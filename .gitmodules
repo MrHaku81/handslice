@@ -1,0 +1,3 @@
+[submodule "engine/OrcaSlicer"]
+	path = engine/OrcaSlicer
+	url = https://github.com/SoftFever/OrcaSlicer

@@ -29,8 +29,8 @@ Stand: 2026-10-24 (Erstaufnahme durch Umgebungscheck).
 | aarch64-linux-gnu-gcc (System-Cross-Toolchain) | **nicht installiert** | – |
 | Flutter | **nicht installiert** | – |
 | Kotlin (kotlinc) | **nicht installiert** | – |
-| OrcaSlicer-Tag (Submodul) | – (Submodul noch nicht eingerichtet) | `engine/OrcaSlicer` |
-| Desktop-Orca (Referenz, AppImage) | – muss zum Tag passen | – |
+| OrcaSlicer-Tag (Submodul) | v2.4.2 (commit `8500fcdcca`) | `engine/OrcaSlicer` |
+| Desktop-Orca (Referenz, AppImage) | v2.4.2 (muss zum Submodul-Tag passen) | `engine/reference/` (gitignored) |
 
 Hinweis: Clang+lld können aarch64-ELFs erzeugen (freistehend, direkte
 Linux-Syscalls), siehe ADB-Rundlauf unten. Für echtes NDK/Bionic-Linking

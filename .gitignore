@@ -42,6 +42,12 @@ __pycache__/
 /tmp/
 /scratch/
 /server/jobs/
+/engine/test/out-*/
+/engine/test/*.log
 
 # Large bundled engine binaries (über Release-Assets verteilen)
 /engine/bin/*-arm64
+/engine/bin/*-x86
+
+# Referenz-AppImage und sonstige externe Build-Artefakte (nicht einchecken)
+/engine/reference/
