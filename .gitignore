@@ -1,0 +1,47 @@
+# Build outputs
+/build/
+/app/build/
+/engine/build/
+/engine/deps-build/
+*.apk
+*.aab
+*.so
+*.o
+*.a
+
+# NDK / native
+/engine/obj/
+/engine/.cxx/
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# Android / Gradle
+.gradle/
+local.properties
+*.iml
+/.idea/
+captures/
+
+# Python (server/)
+__pycache__/
+*.pyc
+.venv/
+
+# OS / editor
+.DS_Store
+*.swp
+*~
+
+# Sliced output / test artifacts
+*.gcode
+/tmp/
+/scratch/
+/server/jobs/
+
+# Large bundled engine binaries (über Release-Assets verteilen)
+/engine/bin/*-arm64
