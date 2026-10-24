@@ -53,6 +53,11 @@ eines vierten Versuchs.
   `docs/test-setup.md` eintragen und danach **nicht stillschweigend wechseln**.
 - Orca-Upstream als Git-Submodul unter `engine/OrcaSlicer`, auf einen
   **festen Tag** gepinnt. Tag-Wechsel nur nach Absprache.
+- Alle sichtbaren Texte (UI, Fehlermeldungen, Buttons) von Anfang an über
+  die Lokalisierungsmechanik des UI-Stacks (Flutter: ARB-Dateien unter
+  `app/lib/l10n/`; Compose: `strings.xml`), **nie fest im Code**.
+  Quellsprache Englisch, erste Übersetzung Deutsch. Weitere Sprachen kommen
+  später über dieselben Dateien dazu – das ist ein erklärtes Projektziel.
 - Commits klein und beschreibend, deutsch oder englisch – egal, aber
   konsistent pro Commit. Jeder Commit baut.
 
