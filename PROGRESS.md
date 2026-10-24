@@ -8,6 +8,51 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-24 16:50 – Schritt A: eigener Minimal-CLI (Option F) steht
+
+- Klaus hat Option F entschieden: statt Patch an `OrcaSlicer.cpp` eine
+  eigene Entry unter `engine/cli/handslice-cli.cpp` (+ CMakeLists), die
+  gegen die bereits gebauten `libslic3r_*`-Statik-Bibliotheken linkt und
+  **keinerlei** wx-/GLFW-/`slic3r/GUI`-Code mitzieht. Keine Zeile an
+  OrcaSlicer-Upstream geändert.
+- Umfang: STL + 3mf laden, Profil-JSONs (machine/process/filament) mit
+  `inherits`-Chain über rekursiven Resource-Scan auflösen, Modell optional
+  auf Plattenmitte zentrieren (`--no-center` lässt es an Ort), Print
+  erstellen+process+export_gcode, Statistik (Zeit, Volumen, Gewicht) als
+  JSON auf stdout.
+- Zweite CLI-Kopplungs-Fundstelle beim Linken: libslic3r referenziert
+  `nsvgParseFromFile`/`nsvgDelete`, deren Implementierung in Orca-Upstream
+  **in einer GUI-Datei** erzeugt wird. Lösung ohne Patch: eigene
+  `engine/cli/nanosvg_impl.cpp` setzt die beiden `#define
+  NANOSVG_IMPLEMENTATION`/`NANOSVGRAST_IMPLEMENTATION`. Dritte Fundstelle:
+  OpenCascade-`libTKService.a` braucht `fontconfig`, in Orca nur unter
+  `SLIC3R_GUI=ON` gelinkt – wir ergänzen es explizit.
+- Binary: `engine/bin/handslice-cli-x86` (66 MB; `ldd` zeigt kein `libwx*`,
+  `libGLFW*`, `libGL*`).
+- Testlauf: Slice eines 20-mm-Würfels mit Elegoo CC2 0.4 Düse +
+  0.20 mm Standard + Elegoo PLA erzeugt validen G-Code, 100 Layer,
+  `return_code: 0`, Statistik (1 201 mm Filament, 2 888 mm³ Volumen,
+  3.61 g) plausibel.
+- Byte-Vergleich gegen AppImage CLI (mit `--arrange 0 --orient 0` auf
+  vorzentriertem STL `cube_20mm_centered_cc2.stl` auf (128, 128)):
+  **unterschiedlich**. Hauptursache ist aber **nicht PartPlate** – die
+  AppImage CLI (nicht die GUI!) **löst die Preset-Vererbungs-Kette
+  nicht auf**, deshalb bleibt bei ihr `skirt_loops=1` (Default) statt
+  `0` (Elegoo-Common), und `filament_density=0` statt `1.25`. Unser
+  CLI resolvt die Chain korrekt und ist semantisch näher am GUI-Resultat.
+  Volltext der Analyse: `docs/engine-integration.md` Abschnitt
+  „Nachweislauf (2026-10-24, Byte-Vergleich)".
+- Blocker #1 nach `docs/blockers.md` → **Gelöst**.
+- Option C (Upstream-PR für saubere CLI/GUI-Trennung) in
+  `docs/roadmap.md` unter Phase 3 vermerkt.
+
+### Offene Punkte
+
+- **Byte-Gleichheit gegen Desktop-Orca-GUI-Export** (nicht gegen AppImage
+  CLI) steht noch aus. Klaus prüft das manuell: STL in die GUI laden,
+  gleiche Profile, slicen, G-Code exportieren, mit unserem CLI-G-Code
+  diffen. Nicht blockierend für Phase 0/1.
+
 ## 2026-10-24 14:35 – Schritt A: Orca-Deps gebaut, CLI-Binary blockiert
 
 - Orcas eigenes Deps-System durchgebaut: Boost 1.84, TBB, Cereal, Eigen
@@ -111,7 +156,7 @@ geladen werden.
   Bis zur Entscheidung kein Frontend-Code.
 
 ### Offene Fragen an Klaus
-- **Welchen Weg bei Blocker #1 (Orca v2.4.2 CLI = GUI)?** Fünf Kandidaten
-  in `docs/blockers.md` #1 bzw. ausführlich in `docs/engine-integration.md`
-  („Harter Befund"-Abschnitt). Bis zur Entscheidung ist Schritt A
-  pausiert.
+- Byte-Gleichheits-Check gegen Desktop-Orca-GUI-Export (manuell) für
+  endgültigen Nachweis von Phase 1 – wenn du Zeit hast, einmal die GUI
+  mit demselben Modell + CC2-0.4+0.20 mm+Elegoo-PLA laufen lassen und
+  G-Code vergleichen. Nicht eilig, nicht blockierend.

@@ -193,6 +193,77 @@ dem AppImage als CLI-Binary laufen – es slict korrekt mit den
 Elegoo-Profilen, siehe Testlauf oben. Das freigegebene Headless-x86-
 Binary wäre nice-to-have, aber nicht blockierend.
 
+#### Entscheidung (2026-10-24): Option F – eigener Minimal-CLI
+
+Klaus hat Option **F** gewählt: statt an `OrcaSlicer.cpp` zu patchen, lebt
+ab jetzt eine eigene Entry unter `engine/cli/handslice-cli.cpp`. Sie linkt
+gegen die statisch gebauten `libslic3r_*`-Bibliotheken, zieht **weder
+wxWidgets noch GLFW noch `slic3r/GUI/*`** mit, und deckt genau den
+Core-Flow ab: STL/3mf laden → Profil-JSONs (machine/process/filament)
+mit `inherits`-Chain mergen → Modell positionieren → `Print::process()` →
+`export_gcode()` → Kennzahlen als JSON. Keine Zeile im OrcaSlicer-
+Upstream geändert.
+
+Build: `engine/build-headless-x86.sh` orchestriert alles (Deps, libslic3r,
+handslice-cli), Binary landet unter `engine/bin/handslice-cli-x86`
+(gitignored).
+
+**Zwei zusätzliche Stolpersteine beim ersten Link-Durchgang** (gehört
+hier dokumentiert, weil sie beim Android-Build wiederkommen):
+
+1. **NanoSVG-Implementierung lebt in GUI-Datei.** `libslic3r.a` enthält
+   `NSVGUtils.cpp.o`, das `nsvgParseFromFile`, `nsvgDelete` etc.
+   referenziert. NanoSVG ist in Orca ein `INTERFACE`-Target; die
+   `#define NANOSVG_IMPLEMENTATION`-Umsetzung passiert in genau einer
+   Datei – `src/slic3r/GUI/BitmapCache.cpp`. Mit `SLIC3R_GUI=OFF` wird
+   diese `.cpp` nicht übersetzt, also fehlen die Symbole. Lösung: wir
+   stellen die Implementierung in `engine/cli/nanosvg_impl.cpp` selbst
+   bereit (zwei `#define` + `#include`). Zweite CLI-Koppel-Fundstelle.
+2. **fontconfig als System-Lib fehlt im CLI-Linking.** `libTKService.a`
+   (OpenCascade) ruft `FcInitLoadConfig` et al. – unter Linux hängt
+   OCCT also an fontconfig. Orcas eigenes `src/libslic3r/CMakeLists.txt`
+   fügt das nur hinzu, wenn `SLIC3R_GUI=ON` ist. Wir ergänzen die
+   System-Lib explizit im `engine/cli/CMakeLists.txt`.
+
+#### Nachweislauf (2026-10-24, Byte-Vergleich)
+
+**Testaufbau:** 20-mm-Würfel-STL `cube_20mm_centered_cc2.stl`,
+Vertices vorzentriert auf (118..138, 118..138, 0..20) → CC2-Bed-Mitte
+(128, 128). Beide Slicer bekommen dieselbe Position-Lage, kein Arrange,
+kein Orient:
+
+- Referenz: `AppRun --slice 0 --orient 0 --arrange 0 --load-settings
+  "<machine>;<process>" --load-filaments "<filament>"`.
+- Unseres: `handslice-cli-x86 --machine <m> --process <p> --filament
+  <f> --resources <orca-resources> --no-center <stl>`.
+
+**Ergebnis:** Beide erzeugen gültigen G-Code, 100 Layer, 20 mm Höhe,
+`return_code: 0`. **Byte-identisch sind sie nicht.** Der Diff war
+systematisch; die Abweichungen zerfallen in zwei Klassen (eine davon
+*nicht* PartPlate, zur Protokolltreue hier mit dokumentiert):
+
+| Kategorie | Beispiel | Ursache |
+|---|---|---|
+| A: AppImage-CLI lädt Preset-Vererbung nicht | `; skirt_loops = 1` (AppImage) vs `= 0` (uns); `; filament_density = 0` vs `= 1.25` | AppImage CLI mit `--load-settings <path>` liest nur die Leaf-JSON und ignoriert `inherits`. Werte wie `skirt_loops` liegen in `fdm_process_elegoo_common.json` (Parent-Level), `filament_density` in `Elegoo PLA @base.json` + `fdm_filament_pla.json`. AppImage CLI resolvt diese Chain nicht und fällt auf die PrintConfig-Defaults zurück. **Unser CLI ist hier semantisch korrekter**, nicht AppImage. Siehe Issue-Klasse im Orca-Tracker. |
+| B: Metadata-Zeilen im Header unterschiedlich | AppImage: nur `; filament_density: 0 \n ; filament_diameter: 1.75`; unseres zusätzlich: `; model printing time: … \n ; estimated first layer time … \n ; model label id: 12` | Hängt daran, dass unser Codepfad die PartPlate-Logik nicht durchläuft und `Print::print_statistics` direkt in den Header-Writer gibt. AppImage CLI mit PartPlate dropt diese Zeilen in bestimmten Modi. **Diese sind PartPlate-nahe Formatierungs-Unterschiede.** |
+
+**Hauptsächliche G-Move-Differenz:** AppImage druckt wegen des falschen
+Defaults `skirt_loops=1` einen Skirt (Rechteck 116.4..140.2 × 115.1..138.7
+auf erster Layer-Höhe); unser CLI mit korrektem `skirt_loops=0` druckt
+keinen Skirt. Entsprechend AppImage: 1 377 mm Filament gesamt, unseres
+1 201 mm – Differenz ≈ 177 mm, grob konsistent mit einem Skirt-Umfang
+≈ 94 mm × 2 Layer = 188 mm bei 0.45 mm Linienbreite.
+
+**Fazit:** Byte-Gleichheit mit AppImage CLI ist bei v2.4.2 **nicht
+erreichbar** – nicht wegen eines Fehlers in unserem CLI, sondern weil
+AppImage CLI selbst die Preset-Chain nicht ausflöst. Ein belastbarerer
+Nachweis gegen den Desktop-Orca-GUI-Export steht noch aus; dafür muss
+Klaus einmal in der GUI den gleichen Workflow fahren (STL laden,
+CC2 0.4 + 0.20 mm Standard + Elegoo PLA auswählen, slicen, G-Code
+exportieren). Erst der GUI-G-Code (nicht der AppImage-CLI-G-Code) ist
+der korrekte Byte-Vergleichs-Partner, weil die GUI die Preset-Chain
+ebenso vollständig lädt wie unser CLI.
+
 ### Schritt B: Abhängigkeiten für Android ARM64 cross-compilen
 
 Orca hängt an Boost, TBB, OpenVDB, CGAL, Eigen, nlohmann-json, Expat, libpng,

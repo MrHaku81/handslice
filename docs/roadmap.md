@@ -42,6 +42,14 @@ Funktionskontrolle gemacht hat.
 - [ ] STL-Import + Auto-Orientierung
 - [ ] Layer-Vorschau
 - [ ] Support-Feintuning
+- [ ] **Upstream-PR an OrcaSlicer** (Option C aus Blocker #1): saubere
+      `SLIC3R_GUI=OFF`-CLI anbieten – `OrcaSlicer.cpp` so umbauen, dass
+      wx-/GLFW-/`slic3r/GUI`-Pfade komplett im Guard liegen,
+      PartPlateList aus dem `GUI`-Namespace in `libslic3r` ziehen,
+      Thumbnail-Rendering per Build-Option abschaltbar. Bringt mittel-
+      fristig die eigene CLI-Kopie (`engine/cli/handslice-cli.cpp`)
+      weg und macht den Android-Build strukturell einfacher. Nur
+      sinnvoll, nachdem Phase 0/1 steht und wir Belege haben.
 
 ## Phase 4 – Der harte Touch-Teil
 
