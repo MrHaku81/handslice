@@ -8,6 +8,92 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-24 23:50 – Device-Test auf Poco X3 Pro gelaufen, Byte-Gleichheit nicht erreicht
+
+Klaus hat die ADB-Autorisierung am Poco bestaetigt; `adb devices` zeigt
+`9ed86ce3 device`. `docs/blockers.md` #2 nach „Gelöst" verschoben.
+
+### Device-Lauf
+
+`bash engine/test/run-reference-test.sh --device` lief vollstaendig
+durch:
+
+- Push: `handslice-cli-arm64` (14 MB) in 0.097 s, `resources/profiles/`
+  (12 852 Dateien, 44 MB) in 2.385 s nach `/data/local/tmp/handslice/`.
+- Slice auf dem Poco: **0.9 s**, Return 0, G-Code 207 769 Byte, 100
+  Layer, 8479 Zeilen EXECUTABLE_BLOCK.
+- Stats (praktisch identisch zum x86-Lauf): 1177 mm Filament,
+  2831 mm³, 3.54 g, 9m 21s.
+
+**Laufzeit auf dem Snapdragon 860 (0.9 s) ist nur ca. 1.2× die
+AMR5-Zeit (Ryzen 7 5800U, 0.76 s).** Deutlich besser als erwartet.
+Zwei aufeinanderfolgende Slices auf dem Poco sind byte-identisch
+(`a30ffec3e76452ea67843fa8a1b67eb5dd38fa92a285045a0467f163ec872c99`) –
+der arm64-Build ist deterministisch.
+
+### Byte-Divergenz zur Referenz
+
+**EXECUTABLE_BLOCK sha256 arm64 vs. Desktop-Referenz: unterschiedlich**
+(513 geaenderte Zeilen bei gleicher Zeilenzahl 8479). Nicht Fliesskomma-
+Rauschen: die unterschiedlichen Zeilen sind **rotations-symmetrisch
+vertauschte XY-Koordinaten** eines symmetrischen Wuerfels, plus eine
+139-Zeilen-TopInfill-Partie um 90° gedrehte Linienrichtung. Topologisch
+gleicher G-Code, byte-unterschiedlich. Vollstaendige Analyse in
+`docs/engine-integration.md` Abschnitt „Byte-Divergenz arm64 ↔ x86".
+
+**Vermutung:** `std::sort` ist nicht stabil; libc++ (NDK) ordnet Equal-
+Key-Elemente anders als libstdc++ (Host). Beim Wuerfel sind viele
+Perimeter-Nachbarschafts-Metriken exakt gleich, deshalb schlaegt das
+in jeder Instance-Entscheidung durch. Alternativ TBB-paralleles
+Zusammenfuehren bei 16 Host-Cores vs. 8 Device-Cores.
+
+### Phase-C-Erfolgskriterium
+
+Laut `docs/engine-integration.md` Schritt C war das Kriterium
+„`sha256sum` identisch zum Desktop". Das ist **nicht erfuellt**.
+Entscheidung ueber Lockerung (funktional vs. byte-genau) ist nicht
+Teil dieses Nachtlaufs – Klaus-Rueckfrage noetig.
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Binary `engine/bin/handslice-cli-arm64` laeuft auf dem Poco X3 Pro
+  und erzeugt gueltigen G-Code in 0.9 s. Beweis-Befehl:
+  `bash engine/test/run-reference-test.sh --device` (Exit 0, Stats-JSON
+  mit `return_code: 0`, 100 Layer, Filament/Zeit/Volumen plausibel und
+  identisch zum x86-Lauf auf Milligramm genau).
+- arm64-Build ist deterministisch: zwei Slices desselben STL ergeben
+  identische sha256 des G-Codes.
+- Laufzeit arm64 : x86 ≈ 0.9 s : 0.76 s – Snapdragon 860 nur 1.2×
+  langsamer als Ryzen 7 5800U.
+
+**2. Ungeprueft**
+
+- Verhalten unter Last / mehreren parallelen Slices im App-Kontext.
+- Verhalten mit groesseren Modellen (>50k Dreiecke) – aktueller
+  Testlauf ist nur der 12-Dreiecke-Wuerfel.
+- MIUI-Hintergrund-Kill (CLAUDE.md: „MIUI killt Hintergrundprozesse
+  aggressiv") – aktuell lief der CLI im Vordergrund per adb shell.
+- Second-Lauf im selben adb-shell-Aufruf crasht mit
+  `boost::filesystem::create_directory: No such file or directory` –
+  ein Aufruf pro adb-shell-Kommando ist bisher der einzige getestete
+  Pfad. Vermutlich harmlos (vermutlich braucht die 3mf-Pipeline einen
+  frischen Pfad), aber nicht untersucht.
+
+**3. Geht nicht**
+
+- **Byte-Gleichheit arm64 ↔ Desktop-Referenz.** Phase-C-Kriterium
+  nicht erfuellt. 513 von 8479 Zeilen unterschiedlich, Natur
+  rotations-symmetrisch (`std::sort`-Instability oder TBB-parallele-
+  Reihenfolge). Siehe `docs/engine-integration.md` Abschnitt
+  „Byte-Divergenz arm64 ↔ x86" fuer die vollstaendige Analyse und
+  die zwei Hypothesen zur Ursache.
+
+---
+
 ## 2026-10-24 21:40 – Schritt B/C: Deps + handslice-cli-arm64 gebaut, Device-Test blockiert
 
 Fortsetzung des Nachttauftrags. Alle sechs Punkte aus Klaus' Vorgabe

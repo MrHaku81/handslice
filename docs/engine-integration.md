@@ -552,18 +552,103 @@ Dependenz auf Android-System-Libs (ldd-Aequivalent via `readelf -d`):
 libz.so (Bionic), libc.so, libm.so, libdl.so, libstdc++.a statisch via
 `c++_static`. **Keine** externen Libs ausserhalb des NDK-Sysroots.
 
-#### Device-Test (ausstehend)
+#### Device-Test (2026-10-24, nach adb-Reautorisierung)
 
-- Erwarteter Lauf: `bash engine/test/run-reference-test.sh --device`
-  pusht Binary + Elegoo-Profile + 20-mm-Wuerfel-STL via adb nach
-  `/data/local/tmp/handslice/`, slicet dort, pullt den G-Code zurueck,
-  vergleicht den EXECUTABLE_BLOCK gegen die Referenz
-  `92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`
-  (8479 Zeilen).
-- **Status 2026-10-24 Nacht:** nicht ausgefuehrt. adb sieht das Poco nach
-  Rechner-User-Wechsel nicht mehr; siehe `docs/blockers.md` #2.
-  Binary ist baubar und existiert; der Test braucht nur, dass das Geraet
-  wieder autorisiert ist.
+`bash engine/test/run-reference-test.sh --device` lief sauber durch:
+
+```
+=== 1/3  Push Binary + Profile + STL (/data/local/tmp/handslice) ===
+handslice-cli-arm64: 135.9 MB/s (13 830 024 Byte in 0.097 s)
+resources/profiles/: 12 852 Dateien, 17.9 MB/s (44 683 328 Byte in 2.385 s)
+=== 2/3  Slice auf Poco X3 Pro ===
+   Laufzeit: 0.9 s (Poco X3 Pro, Snapdragon 860)
+   return_code: 0, 1177 mm Filament, 2831 mm³, 3.54 g, 9m 21s
+```
+
+**Laufzeit-Vergleich:**
+
+| Rechner | Zeit (`time`) |
+|---|---|
+| AMR5 (Ryzen 7 5800U, 8C/16T) | 0.76 s |
+| Poco X3 Pro (Snapdragon 860, 4× A76 + 4× A55) | 0.90 s |
+
+Snapdragon 860 ist fuer diesen Slice-Workload nur ca. 1.2× langsamer als
+Ryzen 7 5800U – deutlich besser als erwartet (vermutet hatten wir 3-5×).
+TBB-Parallelisierung + OpenVDBs Grid-Operationen skalieren offenbar gut
+auf big.LITTLE-Cores.
+
+**arm64-Lauf ist deterministisch**: zwei aufeinanderfolgende Slices
+desselben STL erzeugen byte-identische G-Codes
+(`a30ffec3e76452ea67843fa8a1b67eb5dd38fa92a285045a0467f163ec872c99`).
+
+#### Byte-Divergenz arm64 ↔ x86 (Phase-C-Erfolgskriterium nicht erfuellt)
+
+**Vergleich arm64-G-Code gegen Desktop-Orca-GUI-Referenz:**
+
+```
+EXECUTABLE_BLOCK, 8479 Zeilen beide Seiten
+sha256 Referenz: 92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d
+sha256 arm64:    a30ffec3e76452ea67843fa8a1b67eb5dd38fa92a285045a0467f163ec872c99
+Diff: 513 geaenderte Zeilen (gleiche Anzahl Entfernungen und Zugaenge)
+```
+
+Phase C hatte als Erfolgskriterium „`sha256sum` identisch zum Desktop" –
+**ist nicht erfuellt**. Der Rest der Rubrik 1 (G-Code funktional valide,
+100 Layer, Stats stimmen auf's Milligramm) ist erfuellt.
+
+**Was divergiert, warum es nicht trivial ist:**
+
+Die 513 Zeilen sind nicht gleichverteilt und nicht Floating-Point-Noise.
+Beispiel aus dem Diff (nach Zeile 479, letztes Perimeter-Segment Layer 1):
+
+```
+<  G1 X136.88 Y128.626 Z1       ← Referenz / x86
+<  G1 X137.234 Y119.312 Z1
+---
+>  G1 X128.965 Y135.905 Z1       ← arm64
+>  G1 X119.03 Y135.451 Z1
+```
+
+Das sind nicht zufaellige Positionsabweichungen, sondern **rotations-
+symmetrisch vertauschte XY-Koordinaten** auf dem Wuerfel (um die
+X=Y-Diagonale gespiegelt). Topologisch identisch, zahlenmaessig
+unterschiedlich.
+
+Dazu kommt eine 139 Zeilen lange zusammenhaengende TopInfill-Partie
+(`;WIDTH:0.419999` + G1-Infill), die auf arm64 um einige Zeilen
+*spaeter* kommt und mit um 90° gedrehter Linienrichtung – wieder
+rotations-symmetrisch.
+
+**Hypothese fuer die Ursache:**
+
+1. **Sort-Order bei equal keys.** OrcaSlicer sortiert Perimeter-Pfade
+   mit `std::sort` nach einer Prioritaetsmetrik (naechster-Punkt-first).
+   Fuer symmetrische Werkstuecke wie den Wuerfel sind viele Metrik-
+   Werte exakt gleich (zwei Perimeter-Enden mit identischer Distanz zum
+   Toolhead). `std::sort` ist nicht stabil; libc++ (NDK) und libstdc++
+   (Host-GCC) implementieren den Quicksort-Fallback unterschiedlich und
+   ordnen Equal-Keys verschieden.
+2. **TBB-parallele Reihenfolge.** Teile der Perimeter-Generierung
+   laufen in `parallel_for`. Auf 16 Cores (AMR5) vs. 8 Cores (Snapdragon)
+   koennten Teil-Ergebnisse in unterschiedlicher Reihenfolge zusammen-
+   gefuehrt werden; bei equal-metric-Entscheidungen schaegt das durch.
+
+Floating-Point-Divergenz hingegen ist unwahrscheinlich: die Zahlen in
+den beiden Ausgaben sind **nicht benachbart**, sondern genau die
+gleichen Werte in anderer Reihenfolge/an anderer Position.
+
+**Konsequenz:**
+
+- Fuer **funktionale Richtigkeit** – G-Code bedruckt den Wuerfel
+  korrekt, mit identischer Materialmenge und Zeitabschaetzung – ist der
+  arm64-Build in Ordnung.
+- Fuer **Byte-Gleichheit** – das war das strenge Phase-C-Kriterium –
+  reicht es nicht. Entweder man patcht Orca so, dass seine Sort-Keys
+  nach einer eindeutigen (laufwerk-unabhaengigen) Tie-Breaking-Regel
+  sortieren, oder man akzeptiert eine funktionale statt eine binaere
+  Aequivalenz als Nachweis.
+- Entscheidung ueber „neues Phase-C-Erfolgskriterium" (funktional vs.
+  byte-genau) ist Klaus-Entscheidung, nicht in dieser Nacht gefaellt.
 
 ### Schritt D: Einbettung in die App
 

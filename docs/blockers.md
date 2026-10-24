@@ -17,7 +17,14 @@ Format pro Eintrag:
 
 ---
 
-## #2 – adb sieht das Poco X3 Pro nach User-Wechsel nicht mehr  (2026-10-24, Phase C)
+(keine offenen Blocker)
+
+
+---
+
+## Gelöst
+
+### #2 – adb sieht das Poco X3 Pro nach User-Wechsel nicht mehr  (2026-10-24, Phase C)
 
 **Symptom:** `adb devices` leer, obwohl `lsusb` das Geraet
 (`2717:ff48 Xiaomi Inc. Mi/Redmi series (MTP + ADB)`) als verbunden
@@ -28,34 +35,22 @@ listet. `adb kill-server && adb start-server`, `adb reconnect` sowie
 3. `adb usb`.
 
 **Beobachtet:** USB-Verbindung ist auf OS-Ebene da (lsusb). ADB-Daemon
-laeuft (`* daemon started successfully`), listet aber keine Geraete.
-Keine `unauthorized`-Zeile – kein Eintrag ueberhaupt.
+laeuft, listet aber keine Geraete. Keine `unauthorized`-Zeile.
 
-**Vermutung:** Beim fruehen `adb` haben wir unter dem User
-`handslice` noch nicht die „immer erlauben"-Bestaetigung am Poco
-geklickt, oder die ADB-RSA-Keys im Home des neuen Users
-(`~/.android/adbkey*`) haben noch keinen Fingerabdruck im Geraet.
-Klaus muss am Telefon:
-1. Entwickleroptionen → USB-Debugging kurz aus/an.
-2. Beim naechsten `adb devices` am Rechner den Dialog
-   „USB-Debugging von diesem Rechner erlauben?" mit „Immer erlauben"
-   bestaetigen.
+**Vermutung:** ADB-RSA-Key des User `handslice` noch nicht am Geraet
+autorisiert, oder USB-Debugging-Dialog war noch nicht bestaetigt.
 
-**Fragen an Klaus:**
-- Kurz am Poco den USB-Debugging-Dialog bestaetigen, dann ist das
-  arm64-Binary (14 MB, siehe `engine/bin/handslice-cli-arm64`)
-  per `bash engine/test/run-reference-test.sh --device` auf
-  Byte-Gleichheit pruefbar.
-- Falls das Geraet weiterhin stumm bleibt: USB-Kabel wechseln
-  (manche Kabel sind nur Lade-, keine Datenleitungen).
+**Loesung (2026-10-24, Klaus):** Nach erneuter Autorisierung am Poco
+listet `adb devices` wieder `9ed86ce3 device`. Danach lief
+`bash engine/test/run-reference-test.sh --device` sauber durch (Slice
+in 0.9 s, G-Code 207 769 Byte, Return 0). Siehe PROGRESS.md
+2026-10-24 23:50 fuer den vollstaendigen Nachweis + die weiterhin
+offene **Byte-Divergenz** gegen die Desktop-Referenz (die ist kein
+Blocker im Sinne der Drei-Versuche-Regel, sondern eine Phase-C-
+Erfolgskriterium-Luecke; siehe `docs/engine-integration.md` Abschnitt
+„Byte-Divergenz arm64 ↔ x86").
 
 ---
-
-
-
----
-
-## Gelöst
 
 ### #1 – Orca v2.4.2 koppelt CLI an wxWidgets+GLFW  (2026-10-24, Phase A→B)
 
