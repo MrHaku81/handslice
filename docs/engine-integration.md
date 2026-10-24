@@ -267,7 +267,8 @@ genutzt, weil er die Preset-Vererbung nicht aufloest – siehe dort.
   Metadaten-Felder (`extruder_colour`, `filament_colour`, `wipe_tower_x/y`,
   `filament_ids`, `print_settings_id`, Flashforge-Defaults, u.ä.), die
   der Slicer nicht in den EXECUTABLE_BLOCK zieht. Siehe
-  `compare-configblock.sh`-Output.
+  `compare-configblock.sh`-Output. Herkunft der 15 „nur in ref"-Zeilen
+  siehe Abschnitt „Woher die GUI-only CONFIG_BLOCK-Keys kommen" unten.
 - `; model label id: 12` im Header: GUI haengt es nicht an, wir schon.
   Rein Metadata.
 
@@ -310,6 +311,63 @@ ebenso vollständig lädt wie unser CLI.
 
 Dieser Abschnitt bleibt zur Protokolltreue stehen – damit künftig klar
 ist, warum nicht gegen das AppImage CLI gemessen wird.
+
+#### Woher die GUI-only CONFIG_BLOCK-Keys kommen (2026-10-24)
+
+Im `compare-configblock.sh`-Diff tauchen rund 15 Keys als „nur in ref" auf,
+darunter `flashforge_serial_number`, `bbl_use_printhost`,
+`printhost_authorization_type`, `printhost_ssl_ignore_revoke`,
+`printer_agent`, `preferred_orientation`, `physical_extruder_map`,
+`head_wrap_detect_zone`, `extruder_type`, `nozzle_hrc`, `travel_slope`,
+`retract_lift_enforce`, `grab_length`, `pellet_modded_printer`.
+
+**Herkunft.** Diese Keys stehen in **keinem** Elegoo-Profile-JSON (weder
+im CC2-0.4-Leaf noch in den Vererbungs-Eltern `fdm_elegoo_3dp_001_common`
+und `fdm_machine_common`). Sie sind in `src/libslic3r/PrintConfig.cpp`
+per `ConfigDef::add()` registriert und haben dort einen Default
+(z. B. `flashforge_serial_number` → leerer String). In
+`FullPrintConfig::defaults()` fehlen sie allerdings, weil sie nicht per
+`OPT_PTR` in `PrintConfig.hpp` ausgewiesen sind.
+
+Die GUI schleust sie trotzdem in den Full-Config, bevor
+`append_full_config()` den CONFIG_BLOCK schreibt: Beim Speichern eines
+Printer-Presets geht Orcas PresetBundle die Listen
+`s_Preset_printer_options` (`src/libslic3r/Preset.cpp:1375`) und
+`s_PhysicalPrinter_opts` (ebd. :3938) durch und ruft für jeden Key
+`cfg.option(key, /*create=*/true)` auf. Fehlende Keys werden damit mit
+ihrem `print_config_def`-Default angelegt.
+
+**Warum unser CLI das nicht macht.** `handslice-cli` baut die Config aus
+`FullPrintConfig::defaults()` + Vererbungs-Kette und bildet
+PresetBundle/PhysicalPrinter nicht nach. Für reines Slicen ist das in
+Ordnung:
+
+- `append_full_config()` filtert ohnehin die sensiblen Host-Keys
+  (`print_host`, `print_host_webui`, `printhost_apikey`,
+  `printhost_cafile`, `printhost_user`, `printhost_password`,
+  `printhost_port`) hart raus (`src/libslic3r/GCode.cpp:5620`).
+- Der eine Key, der semantisch zum Druckerprofil gehört – `host_type`
+  (Wert `elegoolink`) – steht direkt in
+  `Elegoo Centauri Carbon 2 0.4 nozzle.json` und kommt durch unsere
+  Chain-Auflösung sauber durch.
+- Alle anderen Keys sind entweder Netzwerk-/PhysicalPrinter-Metadaten
+  (`bbl_use_printhost`, `flashforge_serial_number`,
+  `printhost_authorization_type`, `printhost_ssl_ignore_revoke`,
+  `printer_agent`) oder leere Scaffolding-Defaults
+  (`head_wrap_detect_zone` leer, `preferred_orientation=0`,
+  `physical_extruder_map=0`). Sie beeinflussen den EXECUTABLE_BLOCK
+  nachweislich nicht – der ist byte-identisch.
+
+**Keine Restspur der Vendor-blinden Chain-Auflösung.** Der
+`filament_flow_ratio`-Fall vom 2026-10-24 kam daher, dass unser Index
+40 Vendor-Dateien mit gleichem Namen vermischt hat; das war ein
+Lookup-Bug und ist seit der Vendor-Preferenz behoben. Die hier
+genannten Keys sind dagegen *in keinem* Elegoo-Profil-JSON vorhanden –
+die GUI zieht sie aus `print_config_def` beim Preset-Save. Es ist also
+kein Resolution-Fehler, sondern ein GUI-only-Verhalten, das ein
+headless CLI für die Slice-Logik nicht braucht.
+
+**Entscheidung.** Nicht nachbilden. Dokumentiert, geschlossen.
 
 ### Schritt B: Abhängigkeiten für Android ARM64 cross-compilen
 

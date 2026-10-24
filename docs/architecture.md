@@ -26,6 +26,13 @@ bleibt Orca-Upstream. Siehe `elegoo-integration.md`.
    (Qualität, Struktur, Speed, Supports, Multimaterial); Werte als
    Slider/Eingabe/Toggle. 3D-Viewport (Drehen/Zoomen, nach dem Slicen
    Layer-/Farbvorschau). Preset-Auswahl und Slot-Mapping als Dropdowns.
+   **Vollständige Fokus-Navigation**: jedes bedienbare Element außerhalb
+   des 3D-Viewports ist per Tastatur, D-Pad und Controller erreichbar
+   (Tab/Shift+Tab zum Blättern, Pfeiltasten zum Fokus-Verschieben,
+   Enter/Space zum Aktivieren). Keine Touch-only-Interaktionen in Menüs,
+   Dialogen oder Listen. Grund: Barrierefreiheit; Nebeneffekt ist, dass
+   die App auf Android TV und auf Tablets mit angeschlossener Tastatur
+   komplett nutzbar bleibt.
 2. **App-Logik / Profilverwaltung** – lädt die Orca-Profil-JSONs 1:1 vom
    Desktop-Format (inkl. `inherits`-Ketten) und baut daraus die Menüs
    dynamisch.

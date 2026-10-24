@@ -8,6 +8,145 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-24 19:30 – Reproduzierbarkeit nachgewiesen, Flashforge-Rest geklärt, Android-NDK installiert
+
+Fortsetzung unter dem frischen User `handslice` auf AMR5, kein Build-Cache
+vorhanden. Alle sechs Punkte aus Klaus' Nachtlauf-Auftrag abgearbeitet.
+
+### 1. `engine/build-headless-x86.sh` von null durchlaufen
+
+Erst-Lauf fiel in Schritt 4/4 (CLI-Link) mit
+`liblibnest2d.a missing and no known rule to make it` um. Ursache:
+`libslic3r libslic3r_cgal` als `cmake --build`-Target zieht die internen
+`deps_src/`-Libs (`miniz_static`, `admesh`, `clipper`, `Clipper2`,
+`glu-libtess`, `mcut`, `qoi`, `libsemver`) transitiv mit, aber **nicht**
+`libnest2d` – das linkt nur gegen `libslic3r`, nicht umgekehrt, und ist
+daher kein ninja-Dependent. Fix im Skript: `libnest2d` explizit zu den
+Build-Targets ergaenzen (`engine/build-headless-x86.sh` Zeile 58, mit
+Kommentar). Nach dem Fix laeuft der Build end-to-end sauber durch, inklusive
+sauber Install nach `engine/bin/handslice-cli-x86`.
+
+Nebenbefund: `extra-cmake-modules` (vom `docs/engine-integration.md`-
+Logbuch-Eintrag vom 13:40 als „fehlt" vermerkt) ist fuer den
+`SLIC3R_GUI=OFF`-Build **nicht** erforderlich – der komplette Deps-
+und libslic3r-Build geht ohne `ECM`-Variablen. Daher nicht als
+Script-Dependency aufgenommen (nur installiert, weil heute morgen
+praeventiv geholt).
+
+### 2. Reference-Test byte-gleich reproduziert
+
+`engine/test/run-reference-test.sh` (neu, 3 Schritte, Ein-Befehls-Call):
+Slicet den Wuerfel mit CC2 0.4 + 0.20mm Standard + Elegoo PLA, zieht den
+`EXECUTABLE_BLOCK` aus beiden Dateien, vergleicht sha256 + Zeilenzahl
+gegen die bekannte Referenz `92951c26...8777675d` / 8479 Zeilen. **Exit 0
+= bestanden.**
+
+Lauf:
+
+```
+$ bash engine/test/run-reference-test.sh
+=== 2/3  EXECUTABLE_BLOCK vergleichen ===
+  erwartet: 92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d  (8479 Zeilen)
+  erhalten: 92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d  (8479 Zeilen)
+  → IDENTISCH
+```
+
+Stats-JSON (plausibel): 1 177 mm Filament, 2 831 mm³, 3,54 g, 9m 21s
+geschaetzt. (Die kleine Differenz zur frueheren Zahl 1 201 mm liegt an
+`total_filament_used_mm` vs. per-Extruder in alter Statistik.)
+
+### 3. „Flashforge-Defaults" im CONFIG_BLOCK aufgeklaert
+
+`compare-configblock.sh` zeigt stabil 11 / 15 / 1 (gleich wie beim ersten
+Nachweis). Herkunft der 15 „nur in ref"-Keys (`flashforge_serial_number`,
+`bbl_use_printhost`, `printhost_authorization_type`,
+`printhost_ssl_ignore_revoke`, `printer_agent`, `pellet_modded_printer`,
+`default_bed_type` empty, `default_nozzle_volume_type`,
+`extruder_variant_list`, `filament_colour_type`, `filament_multi_colour`,
+`filament_self_index`, `ironing_expansion`, `pellet_flow_coefficient`,
+`print_compatible_printers`): **nicht** Vendor-blind-Rest, sondern
+GUI-Only-Verhalten. Keiner dieser Keys steht in einem Elegoo-Profile-JSON;
+die GUI ergaenzt sie beim Preset-Save ueber
+`s_Preset_printer_options` + `s_PhysicalPrinter_opts` (`Preset.cpp:1375`,
+`:3938`) mit ihrem `print_config_def`-Default. Unser CLI baut die Config
+aus `FullPrintConfig::defaults()` + Vererbungs-Kette; da diese Keys dort
+nicht per `OPT_PTR` ausgewiesen sind, fallen sie weg. Harmlos fuer den
+EXECUTABLE_BLOCK (nachweislich byte-gleich). Dokumentiert in
+`docs/engine-integration.md` Abschnitt „Woher die GUI-only
+CONFIG_BLOCK-Keys kommen". Nicht nachbilden.
+
+### 4. Doku-Nachtrag: Fokus-Navigation
+
+- `docs/architecture.md` → UI-Schicht: Vollstaendige Fokus-Navigation
+  (Tastatur, D-Pad, Controller) als Pflicht ausserhalb des 3D-Viewports.
+- `CLAUDE.md` → Technische Konventionen: dieselbe Regel kurz, damit sie
+  in jedem Session-Start sichtbar bleibt.
+
+### 5. Android SDK/NDK vorbereitet (noch nichts damit gebaut)
+
+- `jre-openjdk-headless` (OpenJDK 27) via Pacman installiert
+  (`sudo -n pacman -S --needed --noconfirm`), weil `sdkmanager`/`android`-
+  CLI eine JRE braucht.
+- Googles Command-Line-Tools Linux-Zip (`16111833`) nach
+  `~/android-sdk/cmdline-tools/latest/` entpackt. Hinweis: Google hat
+  `sdkmanager` deprecated zugunsten einer neuen `android`-CLI; beide
+  liegen im `bin/`-Dir.
+- `yes | sdkmanager --licenses` einmalig akzeptiert.
+- NDK `27.3.13750724` (= r27d, aktueller LTS-Patch der r27-Linie) ueber
+  `sdkmanager "ndk;27.3.13750724"` installiert nach
+  `~/android-sdk/ndk/27.3.13750724/` (ca. 2 GB). `aarch64-linux-android29-
+  clang --version` meldet Android-Clang 18.0.4 – damit sind Bionic-Linking
+  und `arm64-v8a`-Cross-Compile fuer Phase B/C bereitgestellt.
+- Versionen + Pfade in `docs/test-setup.md` eingetragen (Toolchain-Tabelle
+  + neuer Abschnitt „Android SDK/NDK einrichten"). `PATH`-Exports stehen
+  dort als Projekt-lokale Umgebungs-Snippets – **nicht** in `~/.bashrc`
+  geschrieben, Projektregel „Keine Dotfile-Aenderungen".
+- Platform-SDK (API-Level, Build-Tools) **noch nicht** installiert; haengt
+  an UI-Stack-Entscheid.
+
+### 6. Protokoll + Commit
+
+Siehe Abschlussbericht unten; lokaler Commit erstellt, nicht gepusht.
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- `engine/build-headless-x86.sh` baut auf einer leeren Deps-/Build-Cache-
+  Umgebung komplett durch, von Deps ueber `libslic3r` bis `handslice-cli-x86`.
+  Beweis-Befehl: `rm -rf engine/build engine/OrcaSlicer/deps/build-x86 &&
+  bash engine/build-headless-x86.sh` – endet mit `ELF 64-bit ... x86-64`
+  und Help-Ausgabe.
+- `engine/test/run-reference-test.sh` liefert Exit 0 und
+  `EXECUTABLE_BLOCK sha256 = 92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`
+  bei 8479 Zeilen. Phase-A-Erfolgskriterium ist damit erneut, in einem
+  einzigen Befehl, pruefbar.
+- NDK r27d installiert, `aarch64-linux-android29-clang` ausfuehrbar
+  (`--version` liefert Android-Clang 18.0.4).
+
+**2. Ungeprueft**
+
+- Reproduzierbarkeit „auf einem komplett anderen Rechner" – getestet nur
+  auf AMR5 (CachyOS, GCC 16.2.1, CMake 4.4.4). Fuer andere Distributionen
+  / Compiler-Versionen koennen weitere Deps noetig werden.
+- Android NDK ist installiert, aber **noch nicht fuer Cross-Compile von
+  Orca-Deps genutzt** (ausdruecklich Teil von Schritt B/C, nicht dieses
+  Auftrags).
+- Die Downloads der cmdline-tools-ZIP sind groesser als in der
+  `repository2-3.xml` angekuendigt (173 MB vs. 157 MB laut `Content-Length`
+  bei der Probe); Google scheint die Datei inzwischen aktualisiert zu
+  haben. Zip ist gueltig (`unzip -l` listet 139 Dateien, `sdkmanager`
+  laeuft), aber ein sha256-Pinning ist nicht hinterlegt.
+
+**3. Geht nicht**
+
+- (keine offenen Blocker; `docs/blockers.md` unveraendert bei „keine
+  offenen".)
+
+---
+
 ## 2026-10-24 17:40 – Executable-Block byte-gleich mit GUI-Export
 
 Klaus hat den Desktop-Orca-GUI-Export unter `engine/test/out-gui/plate_1.gcode`

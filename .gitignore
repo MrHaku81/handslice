@@ -44,6 +44,10 @@ __pycache__/
 /server/jobs/
 /engine/test/out-*/
 /engine/test/*.log
+/engine/build-logs/
+
+# Reference G-Code bleibt eingecheckt (siehe engine/test/reference/)
+!/engine/test/reference/*.gcode
 
 # Large bundled engine binaries (über Release-Assets verteilen)
 /engine/bin/*-arm64

@@ -55,7 +55,12 @@ cmake -S "${ORCA_DIR}" -B "${ORCA_BUILD_DIR}" -G Ninja \
     -DSLIC3R_BUILD_SANDBOXES=OFF \
     -DBUILD_TESTS=OFF \
     -DORCA_TOOLS=OFF
-cmake --build "${ORCA_BUILD_DIR}" -j "${JOBS}" --target libslic3r libslic3r_cgal
+# libslic3r + libslic3r_cgal reichen fuer die Slice-Logik, aber unser CLI
+# linkt zusaetzlich gegen libnest2d (Orca-internes deps_src/-Target, baut
+# nicht als transitiver Dependent von libslic3r auf). Daher explizit mit
+# bauen – ohne diesen Target failt der CLI-Link-Step mit
+# "liblibnest2d.a missing and no known rule to make it".
+cmake --build "${ORCA_BUILD_DIR}" -j "${JOBS}" --target libslic3r libslic3r_cgal libnest2d
 
 echo "=== 4/4  Baue handslice-cli (${CLI_BUILD_DIR}) ==="
 cmake -S "${CLI_SRC_DIR}" -B "${CLI_BUILD_DIR}" -G Ninja \

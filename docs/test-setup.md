@@ -24,8 +24,10 @@ Stand: 2026-10-24 (Erstaufnahme durch Umgebungscheck).
 | lld (LLVM-Linker, aarch64-fähig) | 23.1.3 | `/usr/bin/ld.lld` |
 | Python | 3.14.8 | `/usr/bin/python3` |
 | adb (platform-tools) | 1.0.41 / 37.0.0p1 | `/usr/bin/adb` |
-| Android SDK | **nicht installiert** | – |
-| Android NDK | **nicht installiert** | – |
+| Android cmdline-tools | 23.0.0 (zip `commandlinetools-linux-16111833`) | `~/android-sdk/cmdline-tools/latest/bin/` |
+| Android NDK | r27d (`27.3.13750724`) – aktueller r27-LTS-Patch | `~/android-sdk/ndk/27.3.13750724/` |
+| NDK-Clang (aarch64 Target) | 18.0.4 (`aarch64-linux-android29-clang`) | `.../toolchains/llvm/prebuilt/linux-x86_64/bin/` |
+| JDK (fuer sdkmanager/`android`-CLI) | OpenJDK 27 (jre-openjdk-headless) | `/usr/bin/java` |
 | aarch64-linux-gnu-gcc (System-Cross-Toolchain) | **nicht installiert** | – |
 | Flutter | **nicht installiert** | – |
 | Kotlin (kotlinc) | **nicht installiert** | – |
@@ -34,7 +36,30 @@ Stand: 2026-10-24 (Erstaufnahme durch Umgebungscheck).
 
 Hinweis: Clang+lld können aarch64-ELFs erzeugen (freistehend, direkte
 Linux-Syscalls), siehe ADB-Rundlauf unten. Für echtes NDK/Bionic-Linking
-muss das NDK installiert werden – noch offen (abhängig von UI-Entscheidung).
+seit 2026-10-24 das SDK + NDK installiert.
+
+### Android SDK/NDK einrichten (Stand 2026-10-24)
+
+- Google-Commandline-Tools-Zip (Linux, Release `16111833`) heruntergeladen
+  und entpackt nach `~/android-sdk/cmdline-tools/latest/`.
+- `jre-openjdk-headless` (OpenJDK 27) ueber Pacman installiert – wird vom
+  `sdkmanager` bzw. der neuen `android`-CLI gebraucht.
+- NDK ueber `sdkmanager "ndk;27.3.13750724"` installiert nach
+  `~/android-sdk/ndk/27.3.13750724/`. Entspricht r27d (siehe
+  `source.properties`), ca. 2 GB.
+- Lizenzen wurden mit `yes | sdkmanager --licenses` akzeptiert.
+
+Fuer kuenftige Shells (nicht in `.bashrc` eingetragen – Projektregel: keine
+Dotfile-Aenderungen):
+
+```
+export ANDROID_HOME="$HOME/android-sdk"
+export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+```
+
+Platform-SDK (API-Level, Build-Tools) **noch nicht installiert** – wird
+erst mit dem UI-Stack-Entscheid (Flutter vs. Compose) relevant. Platform-
+Tools (adb) sind weiterhin die Pacman-Variante.
 
 ## Testgerät: Poco X3 Pro
 

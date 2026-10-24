@@ -58,6 +58,9 @@ eines vierten Versuchs.
   `app/lib/l10n/`; Compose: `strings.xml`), **nie fest im Code**.
   Quellsprache Englisch, erste Übersetzung Deutsch. Weitere Sprachen kommen
   später über dieselben Dateien dazu – das ist ein erklärtes Projektziel.
+- UI vollständig per Fokus-Navigation (Tastatur, D-Pad, Controller)
+  bedienbar; keine Touch-only-Elemente außerhalb des 3D-Viewports. Grund:
+  Barrierefreiheit und Nebeneffekt Android TV / Tablets mit Tastatur.
 - Commits klein und beschreibend, deutsch oder englisch – egal, aber
   konsistent pro Commit. Jeder Commit baut.
 
