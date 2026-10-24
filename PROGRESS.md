@@ -8,6 +8,62 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-24 17:40 – Executable-Block byte-gleich mit GUI-Export
+
+Klaus hat den Desktop-Orca-GUI-Export unter `engine/test/out-gui/plate_1.gcode`
+hinterlegt und drei Divergenzen zum CLI-Output benannt. Alle drei gefixt;
+der EXECUTABLE_BLOCK ist jetzt **sha256-identisch**
+(`92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`,
+8479 Zeilen auf beiden Seiten).
+
+**Fixes im CLI:**
+
+1. **ResourceIndex vendor-aware.** Mein alter Chain-Walker lief bei
+   `inherits = fdm_filament_common` zufaellig in das Afinia-Verzeichnis
+   statt in das Elegoo-Verzeichnis (40 Vendors haben eine gleichnamige
+   Datei; Afinia hat `filament_flow_ratio=1`, Elegoo `0.98`). Jetzt
+   speichert der Index alle Pfade pro `(type, name)`, und der Lookup
+   bevorzugt den Pfad, dessen Vendor-Verzeichnis (das Segment direkt
+   unter `profiles/`) mit dem Leaf uebereinstimmt. Damit kommt
+   `filament_flow_ratio=0.98` sauber durch, und meine fruehere
+   Behauptung „unser CLI resolvt die Chain korrekt" wird jetzt auch
+   wirklich eingeloest.
+2. **`curr_bed_type` nachsetzen.** CLI fiel auf Enum-Default `btPC`
+   (Cool Plate) zurueck, weil wir es nicht explizit setzen. Orcas GUI
+   leitet den Wert aus `default_bed_type` des Druckerprofils ab
+   (int-String → `BedType`, Fallback `btPEI` = High Temp Plate).
+   Im CLI nachgebildet nach dem Chain-Load.
+3. **`is_BBL_printer = false` setzen.** `Print::m_isBBLPrinter` ist in
+   `Print.hpp` nicht initialisiert; `GCodeProcessor::s_IsBBLPrinter`
+   ist ein static mit Default `true`. Orca setzt beide aus
+   `preset_bundle->is_bbl_vendor()`, fuer CC2 (Vendor „Elegoo") ist das
+   `false`. Fehlte in unserem CLI – deshalb kam Bambu-Stil raus
+   (`; FEATURE:`, `M624`, `M981`, `M900`) statt Klipper-Stil (`;TYPE:`,
+   `SET_PRESSURE_ADVANCE`).
+
+**Vergleichsskripte** unter `engine/test/`:
+
+- `compare-gcode.sh` erweitert: EXECUTABLE_BLOCK-sha256 getrennt vom
+  Gesamtdatei-Hash. Exit 0 wenn Executable identisch.
+- `compare-configblock.sh` neu: differenziert die CONFIG_BLOCK-
+  Zuweisungen in drei Kategorien („Werte unterschiedlich", „nur in ref",
+  „nur in ours"). Haette den `filament_flow_ratio=1` vs `0.98` sofort
+  gezeigt – kuenftige Divergenzen fallen damit automatisch auf.
+
+**Was weiterhin unterschiedlich bleibt** (akzeptiert, dokumentiert in
+`docs/engine-integration.md`):
+
+- Thumbnail-Block (GUI schreibt PNG-base64, wir nicht).
+- Reihenfolge der Bloecke (GUI: Header → Thumbnail → Executable →
+  Config; wir: Header → Executable → Config).
+- 11 Metadaten-Werte im CONFIG_BLOCK (`extruder_colour`, `filament_colour`,
+  `wipe_tower_x/y`, `filament_ids`, `print_settings_id`, Flashforge-
+  Defaults, u. ä.) – alle beeinflussen den EXECUTABLE_BLOCK nicht.
+- `; model label id: 12`-Header-Zeile (bei uns da, bei GUI nicht).
+
+Keine offenen Blocker. Phase A damit sauber abgeschlossen; naechster
+Auftrag ist Schritt B/C (ARM64 Cross-Build).
+
 ## 2026-10-24 16:50 – Schritt A: eigener Minimal-CLI (Option F) steht
 
 - Klaus hat Option F entschieden: statt Patch an `OrcaSlicer.cpp` eine
@@ -156,7 +212,4 @@ geladen werden.
   Bis zur Entscheidung kein Frontend-Code.
 
 ### Offene Fragen an Klaus
-- Byte-Gleichheits-Check gegen Desktop-Orca-GUI-Export (manuell) für
-  endgültigen Nachweis von Phase 1 – wenn du Zeit hast, einmal die GUI
-  mit demselben Modell + CC2-0.4+0.20 mm+Elegoo-PLA laufen lassen und
-  G-Code vergleichen. Nicht eilig, nicht blockierend.
+- (keine)

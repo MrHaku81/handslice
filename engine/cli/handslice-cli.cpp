@@ -116,14 +116,32 @@ Args parse_args(int argc, char** argv) {
     return a;
 }
 
-// Resource-Index: (type, name) -> path. Scannt rekursiv die Elegoo-/Vendor-
-// Verzeichnisstruktur unter resources/profiles/<vendor>/{machine,process,filament}/.
-// Liest nur die ersten paar Keys jedes JSON (type + name), ignoriert den Rest.
+// Resource-Index: (type, name) -> {paths…}. Scannt rekursiv die
+// Vendor-Verzeichnisstruktur unter resources/profiles/<vendor>/{machine,
+// process,filament}/. Liest nur die ersten paar Keys jedes JSON
+// (type + name), ignoriert den Rest.
+//
+// Vendor-aware: Namen wie "fdm_filament_common" existieren in 40
+// Vendors, mit unterschiedlichen Werten. inherits muss aus dem gleichen
+// Vendor-Dir aufgeloest werden wie der Leaf, sonst zieht man z. B.
+// Afinias filament_flow_ratio=1 statt Elegoos 0.98.
 struct ResourceIndex {
-    std::unordered_map<std::string, std::string> map;  // key = type+"\x1F"+name
+    // Pro (type, name) alle gefundenen Pfade (mehrdeutig moeglich).
+    std::unordered_map<std::string, std::vector<std::string>> map;
 
     static std::string make_key(const std::string& type, const std::string& name) {
         return type + std::string("\x1F") + name;
+    }
+
+    // Vendor = oberstes Verzeichnis unter resources/profiles/<X>/...
+    static std::string vendor_of(const stdfs::path& p) {
+        const std::string s = p.string();
+        const std::string marker = "/profiles/";
+        auto pos = s.find(marker);
+        if (pos == std::string::npos) return {};
+        pos += marker.size();
+        auto end = s.find('/', pos);
+        return end == std::string::npos ? std::string{} : s.substr(pos, end - pos);
     }
 
     void scan(const stdfs::path& root) {
@@ -139,16 +157,27 @@ struct ResourceIndex {
                 if (!j.contains("type") || !j.contains("name")) continue;
                 const std::string type = j["type"].get<std::string>();
                 const std::string name = j["name"].get<std::string>();
-                map.emplace(make_key(type, name), entry.path().string());
+                map[make_key(type, name)].push_back(entry.path().string());
             } catch (...) {
                 // Ignoriere nicht-Profile-JSONs (Theme, Hints, u.ä.)
             }
         }
     }
 
-    std::string find(const std::string& type, const std::string& name) const {
+    // find() liefert den Pfad des Treffers, der im gleichen Vendor-Dir
+    // wie `prefer_vendor` liegt; fehlt es dort, Fallback auf den ersten
+    // gefundenen Pfad (deterministische sort-Reihenfolge).
+    std::string find(const std::string& type,
+                     const std::string& name,
+                     const std::string& prefer_vendor) const {
         auto it = map.find(make_key(type, name));
-        return it == map.end() ? std::string{} : it->second;
+        if (it == map.end() || it->second.empty()) return {};
+        if (!prefer_vendor.empty()) {
+            for (const auto& p : it->second)
+                if (vendor_of(p) == prefer_vendor)
+                    return p;
+        }
+        return it->second.front();
     }
 };
 
@@ -174,6 +203,11 @@ void load_profile_chain(const std::string& type,
                         const ResourceIndex& index,
                         DynamicPrintConfig& out,
                         bool verbose) {
+    // Vendor-Preferenz: dieselbe wie der Leaf. Vendor-common-Profile wie
+    // "fdm_filament_common" gibt es 40x; wir brauchen die Elegoo-Variante
+    // mit filament_flow_ratio=0.98, nicht die Afinia-Variante mit 1.
+    const std::string leaf_vendor = ResourceIndex::vendor_of(leaf_path);
+
     // Kette von Leaf nach Root aufsammeln.
     std::vector<std::string> chain;
     chain.push_back(leaf_path);
@@ -182,7 +216,7 @@ void load_profile_chain(const std::string& type,
         DynamicPrintConfig tmp;
         const std::string parent_name = load_single_profile(current_path, tmp);
         if (parent_name.empty()) break;
-        const std::string parent_path = index.find(type, parent_name);
+        const std::string parent_path = index.find(type, parent_name, leaf_vendor);
         if (parent_path.empty())
             die("cannot resolve inherits \"" + parent_name + "\" for type \"" + type
                 + "\" (chain head: " + leaf_path + ")");
@@ -277,8 +311,23 @@ int main(int argc, char** argv) {
     for (const auto& fp : args.filaments)
         load_profile_chain("filament", fp, index, cfg, !args.quiet);
 
-    // 3. Konfig normalisieren (FDM-spezifische Konsistenz).
-    cfg.normalize_fdm();
+    // 3. Zwei Konfig-Nachsetzschritte, die Orca selbst ausserhalb von
+    //    libslic3r erledigt (in Plater/OrcaSlicer.cpp), die wir hier aber
+    //    nachbilden muessen, damit der G-Code mit dem GUI-Export matcht:
+    //
+    //    a) curr_bed_type (Enum) wird aus default_bed_type (String mit
+    //       Integer-Wert) des Druckerprofils abgeleitet. Fallback btPEI,
+    //       wie es Orcas Preset::get_default_bed_type auch tut.
+    {
+        BedType bt = BedType::btPEI;  // Default-Fallback wie Orca-GUI
+        const ConfigOptionString* dbt = cfg.opt<ConfigOptionString>("default_bed_type");
+        if (dbt && !dbt->value.empty()) {
+            const int v = std::atoi(dbt->value.c_str());
+            if (v > 0 && v < int(BedType::btCount))
+                bt = BedType(v);
+        }
+        cfg.set_key_value("curr_bed_type", new ConfigOptionEnum<BedType>(bt));
+    }
 
     // 4. Modell laden (STL oder 3mf).
     Model model;
@@ -321,7 +370,16 @@ int main(int argc, char** argv) {
     }
 
     // 6. Print aufbauen und slicen.
+    //    Vendor-Flag: Orcas CLI/GUI setzen m_isBBLPrinter aus
+    //    preset_bundle->is_bbl_vendor(). Fuer CC2 (Elegoo) ist das false.
+    //    Default von m_isBBLPrinter in Print.hpp ist uninitialisiert –
+    //    wir setzen es explizit. Ebenso GCodeProcessor::s_IsBBLPrinter
+    //    (ein static mit Default true, das sonst Bambu-Stil-Marker ins
+    //    G-Code wandern laesst: `; FEATURE:` statt `;TYPE:`, M624/M900
+    //    statt SET_PRESSURE_ADVANCE).
     Print print;
+    print.is_BBL_printer() = false;
+    GCodeProcessor::s_IsBBLPrinter = false;
     print.apply(model, cfg);
     print.process();
 

@@ -225,7 +225,53 @@ hier dokumentiert, weil sie beim Android-Build wiederkommen):
    fügt das nur hinzu, wenn `SLIC3R_GUI=ON` ist. Wir ergänzen die
    System-Lib explizit im `engine/cli/CMakeLists.txt`.
 
-#### Nachweislauf (2026-10-24, Byte-Vergleich)
+#### Nachweislauf gegen GUI-Export (2026-10-24, Executable-Block byte-gleich)
+
+**Referenz** ist der Desktop-Orca-GUI-Export (Orca 2.4.2, GUI, selbes
+STL und selbe CC2-Profile, kein Arrange): `engine/test/out-gui/plate_1.gcode`.
+AppImage CLI (Abschnitt darunter) wird nicht mehr als Vergleichs-Partner
+genutzt, weil er die Preset-Vererbung nicht aufloest – siehe dort.
+
+**Ergebnis:** EXECUTABLE_BLOCK sha256-identisch
+(`92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`,
+8479 Zeilen auf beiden Seiten). Das ist der Nachweis fuer Phase A.
+
+**Was in den Fix hinein musste:**
+
+| Befund | Ursache | Fix im CLI |
+|---|---|---|
+| GUI schreibt `M140/M190 S60`, wir `S35` | `curr_bed_type` wurde nicht gesetzt; CLI fiel auf Enum-Default `btPC` (Cool Plate) zuruek statt `btPEI` (High Temp Plate, Default aus `Preset::get_default_bed_type`). | Nach dem Chain-Load aus `default_bed_type` ableiten (int-String → `BedType`), Fallback `btPEI`. |
+| E-Werte exakt Faktor 1/0.98 zu hoch | `filament_flow_ratio=0.98` steht in `Elegoo/filament/fdm_filament_common.json` – fruehere Chain-Aufloesung landete versehentlich bei `Afinia/filament/fdm_filament_common.json` (`=1`), weil 40 Vendors eine Datei gleichen Namens haben und mein Index Vendor-blind suchte. | `ResourceIndex` vendor-aware gemacht: speichert alle Treffer pro `(type, name)`, Lookup bevorzugt den Pfad, dessen Vendor-Verzeichnis (das Segment direkt unter `profiles/`) mit dem Leaf-Pfad uebereinstimmt. |
+| G-Code-Stil Bambu (`; FEATURE:`, `M624`, `M981`, `M900`) statt Klipper (`;TYPE:`, `SET_PRESSURE_ADVANCE`) | `Print::m_isBBLPrinter` ist in `Print.hpp` nicht initialisiert; `GCodeProcessor::s_IsBBLPrinter` ist static mit Default `true`. Orca setzt beide in Plater/OrcaSlicer.cpp aus `preset_bundle->is_bbl_vendor()` – fuer CC2 (Vendor „Elegoo") ist das `false`, aber unser CLI uebernahm diesen Schritt nicht. | Explizit `print.is_BBL_printer() = false` und `GCodeProcessor::s_IsBBLPrinter = false` vor `print.apply(...)`. |
+
+**Vergleichsskripte** (unter `engine/test/`):
+
+- `compare-gcode.sh ref.gcode ours.gcode` – vergleicht sha256 des
+  EXECUTABLE_BLOCK (Haupt-Metrik) und zusaetzlich der ganzen Datei
+  (ohne die zeitlich variable Header-Zeile). Exit 0 wenn Executable
+  identisch.
+- `compare-configblock.sh ref.gcode ours.gcode` – differenziert die
+  CONFIG_BLOCK-Zuweisungen zeilenweise in drei Kategorien
+  („Werte unterschiedlich", „nur in ref", „nur in ours"), damit Divergenzen
+  wie `filament_flow_ratio=1` statt `0.98` automatisch auffallen, bevor
+  man per Hand G-Codes diffen muss.
+
+**Was weiterhin unterschiedlich bleibt** (akzeptiert, dokumentiert):
+
+- Header-/Thumbnail-/CONFIG_BLOCK-Position: GUI schreibt zuerst Header,
+  dann Thumbnail (PNG als base64), dann EXECUTABLE_BLOCK, zum Schluss
+  CONFIG_BLOCK. Unser CLI schreibt Header, EXECUTABLE_BLOCK, direkt
+  gefolgt vom CONFIG_BLOCK (ohne Thumbnail). Reihenfolge + Thumbnail
+  sind nicht Teil der Druckerlogik.
+- CONFIG_BLOCK-Werte: 11 differieren, 15 fehlen bei uns, 1 Extra. Allesamt
+  Metadaten-Felder (`extruder_colour`, `filament_colour`, `wipe_tower_x/y`,
+  `filament_ids`, `print_settings_id`, Flashforge-Defaults, u.ä.), die
+  der Slicer nicht in den EXECUTABLE_BLOCK zieht. Siehe
+  `compare-configblock.sh`-Output.
+- `; model label id: 12` im Header: GUI haengt es nicht an, wir schon.
+  Rein Metadata.
+
+#### Nachweislauf gegen AppImage-CLI (nicht geeignet, zur Dokumentation)
 
 **Testaufbau:** 20-mm-Würfel-STL `cube_20mm_centered_cc2.stl`,
 Vertices vorzentriert auf (118..138, 118..138, 0..20) → CC2-Bed-Mitte
@@ -256,13 +302,14 @@ keinen Skirt. Entsprechend AppImage: 1 377 mm Filament gesamt, unseres
 
 **Fazit:** Byte-Gleichheit mit AppImage CLI ist bei v2.4.2 **nicht
 erreichbar** – nicht wegen eines Fehlers in unserem CLI, sondern weil
-AppImage CLI selbst die Preset-Chain nicht ausflöst. Ein belastbarerer
-Nachweis gegen den Desktop-Orca-GUI-Export steht noch aus; dafür muss
-Klaus einmal in der GUI den gleichen Workflow fahren (STL laden,
-CC2 0.4 + 0.20 mm Standard + Elegoo PLA auswählen, slicen, G-Code
-exportieren). Erst der GUI-G-Code (nicht der AppImage-CLI-G-Code) ist
+AppImage CLI selbst die Preset-Chain nicht aufloest. Der belastbare
+Nachweis ist der Vergleich gegen den **Desktop-Orca-GUI-Export** (siehe
+Abschnitt davor). Erst der GUI-G-Code (nicht der AppImage-CLI-G-Code) ist
 der korrekte Byte-Vergleichs-Partner, weil die GUI die Preset-Chain
 ebenso vollständig lädt wie unser CLI.
+
+Dieser Abschnitt bleibt zur Protokolltreue stehen – damit künftig klar
+ist, warum nicht gegen das AppImage CLI gemessen wird.
 
 ### Schritt B: Abhängigkeiten für Android ARM64 cross-compilen
 
