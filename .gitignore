@@ -45,6 +45,8 @@ __pycache__/
 /engine/test/out-*/
 /engine/test/*.log
 /engine/build-logs/
+/engine/build-deps-*.log
+/engine/build-cli-*.log
 
 # Reference G-Code bleibt eingecheckt (siehe engine/test/reference/)
 !/engine/test/reference/*.gcode

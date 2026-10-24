@@ -64,9 +64,17 @@ target_link_libraries(handslice-cli PRIVATE
     ${ORCA_BUILD_DIR}/deps_src/qoi/libqoi.a
     ${ORCA_BUILD_DIR}/lib/libsemver.a
 
-    # OpenCV world + mitgebrachtes libpng (statisch) – OpenCV braucht das
-    ${ORCA_DEPS_PREFIX}/lib/libopencv_world.a
-    ${ORCA_DEPS_PREFIX}/lib/opencv4/3rdparty/liblibpng.a
+    # OpenCV world + mitgebrachtes libpng (statisch). Auf Android installiert
+    # Orcas OpenCV-Recipe nach `sdk/native/staticlibs/arm64-v8a/` + den 3rd-
+    # Party-Mitbringseln unter `sdk/native/3rdparty/libs/arm64-v8a/`, nicht
+    # unter `lib/opencv4/3rdparty/` wie auf Linux. Deshalb pfadabhaengig
+    # auswaehlen.
+    $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Android>:${ORCA_DEPS_PREFIX}/sdk/native/staticlibs/arm64-v8a/libopencv_world.a>
+    $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Android>:${ORCA_DEPS_PREFIX}/sdk/native/3rdparty/libs/arm64-v8a/liblibpng.a>
+    $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Android>:${ORCA_DEPS_PREFIX}/sdk/native/3rdparty/libs/arm64-v8a/libcpufeatures.a>
+    $<$<STREQUAL:${CMAKE_SYSTEM_NAME},Android>:${ORCA_DEPS_PREFIX}/sdk/native/3rdparty/libs/arm64-v8a/libtegra_hal.a>
+    $<$<NOT:$<STREQUAL:${CMAKE_SYSTEM_NAME},Android>>:${ORCA_DEPS_PREFIX}/lib/libopencv_world.a>
+    $<$<NOT:$<STREQUAL:${CMAKE_SYSTEM_NAME},Android>>:${ORCA_DEPS_PREFIX}/lib/opencv4/3rdparty/liblibpng.a>
 
     # OpenCascade (STEP-Import)
     ${ORCA_DEPS_PREFIX}/lib/libTKXDESTEP.a
@@ -147,15 +155,40 @@ target_link_libraries(handslice-cli PRIVATE
     # NLopt
     ${ORCA_DEPS_PREFIX}/lib/libnlopt.a
 
-    # System-Libs
-    /usr/lib/libexpat.so
-    /usr/lib/libjpeg.so
-    /usr/lib/liblzma.so
-    /usr/lib/libz.so
-    fontconfig
-    pthread
-    dl
-    m
 )
+
+# System- und Deps-Libs, die unter Linux und Android unterschiedlich liegen.
+# Auf Linux greifen wir fuer expat/jpeg/lzma/z/fontconfig auf System-Libs
+# zurueck (CachyOS stellt sie als .so). Auf Android gibt es keine System-
+# expat/jpeg/lzma/fontconfig, also wird gegen die statischen Varianten
+# aus dem Orca-Deps-Prefix (plus dem fontconfig-Stub aus
+# engine/build-deps-arm64.sh) gelinkt. libz ist auf Android eine stabile
+# System-Lib (`libz.so` aus Bionic/NDK-Sysroot), lzma wird auf Android
+# weggelassen – Freetype ist dort via `FT_DISABLE_*` ohne lzma gebaut
+# (siehe engine/OrcaSlicer/deps/FREETYPE/FREETYPE.cmake:10). pthread/dl/m
+# sind auf Android Teil von Bionic libc und werden ueber die
+# Standard-Linker-Namen eingezogen.
+if (CMAKE_SYSTEM_NAME STREQUAL "Android")
+    target_link_libraries(handslice-cli PRIVATE
+        ${ORCA_DEPS_PREFIX}/lib/libexpat.a
+        ${ORCA_DEPS_PREFIX}/lib/libjpeg.a
+        ${ORCA_DEPS_PREFIX}/lib/libfontconfig.a
+        z
+        log
+        dl
+        m
+    )
+else ()
+    target_link_libraries(handslice-cli PRIVATE
+        /usr/lib/libexpat.so
+        /usr/lib/libjpeg.so
+        /usr/lib/liblzma.so
+        /usr/lib/libz.so
+        fontconfig
+        pthread
+        dl
+        m
+    )
+endif ()
 
 install(TARGETS handslice-cli RUNTIME DESTINATION bin)

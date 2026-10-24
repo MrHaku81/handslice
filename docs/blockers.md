@@ -17,7 +17,41 @@ Format pro Eintrag:
 
 ---
 
-(keine offenen Blocker)
+## #2 – adb sieht das Poco X3 Pro nach User-Wechsel nicht mehr  (2026-10-24, Phase C)
+
+**Symptom:** `adb devices` leer, obwohl `lsusb` das Geraet
+(`2717:ff48 Xiaomi Inc. Mi/Redmi series (MTP + ADB)`) als verbunden
+listet. `adb kill-server && adb start-server`, `adb reconnect` sowie
+`adb usb` liefern alle `no devices/emulators found`.
+
+**Probiert:** 1. `adb kill-server; adb start-server`. 2. `adb reconnect`.
+3. `adb usb`.
+
+**Beobachtet:** USB-Verbindung ist auf OS-Ebene da (lsusb). ADB-Daemon
+laeuft (`* daemon started successfully`), listet aber keine Geraete.
+Keine `unauthorized`-Zeile – kein Eintrag ueberhaupt.
+
+**Vermutung:** Beim fruehen `adb` haben wir unter dem User
+`handslice` noch nicht die „immer erlauben"-Bestaetigung am Poco
+geklickt, oder die ADB-RSA-Keys im Home des neuen Users
+(`~/.android/adbkey*`) haben noch keinen Fingerabdruck im Geraet.
+Klaus muss am Telefon:
+1. Entwickleroptionen → USB-Debugging kurz aus/an.
+2. Beim naechsten `adb devices` am Rechner den Dialog
+   „USB-Debugging von diesem Rechner erlauben?" mit „Immer erlauben"
+   bestaetigen.
+
+**Fragen an Klaus:**
+- Kurz am Poco den USB-Debugging-Dialog bestaetigen, dann ist das
+  arm64-Binary (14 MB, siehe `engine/bin/handslice-cli-arm64`)
+  per `bash engine/test/run-reference-test.sh --device` auf
+  Byte-Gleichheit pruefbar.
+- Falls das Geraet weiterhin stumm bleibt: USB-Kabel wechseln
+  (manche Kabel sind nur Lade-, keine Datenleitungen).
+
+---
+
+
 
 ---
 

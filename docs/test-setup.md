@@ -27,6 +27,8 @@ Stand: 2026-10-24 (Erstaufnahme durch Umgebungscheck).
 | Android cmdline-tools | 23.0.0 (zip `commandlinetools-linux-16111833`) | `~/android-sdk/cmdline-tools/latest/bin/` |
 | Android NDK | r27d (`27.3.13750724`) – aktueller r27-LTS-Patch | `~/android-sdk/ndk/27.3.13750724/` |
 | NDK-Clang (aarch64 Target) | 18.0.4 (`aarch64-linux-android29-clang`) | `.../toolchains/llvm/prebuilt/linux-x86_64/bin/` |
+| Toolchain-Wrapper fuer Orca-Cross-Build | `engine/cmake/android-arm64.toolchain.cmake` | – |
+| CMake-Shims fuer unconditional find_package(OpenGL) | `engine/cmake/android-shims/` | – |
 | JDK (fuer sdkmanager/`android`-CLI) | OpenJDK 27 (jre-openjdk-headless) | `/usr/bin/java` |
 | aarch64-linux-gnu-gcc (System-Cross-Toolchain) | **nicht installiert** | – |
 | Flutter | **nicht installiert** | – |

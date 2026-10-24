@@ -8,6 +8,133 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-24 21:40 – Schritt B/C: Deps + handslice-cli-arm64 gebaut, Device-Test blockiert
+
+Fortsetzung des Nachttauftrags. Alle sechs Punkte aus Klaus' Vorgabe
+(Dep-Audit → Deps-Build → CLI-Build → Doku → Protokoll → Commit)
+abgearbeitet; der Device-Nachweis haengt an einer offenen ADB-
+Autorisierung am Telefon (siehe Rubrik 3 unten + `docs/blockers.md` #2).
+
+### 1. Dep-Audit vor dem Cross-Build
+
+`libslic3r.a` + `handslice-cli` brauchen 20 der 23 Orca-Deps aus dem
+x86-Build. Weglassen koennen wir **GLFW** (nicht in libslic3r-Sources
+referenziert) und **CURL** (ebenso). **OpenVDB/OpenEXR/Blosc** bleiben
+drin, weil `SLA/Hollowing.cpp` unguarded `<openvdb/...>` includet;
+Weglassen braechte einen Orca-Patch – nicht zulaessig. Ergebnis als
+Tabelle in `docs/engine-integration.md` Abschnitt „Dep-Audit vor dem
+Cross-Build" bevor der Build startete.
+
+### 2. Deps fuer arm64 cross-compiled
+
+`engine/build-deps-arm64.sh` + `engine/cmake/android-arm64.toolchain.cmake`
++ `engine/cmake/android-shims/FindOpenGL.cmake`. Baut Boost 1.84, TBB,
+Cereal, Eigen, PNG, FREETYPE, JPEG, EXPAT, NLopt, GMP, MPFR, CGAL, Blosc,
+OpenEXR, OpenVDB, OCCT 7.6.0, Qhull, Draco, libnoise, OpenCV 4.6.0 fuer
+`arm64-v8a` / android-29 nach
+`engine/OrcaSlicer/deps/build-arm64/OrcaSlicer_dep/usr/local/`.
+
+OpenSSL baut der Build-Script manuell, weil Orcas Recipe einen leeren
+`TOOLCHAIN_PREFIX` an OpenSSL durchreicht. Dazu Stubs:
+
+- `libfontconfig.a` (leer, aber linkbar) – OCCT auf Android ruft keine
+  fontconfig-Symbole, aber `src/libslic3r/CMakeLists.txt:613` linkt sie
+  trotzdem hartkodiert.
+- `libcurl.a` + `include/curl/curl.h` (leer) – `find_package(CURL
+  REQUIRED)` in `OrcaSlicer/CMakeLists.txt:633` zufriedenstellen, ohne
+  echtes libcurl zu bauen.
+- `lib/cmake/glfw3/glfw3Config.cmake` – `find_package(glfw3 REQUIRED)`
+  in `OrcaSlicer/CMakeLists.txt:698` zufriedenstellen; INTERFACE-Target
+  ohne Libs/Includes.
+
+94 `.a`-Dateien im Deps-Prefix, alle `file`-Check: `ELF 64-bit LSB
+relocatable, ARM aarch64`. Zwoelf Cross-Compile-Stolpersteine mit
+Loesung dokumentiert in `docs/engine-integration.md` Abschnitt
+„Umsetzung" (von GLEW-OpenGL-Shim ueber GMP-Autotools-Compiler-Trick
+bis zum NDK-libc++-sstream-Fix fuer LocalesUtils.cpp). **Keine Zeile im
+OrcaSlicer-Upstream geaendert.**
+
+### 3. libslic3r + handslice-cli-arm64
+
+`engine/build-cli-arm64.sh` baut gegen die arm64-Deps. Umgeht die
+cross-compile-fatale OrcaSlicer-encoding-check-Dependency durch einen
+`sed`-Patch auf `build.ninja`, der den Encoding-Check-COMMAND auf das
+bereits vorhandene Host-x86-encoding-check-Binary umbiegt.
+
+`engine/cli/CMakeLists.txt` greift OpenCVs Android-Install-Layout auf
+(`sdk/native/staticlibs/arm64-v8a/libopencv_world.a` statt
+`lib/libopencv_world.a`) und waehlt pro CMAKE_SYSTEM_NAME zwischen
+Linux- und Android-Pfaden fuer System-Libs (`libz`, `-llog` statt
+`-lpthread`, u. a.).
+
+Binary: `engine/bin/handslice-cli-arm64`, 14 MB nach
+`llvm-strip --strip-unneeded` (vorher 865 MB mit Debug-Info).
+
+```
+$ file engine/bin/handslice-cli-arm64
+ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV),
+dynamically linked, interpreter /system/bin/linker64, for Android 29,
+built by NDK r27d (13750724)
+```
+
+### 4. run-reference-test.sh um `--device`-Modus erweitert
+
+Pusht Binary + Elegoo-Profile + Wuerfel per adb nach
+`/data/local/tmp/handslice/`, slicet auf dem Geraet, pullt den G-Code
+und vergleicht EXECUTABLE_BLOCK gegen Referenz. Nicht ausgefuehrt
+(siehe Rubrik 3 unten).
+
+### 5. Doku-Updates
+
+- `docs/engine-integration.md`: neuer Abschnitt „Dep-Audit vor dem
+  Cross-Build" (Tabelle); neuer Abschnitt „Umsetzung" unter Schritt C
+  mit Script-Index, Toolchain-Hinweisen und zwoelf Stolpersteinen inkl.
+  Loesung. „Device-Test" als „ausstehend" markiert.
+- `docs/test-setup.md`: Toolchain-Wrapper + CMake-Shims eingetragen.
+- `docs/blockers.md`: Blocker #2 (ADB).
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- `engine/bin/handslice-cli-arm64` existiert, ist ELF ARM aarch64 fuer
+  Android 29. Beweis-Befehl: `file engine/bin/handslice-cli-arm64`.
+- 94 arm64-static-libs unter `engine/OrcaSlicer/deps/build-arm64/
+  OrcaSlicer_dep/usr/local/lib/` (Boost, TBB, OCCT 7.6, OpenCV 4.6,
+  OpenVDB, CGAL, GMP, MPFR, …). Stichprobe: `file …/libTKMath.a`-
+  Member → `ELF 64-bit LSB relocatable, ARM aarch64`.
+- Build-Skripte reproduzierbar: `bash engine/build-deps-arm64.sh` +
+  `bash engine/build-cli-arm64.sh` (von leerem `build-arm64/` ca. 50 min
+  auf AMR5). Beide ohne Patches an OrcaSlicer-Upstream.
+- Umgehungen fuer zwoelf Cross-Compile-Stolpersteine schriftlich
+  festgehalten (`docs/engine-integration.md` Abschnitt „Umsetzung").
+
+**2. Ungeprueft**
+
+- **Byte-Gleichheit auf dem Poco X3 Pro.** Das Binary existiert, der
+  Testlauf-Pfad in `engine/test/run-reference-test.sh --device` ist
+  implementiert, aber der ADB-Rundlauf ist blockiert (siehe Rubrik 3).
+- Laufzeit auf Snapdragon 860 – ohne Device-Lauf nicht gemessen.
+- Reproduzierbarkeit „von null auf einem anderen Rechner": nur auf
+  AMR5 getestet. Fuer andere Linux-Distributionen oder NDK-Versionen
+  koennen Pfade im Toolchain-Wrapper angepasst werden muessen.
+- fontconfig-Stub + CURL-Stub + glfw3-Stub-Config: belasten die Compile-
+  und Link-Phase korrekt, aber zur Laufzeit ruft libslic3r keine
+  Symbole aus diesen Libs; untestable, solange der G-Code nicht
+  nachweislich erzeugt wird.
+
+**3. Geht nicht**
+
+- **ADB sieht das Poco nicht mehr**, siehe `docs/blockers.md` #2.
+  `adb devices` leer, obwohl `lsusb` das Geraet listet. Vermutung:
+  Nach dem Rechner-User-Wechsel braucht das Telefon einmalig eine
+  neue „USB-Debugging erlauben"-Bestaetigung. Erfordert Klaus am
+  Geraet.
+
+---
+
 ## 2026-10-24 19:30 – Reproduzierbarkeit nachgewiesen, Flashforge-Rest geklärt, Android-NDK installiert
 
 Fortsetzung unter dem frischen User `handslice` auf AMR5, kein Build-Cache

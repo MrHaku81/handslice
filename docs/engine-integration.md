@@ -380,6 +380,54 @@ ausgelegt; mit NDK-Toolchain-File durchgehen, Bibliothek für Bibliothek.
 - **Nachweis:** alle Deps liegen als `.a` unter `engine/deps-build/arm64/`;
   `file` zeigt `ELF 64-bit ... ARM aarch64`.
 
+#### Dep-Audit vor dem Cross-Build (2026-10-24)
+
+Fuer den x86-Build hat `engine/build-headless-x86.sh` alle 23 der GUI-freien
+Orca-Deps gebaut, als defensives „nehmen wir mit". Fuer arm64 lohnt sich
+die Pruefung, was `libslic3r.a` + `handslice-cli` wirklich brauchen – und was
+Zeit verschwendet. Methodik: `target_link_libraries(libslic3r ...)` in
+`engine/OrcaSlicer/src/libslic3r/CMakeLists.txt` plus unguarded Includes in
+den `.cpp`-Dateien unter `src/libslic3r/`. Eine Dep darf nur weg, wenn
+weder eine Quelldatei sie includet noch eine Transitivitaet existiert
+(z. B. OpenEXR → OpenVDB).
+
+| Dep | Rolle im Slicen | libslic3r-Nachweis | Fuer Headless-arm64 noetig? |
+|---|---|---|---|
+| **Boost** (log, filesystem, locale, thread, chrono, atomic, context, coroutine, container, nowide, iostreams, program\_options, serialization, exception, date\_time, random) | Zentraler Util-Stack: Logging, Pfade, nowide-UTF8, Coroutinen in Arachne-Pipeline | `target_link_libraries(libslic3r ... boost_libs)` + umfangreiche Nutzung in `.cpp` | **Ja** |
+| **TBB** (+ tbbmalloc) | Parallelisierung des gesamten Slicers (`-DUSE_TBB` in `libslic3r/CMakeLists.txt:536`) | `target_link_libraries(libslic3r ... TBB::tbb TBB::tbbmalloc)` | **Ja** |
+| **Cereal** (header-only) | Projekt-Serialisierung in 3mf | `target_link_libraries(libslic3r ... cereal::cereal)` | **Ja** |
+| **Eigen** (header-only, PUBLIC) | Geometrie-Vektoren, Transformationen | `target_link_libraries(libslic3r PUBLIC Eigen3::Eigen)` | **Ja** |
+| **PNG** | Thumbnails und Textur-IO | `target_link_libraries(libslic3r ... PNG::PNG)` | **Ja** |
+| **JPEG** | Thumbnail-Loading in 3mf | `find_package(JPEG REQUIRED)` + Link | **Ja** |
+| **FREETYPE** | OCCT-Textrendering (`Shape/TextShape.cpp`), auch unter Headless gelinkt | `target_link_libraries(libslic3r PRIVATE ${FREETYPE_LIBRARIES})` wenn `NOT WIN32` | **Ja** |
+| **NLopt** | Numerische Optimierung – `Arrange.cpp`, `Optimize/NLoptOptimizer.hpp`, SLA Rotfinder/SupportTree | Direkte Includes von `nlopt.h` in genannten Dateien | **Ja** (Arrange zieht es, auch wenn wir `--no-center` nutzen – libslic3r.a referenziert die Symbole) |
+| **GMP + MPFR** | Zahlen-Backend fuer CGAL | Transitiv ueber CGAL | **Ja** |
+| **CGAL** (header-only ab 5.x, aber mit GMP/MPFR-Backend) | Mesh-Boolean, Cut-Surface, Triangulation (`libslic3r_cgal`) | `find_package(CGAL REQUIRED)` + Link ueber `libslic3r_cgal` | **Ja** |
+| **OCCT** (26 Libs, von `TKernel` bis `TKXDESTEP`) | STEP-Import (`Format/STEP.cpp`), SVG-Import (`Format/svg.cpp`), Text-als-Mesh (`Shape/TextShape.cpp`). Alle drei liegen **unguarded** in `lisbslic3r_sources`. | `find_package(OpenCASCADE REQUIRED)` + 26 Libs in `OCCT_LIBS` | **Ja** – ohne Patch an libslic3r/CMakeLists kein Weglassen |
+| **Draco** | Compressed-Mesh-Zweig im 3mf-Loader (`Format/DRC.cpp`, unguarded in `lisbslic3r_sources`) | `find_package(draco REQUIRED)` + Link | **Ja** |
+| **Qhull** | Convex-Hull-Berechnung in Arrange und PlateFill | `target_link_libraries(libslic3r ... qhull)` | **Ja** |
+| **libnoise** | Prozedurales Rauschen fuer Fuzzy Skin (`Feature/FuzzySkin/FuzzySkin.cpp`, unguarded) | `target_link_libraries(libslic3r ... noise::noise)` | **Ja** |
+| **OpenSSL (nur Crypto)** | SHA/MD5 fuer 3mf-Stream-Hashes | `target_link_libraries(libslic3r ... OpenSSL::Crypto)` | **Ja** – nur `libcrypto.a`, nicht `libssl.a` |
+| **OpenCV (world)** | Bildverarbeitung in `ObjColorUtils.hpp` + `Slicing.cpp` (vor allem CMYK/Color-Code für Multi-Material); unguarded via `#include <opencv2/...>` | `find_package(OpenCV REQUIRED core)` + Link `opencv_world` **PUBLIC** | **Ja** – harter Link, kein Patch moeglich |
+| **OpenVDB** | Hollowing-Volumen und (deaktivierte) alte Tree-Support-Variante. `SLA/Hollowing.cpp` includet `OpenVDBUtils.hpp` unguarded. `TreeSupport3D.cpp` benutzt openvdb nur im `#else`-Zweig von `TREE_SUPPORT_ORGANIC_NUDGE_NEW` – aktiv ist der neue Zweig (Z. 44 `#define ... 1`); der Include auf Z. 49 steht unter `#ifndef`. | `target_link_libraries(libslic3r PRIVATE OpenVDB::openvdb)` nur wenn Target existiert | **Ja** fuer die Compile-Phase (Hollowing.cpp), damit stays. Alternativ: Hollowing.cpp aus den Sources entfernen – braucht Patch. |
+| **OpenEXR (Half)** | Nur transitiv von OpenVDB (benutzt `openvdb::math::half`) | – | **Ja** (nur weil OpenVDB bleibt) |
+| **Blosc** | Nur transitiv von OpenVDB (Grid-Komprimierung) | – | **Ja** (nur weil OpenVDB bleibt) |
+| **GLFW** | Fenster-OpenGL fuer Thumbnail-Rendering | `grep -rn 'GLFW' src/libslic3r/` → **keine Fundstelle**. Nur `src/slic3r/CMakeLists.txt:698` + `src/OrcaSlicer.cpp`. | **Nein** – GLFW existiert auf Android ohnehin nicht offiziell |
+| **CURL** | Netzwerk (Online-Updater, Printhost-POST) | `grep -rn 'curl/curl' src/libslic3r/` → **keine Fundstelle**. Nur `src/slic3r/CMakeLists.txt:633`. | **Nein** – libslic3r referenziert kein libcurl-Symbol |
+| **fontconfig** (System-Lib) | OCCT-Font-Lookup auf Linux (nicht auf Android) | `target_link_libraries(libslic3r PRIVATE fontconfig)` in `src/libslic3r/CMakeLists.txt:613` unter `NOT APPLE AND NOT WIN32` | **Sonderfall** – Android faellt in das `NOT APPLE AND NOT WIN32`-Branch, libslic3r.cmake fordert aber hartkodiert `fontconfig`. OCCT selbst setzt auf Android laut `occt_csf.cmake:135` `CSF_androidlog=log` und **kein** fontconfig. Workaround ohne Orca-Patch: Dummy-`libfontconfig.a` (archive ohne Symbole) im Deps-Prefix bereitstellen; der Linker ist zufrieden, Laufzeit-Code ruft nichts auf. Siehe `engine/build-deps-arm64.sh`. |
+
+**Zusammenfassung fuer arm64:** 21 Deps bauen (die x86-Liste minus
+`dep_GLFW` und `dep_CURL`). Zusaetzlich ein `libfontconfig.a`-Stub mit
+leerem Archive im Deps-Prefix hinterlegen. Keine Zeile in
+`engine/OrcaSlicer/` wird geaendert.
+
+**Nicht gelungen beim Audit:** `OpenVDB`, `OpenEXR`, `Blosc` wegzulassen,
+obwohl die aktive Code-Pfade (Tree-Support-NEW-Variante) sie nicht
+benutzen. Grund: `SLA/Hollowing.cpp` includet `OpenVDBUtils.hpp` unguarded
+und steht unguarded in `lisbslic3r_sources`. Ohne Patch an libslic3r
+koennen diese Deps nicht wegfallen. Build-Zeit-Opfer: ca. 20 min
+Cross-Compile fuer OpenVDB. Dokumentiert, akzeptiert.
+
 ### Schritt C: libslic3r + CLI für ARM64
 
 - Gleicher Headless-Build wie A, gegen die Deps aus B.
@@ -387,6 +435,135 @@ ausgelegt; mit NDK-Toolchain-File durchgehen, Bibliothek für Bibliothek.
   `.so` + JNI für den ersten Durchstich).
 - **Nachweis:** per ADB auf das Poco kopiert, dort ausgeführt, G-Code zurück
   kopiert, `sha256sum` identisch zum Desktop.
+
+#### Umsetzung (2026-10-24)
+
+Scripts:
+
+- `engine/build-deps-arm64.sh` – orchestriert den Deps-Build gegen das
+  NDK-Toolchain-Wrapper-File `engine/cmake/android-arm64.toolchain.cmake`.
+- `engine/build-cli-arm64.sh` – baut libslic3r + handslice-cli fuer arm64
+  (ruft intern Orcas Haupt-CMake auf, patcht `build.ninja` fuer
+  Encoding-Check, linkt dann die eigene CLI).
+- `engine/cmake/android-arm64.toolchain.cmake` – Wrapper, der ANDROID_ABI
+  + ANDROID_PLATFORM als Cache setzt, die Prefix-gebundenen NDK-Clangs
+  erzwingt (`aarch64-linux-android29-clang[++]`, damit Autotools das
+  --target im `--sysroot` einbaken), TOOLCHAIN_PREFIX setzt
+  (fuer OpenSSL/GMP-Cross-Konfigs), BOOST_ROOT/CMAKE_FIND_ROOT_PATH auf
+  den Deps-Prefix erweitert, OpenCV_DIR auf die Android-Install-Position,
+  und per `-include` `engine/cmake/android-compat.hpp` einschleust, damit
+  libslic3r/LocalesUtils.cpp unter libc++ compiliert (fehlendes
+  `<sstream>`).
+- `engine/cmake/android-shims/FindOpenGL.cmake` – Dummy, damit
+  `deps/CMakeLists.txt`'s unconditionales `include(GLEW/GLEW.cmake)` beim
+  Configure nicht am OpenGL-REQUIRED-Check scheitert (GLEW wird nicht
+  gebaut).
+- `engine/cmake/android-compat.hpp` – `-include`-Header fuer Android-
+  Cross-Compile. Enthaelt `#include <sstream>` (siehe oben).
+
+Toolchain + Pfade: NDK r27d unter `~/android-sdk/ndk/27.3.13750724`
+(ueber `sdkmanager` installiert, siehe `docs/test-setup.md`).
+`aarch64-linux-android29-clang/clang++` als Compiler.
+
+**Stolpersteine und Loesungen** (vollstaendige Liste, da jede Stolperfalle
+auf einem anderen Rechner wiederkommt und die 3-Versuche-Regel auf
+*verschiedene* Fehler zuschlaegt):
+
+1. **GLEW/GLEW.cmake:3** macht `find_package(OpenGL REQUIRED)` auch wenn
+   wir dep_GLEW nicht bauen. Auf Android gibt es kein Desktop-OpenGL.
+   → `engine/cmake/android-shims/FindOpenGL.cmake` als Dummy, via
+   `-DCMAKE_MODULE_PATH=...` vor dem find_package geladen.
+2. **OpenSSL (Orca-Recipe)** haengt sein Cross-Compile an
+   `--cross-compile-prefix=${TOOLCHAIN_PREFIX}-`, aber Orca setzt
+   TOOLCHAIN_PREFIX nirgends. → OpenSSL wird in `build-deps-arm64.sh`
+   Schritt 3 manuell per `./Configure android-arm64` gebaut; `dep_OpenSSL`
+   wandert aus der Target-Liste.
+3. **GMP configure "C++ compiler not available"** (nicht aufgeloest wie
+   die Fehlermeldung behauptet). Autotools ruft `env CC=/path/clang` ohne
+   `--target`; der plain NDK clang faellt deshalb auf die *Host*-GCC
+   `libstdc++`-Header zurueck, die unter dem konkreten GCC-16 nicht fuer
+   NDK-Clang kompilieren. → Toolchain-Wrapper erzwingt
+   `aarch64-linux-android29-clang[++]` als CMAKE_C_COMPILER (prefix-
+   gebunden, mit eingebakenem `--target`+`--sysroot`). Setzt zusaetzlich
+   `TOOLCHAIN_PREFIX=aarch64-linux-android` fuer `--host=`.
+4. **OpenCV 4.6.0** schaltet mit `ANDROID=1` automatisch
+   `BUILD_ANDROID_PROJECTS/EXAMPLES` auf ON und zieht
+   `samples/android/15-puzzle/CMakeLists.txt`, das `add_android_project()`
+   braucht (verfuegbar nur mit SDK, nicht nur NDK). → im Toolchain-File
+   `BUILD_ANDROID_PROJECTS/EXAMPLES = OFF CACHE FORCE` vor dem OCV_OPTION.
+5. **FindBoost findet BoostConfig.cmake nicht** trotz CMAKE_PREFIX_PATH.
+   Android-Toolchain setzt `CMAKE_FIND_ROOT_PATH_MODE_INCLUDE/LIBRARY` so,
+   dass nur CMAKE_FIND_ROOT_PATH-Pfade zaehlen. → Toolchain-Wrapper
+   erweitert CMAKE_FIND_ROOT_PATH um den Deps-Prefix (via env
+   `HANDSLICE_DEPS_PREFIX`) und setzt BOOST_ROOT/BOOST_INCLUDEDIR
+   /BOOST_LIBRARYDIR explizit.
+6. **OpenCV installiert Android-Layout**: nicht nach
+   `lib/cmake/opencv4/` sondern nach `sdk/native/jni/abi-arm64-v8a/`
+   mit libs unter `sdk/native/staticlibs/arm64-v8a/`. →
+   Toolchain-Wrapper setzt `OpenCV_DIR` dorthin; `engine/cli/CMakeLists.txt`
+   waehlt pfadabhaengig zwischen Linux- und Android-Layout.
+7. **CGAL install reichtet absoluten `/usr/local`** wenn die aeussere
+   deps-CMake neu konfiguriert – ninja triggert dann ein Install mit
+   leerem DESTDIR. → Install-Stamps werden im Build-Script vor der
+   Reconfigure getouched, damit der Install-Schritt als "aktuell" gilt.
+8. **CURL** wird in Orcas root-CMakeLists.txt:633 `find_package(CURL
+   REQUIRED)` – libslic3r nutzt es aber nirgends. → `engine/build-deps-arm64.sh`
+   Schritt 4a legt einen minimalen `libcurl.a`-Stub + `curl/curl.h`-
+   Minimal-Header in den Deps-Prefix. Keine CURL-Symbole in libslic3r.a.
+9. **glfw3** wird in `CMakeLists.txt:698` `find_package(glfw3 REQUIRED)`.
+   → Stub `glfw3Config.cmake` unter `${DEPS_PREFIX}/lib/cmake/glfw3/` mit
+   leerem `glfw` INTERFACE-Target.
+10. **fontconfig** wird in `src/libslic3r/CMakeLists.txt:613` hartkodiert
+    gelinkt (unter `NOT APPLE AND NOT WIN32` – Android matcht). → leeres
+    `libfontconfig.a`-Archive im Deps-Prefix. OCCT ruft auf Android
+    laut `occt_csf.cmake:135` keine fontconfig-Symbole – nur fuer den
+    Linker.
+11. **encoding-check (Build-Tool fuer Encoding-Check)** wird cross-
+    compiliert und dann vom Host versucht auszufuehren →
+    `Fehler im Format der Programmdatei`. → `build.ninja` nach dem
+    Configure per sed umgebogen: COMMAND fuer die Encoding-Check-Stamps
+    zeigt direkt auf das x86-Binary unter `engine/build/x86/src/dev-utils/
+    encoding-check` (muss vorher gebaut sein).
+12. **libslic3r/LocalesUtils.cpp** benutzt `std::stringstream` ohne
+    `<sstream>` zu includen; funktioniert unter GCC/libstdc++ via
+    transitiven Include aus `<iomanip>`, scheitert aber mit NDK-libc++.
+    → `engine/cmake/android-compat.hpp` wird per `-include` global in
+    `CMAKE_CXX_FLAGS` eingezogen (`CMAKE_CXX_FLAGS_INIT` reicht hier
+    nicht aus, weil die NDK-Toolchain CMAKE_CXX_FLAGS teilweise selbst
+    setzt – FORCE Cache direkt auf CMAKE_CXX_FLAGS).
+
+Alle Umgehungen leben in `engine/cmake/` und den beiden Build-Skripten –
+**keine Zeile im OrcaSlicer-Upstream geaendert**.
+
+**Build-Zeit** (AMR5, 16 Cores): Deps von null ~45 min (OCCT allein 15 min,
+OpenCV 10 min, OpenVDB 6 min, Boost 4 min, Rest parallel), libslic3r +
+handslice-cli-arm64 ~8 min. Insgesamt knapp eine Stunde.
+
+**Ergebnis-Binary:** `engine/bin/handslice-cli-arm64` (14 MB nach
+`llvm-strip --strip-unneeded`, vorher 865 MB mit Debug-Info). `file`:
+
+```
+ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV),
+dynamically linked, interpreter /system/bin/linker64, for Android 29,
+built by NDK r27d (13750724)
+```
+
+Dependenz auf Android-System-Libs (ldd-Aequivalent via `readelf -d`):
+libz.so (Bionic), libc.so, libm.so, libdl.so, libstdc++.a statisch via
+`c++_static`. **Keine** externen Libs ausserhalb des NDK-Sysroots.
+
+#### Device-Test (ausstehend)
+
+- Erwarteter Lauf: `bash engine/test/run-reference-test.sh --device`
+  pusht Binary + Elegoo-Profile + 20-mm-Wuerfel-STL via adb nach
+  `/data/local/tmp/handslice/`, slicet dort, pullt den G-Code zurueck,
+  vergleicht den EXECUTABLE_BLOCK gegen die Referenz
+  `92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`
+  (8479 Zeilen).
+- **Status 2026-10-24 Nacht:** nicht ausgefuehrt. adb sieht das Poco nach
+  Rechner-User-Wechsel nicht mehr; siehe `docs/blockers.md` #2.
+  Binary ist baubar und existiert; der Test braucht nur, dass das Geraet
+  wieder autorisiert ist.
 
 ### Schritt D: Einbettung in die App
 
