@@ -17,6 +17,7 @@ import 'package:handslice/screens/settings_screen.dart';
 import 'package:handslice/state/printer_state.dart';
 import 'package:handslice/state/project_state.dart';
 import 'package:handslice/theme/workshop_theme.dart';
+import 'package:handslice/widgets/printer_panel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Widget _wrap(Widget w) => MaterialApp(
@@ -215,6 +216,46 @@ void main() {
     expect(b.yMin, -10.0); // bed_texture_area erweitert
     expect(b.yMax, 256.0);
     expect(b.zMax, 256.0);
+  });
+
+  testWidgets('PrinterPanel: Pair-Dialog oeffnet, Save speichert ohne Framework-Assertion',
+      (tester) async {
+    // Regression gegen den Crash in Commit 828ff96:
+    // 'package:flutter/src/widgets/framework.dart': Failed assertion:
+    // line 6281 pos 12: '_dependents.isEmpty': is not true.
+    // Ursache: TextEditingController wurden im outer State erzeugt und
+    // direkt nach `await showDialog` disposed – die TextField-Elements
+    // im Dialog-Pop-Tree waren da noch dependents der Localizations/
+    // Theme-InheritedElements.
+    // Dieser Test oeffnet den Dialog, tippt IP + Code, drueckt "Speichern"
+    // und erwartet, dass der Save-Pfad ohne Framework-Exception durchlaeuft
+    // und savePairing in PrinterState angekommen ist.
+    final printer = await _makePrinter();
+    await tester.pumpWidget(_wrap(
+      Scaffold(body: PrinterPanel(printer: printer)),
+    ));
+    await tester.pumpAndSettle();
+
+    // Pair-Dialog oeffnen
+    await tester.tap(find.text('Pair printer…'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pair with CC2'), findsOneWidget);
+
+    // IP + Code eingeben
+    final tf = find.byType(TextField);
+    expect(tf, findsNWidgets(2));
+    await tester.enterText(tf.first, '192.168.0.42');
+    await tester.enterText(tf.last, 'secret42');
+
+    // Speichern tippen
+    await tester.tap(find.text('Save'));
+    // Pop + Framework-Dispose durchfahren
+    await tester.pumpAndSettle();
+
+    // IP ist persistiert – savePairing hat durchgelaufen
+    expect(printer.ip, '192.168.0.42');
+    // Code bleibt im (Fake-)SecureStorage, nicht in SharedPrefs:
+    expect(await printer.hasAccessCode(), isTrue);
   });
 
   test('Bounds-Check: in-bound + out-of-bound Bewegungen', () {

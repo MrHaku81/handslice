@@ -152,7 +152,7 @@ einen eigenen letzten State machen.
 
 ### Port-Rollen (CC2)
 
-| Port | Protokoll | Rolle | Open bei F01TDL55…? |
+| Port | Protokoll | Rolle | Open bei dem CC2 im Haus? |
 |---|---|---|---|
 | 80 | HTTP | G-Code-Upload (`PUT /upload`, Stock-FW) | **closed** – siehe Nachweislauf |
 | 1883 | MQTT/TCP | Kommandos, Status, Registrierung | open |

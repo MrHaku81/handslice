@@ -36,44 +36,20 @@ class _PrinterPanelState extends State<PrinterPanel> {
   }
 
   Future<void> _openPairDialog() async {
-    final l = AppLocalizations.of(context);
-    final ipCtrl = TextEditingController(text: widget.printer.ip ?? '');
-    final codeCtrl = TextEditingController(); // Code NICHT prefillen
-    final ok = await showDialog<bool>(
+    // Dialog als eigener StatefulWidget – die TextEditingController leben
+    // im State des Dialogs, werden also erst in dessen dispose() freigegeben
+    // (nach Pop-Animation). Fruehere Variante hatte die Controller im outer
+    // State und rief .dispose() direkt nach `await showDialog`; das triggert
+    // _dependents.isEmpty-Assert, weil die TextField-Elements im Dialog-Tree
+    // noch nicht abgebaut waren. Zusaetzlich wurde ipCtrl.text nach
+    // ipCtrl.dispose() gelesen (use-after-dispose).
+    final r = await showDialog<PairResult>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(l.pairDialogTitle),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: ipCtrl,
-              autofocus: true,
-              decoration: InputDecoration(labelText: l.pairDialogIp),
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              controller: codeCtrl,
-              obscureText: true,
-              decoration: InputDecoration(labelText: l.pairDialogCode),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(l.pairDialogCancel)),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(l.pairDialogSave)),
-        ],
-      ),
+      builder: (_) => _PairDialog(initialIp: widget.printer.ip ?? ''),
     );
-    ipCtrl.dispose();
-    final code = codeCtrl.text;
-    codeCtrl.dispose();
-    if (ok != true || ipCtrl.text.isEmpty || code.isEmpty) return;
-    await widget.printer.savePairing(ip: ipCtrl.text.trim(), accessCode: code);
+    if (!mounted || r == null) return;
+    if (r.ip.isEmpty || r.code.isEmpty) return;
+    await widget.printer.savePairing(ip: r.ip, accessCode: r.code);
   }
 
   @override
@@ -241,5 +217,86 @@ class _PrinterPanelState extends State<PrinterPanel> {
     final g = int.parse(h.substring(2, 4), radix: 16);
     final b = int.parse(h.substring(4, 6), radix: 16);
     return Color.fromARGB(255, r, g, b);
+  }
+}
+
+/// Rueckgabe aus dem Pair-Dialog. `null` entspricht Abbrechen.
+class PairResult {
+  const PairResult({required this.ip, required this.code});
+  final String ip;
+  final String code;
+}
+
+class _PairDialog extends StatefulWidget {
+  const _PairDialog({required this.initialIp});
+  final String initialIp;
+
+  @override
+  State<_PairDialog> createState() => _PairDialogState();
+}
+
+class _PairDialogState extends State<_PairDialog> {
+  late final TextEditingController _ip;
+  late final TextEditingController _code;
+
+  @override
+  void initState() {
+    super.initState();
+    _ip = TextEditingController(text: widget.initialIp);
+    _code = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    // Wird gerufen, nachdem die Pop-Animation durch ist – die TextField-
+    // Elements sind dann vollstaendig unmounted. Keine _dependents mehr.
+    _ip.dispose();
+    _code.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    Navigator.pop(
+      context,
+      PairResult(ip: _ip.text.trim(), code: _code.text),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return AlertDialog(
+      title: Text(l.pairDialogTitle),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _ip,
+            autofocus: true,
+            keyboardType: TextInputType.url,
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(labelText: l.pairDialogIp),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _code,
+            obscureText: true,
+            textInputAction: TextInputAction.done,
+            decoration: InputDecoration(labelText: l.pairDialogCode),
+            onSubmitted: (_) => _submit(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop<PairResult>(context, null),
+          child: Text(l.pairDialogCancel),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          child: Text(l.pairDialogSave),
+        ),
+      ],
+    );
   }
 }

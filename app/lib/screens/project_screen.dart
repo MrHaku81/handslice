@@ -7,6 +7,7 @@ import '../l10n/app_localizations.dart';
 import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
+import '../widgets/build_info_badge.dart';
 import '../widgets/printer_panel.dart';
 import '../widgets/workshop_card.dart';
 import '../widgets/workshop_row.dart';
@@ -76,7 +77,16 @@ class _ProjectScreenState extends State<ProjectScreen> {
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: ListView(
         children: [
-          Text(l.projectHeading, style: theme.textTheme.headlineMedium),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Text(l.projectHeading,
+                    style: theme.textTheme.headlineMedium),
+              ),
+              const BuildInfoBadge(),
+            ],
+          ),
           const SizedBox(height: 12),
 
           WorkshopCard(

@@ -8,6 +8,115 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 15:00 – Fix: Pair-Dialog-Crash + Build-Info im Header + SN-Scrub
+
+Klaus hat beim ersten Live-Lauf (Commit 828ff96) auf dem Poco
+„Drucker koppeln" getippt → roter Fehlerbildschirm:
+
+```
+'package:flutter/src/widgets/framework.dart': Failed assertion:
+line 6281 pos 12: '_dependents.isEmpty': is not true.
+```
+
+### Ursache (an der Wurzel)
+
+Flutter framework.dart:6281 ist der Assert in
+`InheritedElement.debugDeactivated`. Er greift, wenn ein
+`InheritedElement` deaktiviert wird, waehrend es noch Dependents
+hat.
+
+Im ursprunglichen `_openPairDialog` wurden zwei
+`TextEditingController` im outer State erzeugt und sofort nach
+`await showDialog` disposed. Zur Dispose-Zeit lief die Dialog-Pop-
+Animation noch; die `TextField`-Elements im Dialog-Tree waren noch
+dependents der umliegenden `_LocalizationsScope`/Theme-Inherited-
+Elements. Zusaetzlich wurde `ipCtrl.text` **nach** `ipCtrl.dispose()`
+gelesen (use-after-dispose).
+
+### Fix (kein try/catch-Pflaster)
+
+Dialog als eigener `StatefulWidget` (`_PairDialog`), die Controller
+leben in dessen `State` und werden erst in dessen `dispose()`
+freigegeben – also nach dem vollstaendigen Unmount der Dialog-
+Element-Hierarchie. Das ist der kanonische Flutter-Weg; keine
+Lifecycle-Workarounds mehr.
+
+### Regression-Test (RED → GREEN)
+
+`test/widget_test.dart`:
+`PrinterPanel: Pair-Dialog oeffnet, Save speichert ohne
+Framework-Assertion` – oeffnet den Dialog, tippt IP + Code,
+drueckt Save, pumpAndSettle. Mit dem alten Code schlug der Test
+fehl („Multiple exceptions (5) were detected during the running of
+the current test"); mit dem Fix laeuft er sauber durch.
+Nachgewiesen durch kurzen `git stash` + Test-Lauf.
+
+### F5 – Commit-Stand sichtbar in der App
+
+- `BuildInfoBadge`-Widget (Mono-Text) im Projekt-Screen oben
+  rechts: `v0.1 · <commit>` + Build-Zeit.
+- Werte werden ueber `--dart-define=BUILD_COMMIT=` /
+  `BUILD_TIME=` eingebrannt; `app/scripts/build_apk.sh` setzt sie
+  automatisch aus `git rev-parse --short=10 HEAD` und `date -u`.
+
+### F6 – Serial Number Scrub
+
+Suche in Working-Tree + Git-History (`git log --all -S`): die SN
+tauchte in `PROGRESS.md` (6×), `docs/networking-cc2.md` (6× +
+1× verkuerzt) und `engine/test/mock-cc2/mock_cc2.py` (1×) auf.
+
+- **Working-Tree:** alle 14 Fundstellen durch Platzhalter `<cc2-sn>`
+  (bzw. „CC2 im Haus" in einer Tabelle) ersetzt. `git grep F01TDL`
+  liefert jetzt leer.
+- **Git-History seit letztem Push (origin/main..HEAD):** nur
+  Commit `828ff96` enthielt die SN (3 Treffer). Dieser Scrub-Commit
+  liegt direkt darueber; nach dem Fix-Commit „leakt" die SN damit
+  nicht in neue Pushes. Rewrite von `828ff96` wuerde Force-Push
+  erfordern und ist laut CLAUDE.md § 2 gesperrt – ohne Klaus-
+  Entscheidung nicht gemacht.
+- **Bereits gepushte Commits:** `7ac8e7b`, `e5ad931`, `7aa8108`,
+  `93e26d0`, `684d1f6` enthalten die SN im History-Zustand von
+  `origin/main`. Entfernung erfordert Force-Push auf main.
+  **Entscheidung an Klaus:** entweder Force-Push nach Backup
+  (CLAUDE.md § 2 bricht), oder SN im Repo akzeptieren (sie ist
+  nicht sensibel genug fuer ein Access-Grant, aber identifiziert
+  den Drucker eindeutig gegenueber anderen Elegoo-Besitzern).
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Pair-Dialog laeuft ohne `_dependents.isEmpty`-Assertion durch
+  (Regression-Widget-Test gruen, nach Rollback des Fixes schlaegt
+  er fehl – echter RED→GREEN-Beweis).
+- 10 Widget-Tests + 4 Mock-Integration-Tests gruen (`flutter test`).
+- `BuildInfoBadge` zeigt `v0.1 · <commit>` + UTC-Build-Zeit im
+  Projekt-Screen (nutzt `--dart-define`).
+- `app/scripts/build_apk.sh` setzt die Build-Info automatisch aus
+  Git.
+- SN `<cc2-sn>` nirgends mehr im Working-Tree
+  (`git grep F01TDL` ist leer).
+
+**2. Ungeprueft**
+
+- **Live-Lauf auf dem Poco nach dem Fix.** APK wird gebaut und
+  installiert – der eigentliche „Drucker koppeln"-Klick muss von
+  Klaus bestaetigt werden.
+- **Live-Reproduktion des Original-Crashes per adb logcat.** USB-
+  Tunnel wurde instabil beim Install-Lauf; die Ursachenanalyse
+  stuetzt sich auf Klaus' Error-Snippet, Flutter-Framework-Code
+  und den RED-Test, der den Pfad geschlossen beweist.
+- **Rewrite der bereits gepushten Commits** – nicht gemacht, siehe
+  F6-Entscheidung.
+
+**3. Geht nicht**
+
+- (keine neuen Blocker)
+
+---
+
 ## 2026-10-25 14:30 – Phase 3 M3: Discovery, CANVAS, Upload gegen Mock + echten CC2
 
 Vor M3 die vier Nacharbeiten aus M2 (Z-Offset, printer_check-Label,
