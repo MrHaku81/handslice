@@ -38,6 +38,8 @@
 #include <boost/log/utility/setup/console.hpp>
 #include <boost/nowide/args.hpp>
 
+#include <sys/resource.h>  // getrusage – fuer Peak-RSS im Stats-JSON
+
 #include <tbb/global_control.h>
 
 #include "nlohmann/json.hpp"
@@ -342,6 +344,14 @@ json emit_statistics(const Print& print,
     json j;
     j["return_code"] = 0;
     j["output_file"] = output_file;
+    // Peak Resident Set Size (ru_maxrss) via POSIX getrusage.
+    // Linux: ru_maxrss in Kilobytes; macOS: Bytes. Wir sind auf Linux
+    // (Host + Android/arm64), also KiB. Script-seitig haengt der Peak
+    // nicht mehr vom Poll-Intervall ab.
+    struct rusage ru{};
+    if (getrusage(RUSAGE_SELF, &ru) == 0) {
+        j["peak_memory_kb"] = static_cast<long long>(ru.ru_maxrss);
+    }
     j["estimated_time_s"] = modes.empty() ? 0.0 : modes[(int)ETM::Normal].time;
     j["estimated_time_fmt"] = stats.estimated_normal_print_time;
     j["total_filament_used_mm"] = stats.total_used_filament;

@@ -89,27 +89,42 @@ run_x86() {
     local out_gcode="${OUT_DIR}/${BASE}-x86.gcode"
     local out_log="${OUT_DIR}/${BASE}-x86.log"
     local mem_log="${OUT_DIR}/${BASE}-x86-mem.log"
+    local stats="${OUT_DIR}/${BASE}-x86-stats.json"
     echo "=== x86 Slice ==="
     [[ ! -x "${X86_CLI}" ]] && { echo "FEHLT: ${X86_CLI}" >&2; return 1; }
     local t0=$(date +%s%N)
+    # Polling-Loop zusaetzlich zur CLI-eigenen getrusage-Zahl: fuer die
+    # Verlaufsdarstellung (mem-log) hilfreich. Peak selbst kommt aus
+    # dem Stats-JSON (peak_memory_kb) und ist nicht vom Poll-Intervall
+    # abhaengig.
     "${X86_CLI}" --machine "${MACHINE}" --process "${PROCESS}" --filament "${FILAMENT}" \
         --resources "${RESOURCES}" --output "${out_gcode}" --bed-type "${BED}" --quiet \
-        "${MODEL}" > "${OUT_DIR}/${BASE}-x86-stats.json" 2> "${out_log}" &
+        "${MODEL}" > "${stats}" 2> "${out_log}" &
     local pid=$!
-    local peak=0
+    local poll_peak=0
     while kill -0 $pid 2>/dev/null; do
         local hwm=$(awk '/^VmHWM:/{print $2}' /proc/$pid/status 2>/dev/null || true)
-        [[ -n "${hwm}" && "${hwm}" -gt "${peak}" ]] && peak=${hwm}
+        [[ -n "${hwm}" && "${hwm}" -gt "${poll_peak}" ]] && poll_peak=${hwm}
         echo "$(date +%s) VmHWM=${hwm:-0}" >> "${mem_log}"
-        sleep 1
+        sleep 0.2
     done
     wait $pid
     local ec=$?
     local t1=$(date +%s%N)
     local ms=$(( (t1 - t0) / 1000000 ))
-    local peak_mb=$(awk "BEGIN{printf \"%.1f\", ${peak}/1024}")
-    echo "x86-exit=${ec}  dauer=${ms}ms  peak-VmHWM=${peak}kB (${peak_mb} MB)" | tee -a "${OUT_DIR}/${BASE}-summary.txt"
-    [[ ${ec} -ne 0 ]] && echo "  stderr: $(tail -1 "${out_log}")" | tee -a "${OUT_DIR}/${BASE}-summary.txt"
+    # getrusage-Peak aus Stats-JSON (immer korrekt, unabhaengig vom
+    # Poll-Intervall).
+    local getrusage_peak=0
+    if [[ -s "${stats}" ]]; then
+        getrusage_peak=$(python3 -c "import json;print(json.load(open('${stats}')).get('peak_memory_kb',0))" 2>/dev/null || echo 0)
+    fi
+    local peak_mb=$(awk "BEGIN{printf \"%.1f\", ${getrusage_peak}/1024}")
+    local poll_mb=$(awk "BEGIN{printf \"%.1f\", ${poll_peak}/1024}")
+    echo "x86-exit=${ec}  dauer=${ms}ms  peak=${getrusage_peak}kB (${peak_mb} MB, getrusage) / ${poll_peak}kB (${poll_mb} MB, Poll 200 ms)" | tee -a "${OUT_DIR}/${BASE}-summary.txt"
+    if [[ ${ec:-99} -ne 0 ]]; then
+        echo "  stderr: $(tail -1 "${out_log}")" | tee -a "${OUT_DIR}/${BASE}-summary.txt"
+    fi
+    return 0
 }
 
 run_arm() {
@@ -162,15 +177,20 @@ wait \$PID; echo exit=\$? )" > "${OUT_DIR}/${BASE}-arm64-mem.log" 2>&1
     local t1=$(date +%s%N)
     local ms=$(( (t1 - t0) / 1000000 ))
 
-    local peak=$(awk '/VmHWM:/ {for(i=1;i<=NF;i++) if ($i=="VmHWM:") {v=$(i+1); if (v+0>m+0) m=v}} END {print m}' "${OUT_DIR}/${BASE}-arm64-mem.log")
+    local poll_peak=$(awk '/VmHWM:/ {for(i=1;i<=NF;i++) if ($i=="VmHWM:") {v=$(i+1); if (v+0>m+0) m=v}} END {print m}' "${OUT_DIR}/${BASE}-arm64-mem.log")
     local thermal_after=$(adb shell "dumpsys thermalservice" | grep -oE 'Thermal Status: [0-9]+' | head -1)
     adb pull "${REMOTE}/out.gcode" "${out_gcode}" >/dev/null 2>&1 || true
     adb pull "${REMOTE}/stats.json" "${OUT_DIR}/${BASE}-arm64-stats.json" >/dev/null 2>&1 || true
     adb pull "${REMOTE}/err.txt"    "${out_log}" >/dev/null 2>&1 || true
     adb shell "rm -rf ${REMOTE}" >/dev/null 2>&1 || true
 
-    local peak_mb=$(awk "BEGIN{printf \"%.1f\", ${peak:-0}/1024}")
-    echo "arm64-exit=${ec:-?}  dauer=${ms}ms  peak-VmHWM=${peak:-0}kB (${peak_mb} MB)  thermal=${thermal_before:-?} / ${thermal_after:-?}" | tee -a "${OUT_DIR}/${BASE}-summary.txt"
+    local getrusage_peak=0
+    if [[ -s "${OUT_DIR}/${BASE}-arm64-stats.json" ]]; then
+        getrusage_peak=$(python3 -c "import json;print(json.load(open('${OUT_DIR}/${BASE}-arm64-stats.json')).get('peak_memory_kb',0))" 2>/dev/null || echo 0)
+    fi
+    local peak_mb=$(awk "BEGIN{printf \"%.1f\", ${getrusage_peak}/1024}")
+    local poll_mb=$(awk "BEGIN{printf \"%.1f\", ${poll_peak:-0}/1024}")
+    echo "arm64-exit=${ec:-?}  dauer=${ms}ms  peak=${getrusage_peak}kB (${peak_mb} MB, getrusage) / ${poll_peak:-0}kB (${poll_mb} MB, Poll 1 s)  thermal=${thermal_before:-?} / ${thermal_after:-?}" | tee -a "${OUT_DIR}/${BASE}-summary.txt"
     [[ "${ec:-99}" -ne 0 ]] && echo "  stderr: $(tail -1 "${out_log}")" | tee -a "${OUT_DIR}/${BASE}-summary.txt"
 }
 
