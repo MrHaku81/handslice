@@ -43,6 +43,34 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-25 22:30 – Stresstest ins Repo (eigener Commit)
+
+- `engine/test/stress-test.sh <modell.stl> [--out <dir>]
+  [--skip-arm64] [--skip-x86] [--bed A|B]`: misst Slice-Dauer,
+  Peak-VmHWM und Thermal-Status (Poco) für x86 und arm64. Keine
+  festverdrahteten Fremdmodelle; der Pfad kommt per Argument.
+- `docs/stress-test.md`: Doku + Messtabelle vom 25.10. mit Modell-
+  Kennzahlen (2 809 436 Dreiecke, 134 MB, 186 × 72 × 209 mm) +
+  Herkunftsangabe für auryn.stl: „Auryn Medallion – Print Ready –
+  FREE" von Droppingformdesigns, cults3d-URL, Lizenz CULTS „Private
+  Use" („No AI"). Hinweis: zum Nachstellen selbst herunterladen.
+  Modell und Bilder davon nicht ins Repo (`.gitignore: /local-test/`).
+- Vorschlag für ein frei lizenziertes Großmodell im selben Dokument –
+  Scan-the-World (CC-BY-SA), Smithsonian 3D (CC0), Stanford
+  Thai Statuette (Educational-Use). Nicht eingebaut; wartet auf
+  Entscheidung.
+
+Smoke-Test gegen den Kerbenwürfel am x86 und am Poco:
+```
+x86-exit=0  dauer=1005ms  peak-VmHWM=2812kB (2.7 MB)
+arm64-exit=0  dauer=2180ms  peak-VmHWM=15184kB (14.8 MB)
+thermal=Status 0 / Status 0
+```
+Der Script liefert Modell-Kennzahlen (bbox + Triangle-Count) ohne
+libslic3r – pure Python.
+
+---
+
 ## 2026-10-25 22:10 – Phase 4.3 Nachtrag: Metrik + Einzel-Beleg + saubere SlicingErrors (STOPP)
 
 ### 1. Metrik angleichen (1172 vs 1367 mm Filament)
