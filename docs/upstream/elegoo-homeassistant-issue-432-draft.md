@@ -53,7 +53,7 @@ Printer reply, ~13 ms round-trip:
 
 After the reply, re-listing with `method 1044` returns 24 files
 again, the test file is **still there**, every other file hash
-unchanged. Klaus confirmed on the printer display that the file was
+unchanged. I confirmed on the printer display that the file was
 still visible.
 
 #### Case B — file that does not exist
