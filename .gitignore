@@ -47,6 +47,7 @@ __pycache__/
 /engine/build-logs/
 /engine/build-deps-*.log
 /engine/build-cli-*.log
+/engine/build-headless-*.log
 
 # Reference G-Code bleibt eingecheckt (siehe engine/test/reference/)
 !/engine/test/reference/*.gcode

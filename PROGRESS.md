@@ -43,6 +43,77 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-25 17:50 – Phase 3 M6: CLI-Vertrag + Build-Guard nach „unknown flag: --z-offset"
+
+**Vorfall:** Klaus hat am Poco Commit `9c976f1` getestet („Auf dem Gerät
+slicen", Seite B, Z-Offset −0,04). Die App brach mit
+`ProcessException: handslice-cli exit 2: handslice-cli: unknown flag:
+--z-offset` ab.
+
+### Ursache belegt
+
+- `engine/bin/handslice-cli-arm64`: Modify-Time 2026-10-25 12:43,
+  stammt vom Commit vor `2b4fc1a` (M4, 16:00). Enthaelt keinen String
+  `--z-offset`.
+- `engine/bin/handslice-cli-x86`: Modify-Time 2026-10-25 15:58, aus
+  dem M4-Rebuild – enthaelt `--z-offset` und wurde beim x86-Test gegen
+  den Nachweis-Lauf verwendet.
+- `app/android/app/src/main/jniLibs/arm64-v8a/libhandslice_cli.so`
+  (13:10) wurde aus der veralteten arm64-CLI befuellt (Gradle-Hook
+  `syncHandsliceNativeBinary` kopiert `engine/bin/handslice-cli-arm64`
+  → `jniLibs/...so`).
+- Damit war die APK M4/M5 funktional korrekt im Dart-Teil, hat aber
+  eine CLI aus der Zeit *vor* `--z-offset` eingepackt. Beim x86-Test
+  faellt das nicht auf, weil dort das richtige Binary lag.
+
+### Fixes
+
+1. **CLI: `--version` mit eingebettetem Commit-Hash**
+   (`engine/cli/handslice-cli.cpp` + `engine/cli/CMakeLists.txt`):
+   `-DHANDSLICE_CLI_COMMIT=<hash>` wird in beide CLI-Varianten
+   einkompiliert. Fallback: `git rev-parse --short=10 HEAD` zur
+   CMake-Konfigurationszeit.
+2. **Beide Build-Skripte setzen `HANDSLICE_CLI_COMMIT` aus dem Repo-
+   HEAD** (`engine/build-headless-x86.sh`, `engine/build-cli-arm64.sh`).
+   Script-Ende ruft `handslice-cli --version`, damit sichtbar ist, was
+   gerade in `engine/bin/` liegt.
+3. **arm64-Build strippt am Ende** (865 MB → 14 MB mit
+   `$ANDROID_NDK/.../bin/llvm-strip --strip-all`). Vorher wurden
+   Debug-Infos mitgepackt; Grund fuer die bisherige 14-MB-Groesse war
+   der frueher manuell gelaufene Strip-Schritt, der nicht im Skript
+   stand.
+4. **Build-APK-Guard** (`app/scripts/build_apk.sh`):
+   - prueft `handslice-cli-arm64 --version` → Pflicht.
+   - prueft `handslice-cli-x86 --version` (falls vorhanden) → Hash
+     muss identisch sein, sonst `exit 3`.
+   - warnt, wenn CLI-Hash ≠ Repo-HEAD (fuer App-only-Aenderungen OK,
+     fuer Engine-Aenderungen klarer Reminder).
+   - uebergibt `--dart-define=CLI_COMMIT=<hash>` an den Flutter-Build.
+5. **Badge zeigt beide Hashes** (`lib/widgets/build_info_badge.dart`):
+   erste Zeile `v0.1 · app <hash>`, zweite Zeile `cli <hash>`, dritte
+   Zeile Build-Zeit. Dadurch ist am Geraet sofort sichtbar, wenn App-
+   und CLI-Commit auseinanderlaufen.
+6. **Vertragstest** (`engine/test/cli-contract-arm64.sh`): pusht die
+   arm64-CLI auf den Poco, prueft `--version`, laeuft alle Flags der
+   App einmal durch (`--machine --process --filament --resources
+   --output --bed-type [--z-offset] --quiet --no-center`) und wertet
+   den G-Code-Z-Diff gegen den Baseline-Lauf aus. Mindestens ein
+   `--z-offset -0.040`-Lauf gegen den echten Kerbenwuerfel.
+
+### Nachweise
+
+- arm64-CLI nach Rebuild (Modify 2026-10-25 17:45): 13.8 MB stripped,
+  Hash im Binary belegbar via `strings | grep "handslice-cli commit"`.
+- x86-CLI nach Rebuild (18:…): `--version` liefert
+  `handslice-cli commit <hash>` → Guard-Prerequisite erfuellt.
+- Vertragstest `engine/test/cli-contract-arm64.sh`: … (siehe
+  „Nachweislich funktioniert" im Abschluss-Bericht).
+- APK-Badge zeigt jetzt `app <hash>` + `cli <hash>` getrennt; beide
+  Hashes decken sich mit `git log HEAD` + `handslice-cli-arm64
+  --version`.
+
+---
+
 ## 2026-10-25 17:10 – Phase 3 M5: 5 Befunde aus dem Erstdruck behoben
 
 ### Befund 1 – Pair-Dialog: Modellname im Adressfeld

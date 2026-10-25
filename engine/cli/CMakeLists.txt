@@ -32,6 +32,26 @@ add_executable(handslice-cli
     nanosvg_impl.cpp
 )
 
+# HANDSLICE_CLI_COMMIT: Repo-HEAD-Kurz-Hash, in die Binary einkompiliert.
+# Vom umgebenden Build-Skript via -DHANDSLICE_CLI_COMMIT=<hash> gesetzt;
+# als Fallback hier aus git abfragen, damit lokale Builds nicht leer sind.
+if (NOT DEFINED HANDSLICE_CLI_COMMIT)
+    execute_process(
+        COMMAND git rev-parse --short=10 HEAD
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        OUTPUT_VARIABLE HANDSLICE_CLI_COMMIT
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+    )
+    if (NOT HANDSLICE_CLI_COMMIT)
+        set(HANDSLICE_CLI_COMMIT "unknown")
+    endif ()
+endif ()
+message(STATUS "handslice-cli commit: ${HANDSLICE_CLI_COMMIT}")
+target_compile_definitions(handslice-cli PRIVATE
+    HANDSLICE_CLI_COMMIT="${HANDSLICE_CLI_COMMIT}"
+)
+
 target_include_directories(handslice-cli SYSTEM PRIVATE
     ${ORCA_SOURCE_DIR}/src
     ${ORCA_SOURCE_DIR}/deps_src

@@ -63,15 +63,25 @@ cmake -S "${ORCA_DIR}" -B "${ORCA_BUILD_DIR}" -G Ninja \
 cmake --build "${ORCA_BUILD_DIR}" -j "${JOBS}" --target libslic3r libslic3r_cgal libnest2d
 
 echo "=== 4/4  Baue handslice-cli (${CLI_BUILD_DIR}) ==="
+# HANDSLICE_CLI_COMMIT: wird in die Binary einkompiliert und per --version
+# abfragbar. Dient dem Build-APK-Guard, der x86- und arm64-CLI auf
+# Byte-Gleichheit im Commit prueft.
+CLI_COMMIT="$(cd "${PROJECT_ROOT}" && git rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"
 cmake -S "${CLI_SRC_DIR}" -B "${CLI_BUILD_DIR}" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DORCA_SOURCE_DIR="${ORCA_DIR}" \
     -DORCA_BUILD_DIR="${ORCA_BUILD_DIR}" \
-    -DORCA_DEPS_PREFIX="${DEPS_DESTDIR}"
+    -DORCA_DEPS_PREFIX="${DEPS_DESTDIR}" \
+    -DHANDSLICE_CLI_COMMIT="${CLI_COMMIT}"
 cmake --build "${CLI_BUILD_DIR}" -j "${JOBS}" --target handslice-cli
 
 mkdir -p "${BIN_DIR}"
 install -m 0755 "${CLI_BUILD_DIR}/handslice-cli" "${BIN_DIR}/handslice-cli-x86"
+# Side-car-Datei mit dem Commit-Hash – symmetrisch zum arm64-Build
+# (siehe engine/build-cli-arm64.sh). build_apk.sh prueft beide Dateien
+# gegeneinander (nicht die Binaries ausfuehren – Cross-Compile).
+echo -n "${CLI_COMMIT}" > "${BIN_DIR}/handslice-cli-x86.commit"
 echo "--> ${BIN_DIR}/handslice-cli-x86"
 file "${BIN_DIR}/handslice-cli-x86"
+"${BIN_DIR}/handslice-cli-x86" --version
 "${BIN_DIR}/handslice-cli-x86" --help | head -20 || true

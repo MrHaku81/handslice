@@ -144,6 +144,19 @@ Args parse_args(int argc, char** argv) {
             }
         }
         else if (arg == "--help" || arg == "-h") { usage(std::cout); std::exit(0); }
+        else if (arg == "--version") {
+            // Zweck: Build-Script-Guard und App-Badge koennen so belegen,
+            // dass die arm64- und x86-Binaries aus demselben Quellstand
+            // kommen. HANDSLICE_CLI_COMMIT wird vom umgebenden Build-Skript
+            // via -D auf den Repo-HEAD-Hash gesetzt (siehe
+            // engine/cli/CMakeLists.txt). Format: eine Zeile mit dem
+            // Kurz-Hash, damit Scripts einfach vergleichen koennen.
+#ifndef HANDSLICE_CLI_COMMIT
+#define HANDSLICE_CLI_COMMIT "unknown"
+#endif
+            std::cout << "handslice-cli commit " << HANDSLICE_CLI_COMMIT << "\n";
+            std::exit(0);
+        }
         else if (!arg.empty() && arg[0] == '-') die("unknown flag: " + arg);
         else {
             if (!a.input_path.empty())

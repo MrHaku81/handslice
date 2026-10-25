@@ -80,16 +80,32 @@ echo "   encoding-check: build.ninja auf Host-Binary ${HOST_EC} umgebogen"
 cmake --build "${ORCA_BUILD_DIR}" -j "${JOBS}" --target libslic3r libslic3r_cgal libnest2d
 
 echo "=== 2/2  Baue handslice-cli fuer arm64 (${CLI_BUILD_DIR}) ==="
+# HANDSLICE_CLI_COMMIT: wird in die Binary einkompiliert und per --version
+# abfragbar. Dient dem Build-APK-Guard, der x86- und arm64-CLI auf
+# Byte-Gleichheit im Commit prueft.
+CLI_COMMIT="$(cd "${PROJECT_ROOT}" && git rev-parse --short=10 HEAD 2>/dev/null || echo unknown)"
 cmake -S "${CLI_SRC_DIR}" -B "${CLI_BUILD_DIR}" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="${TOOLCHAIN_FILE}" \
     -DORCA_SOURCE_DIR="${ORCA_DIR}" \
     -DORCA_BUILD_DIR="${ORCA_BUILD_DIR}" \
     -DORCA_DEPS_PREFIX="${DEPS_DESTDIR}" \
-    -DHANDSLICE_ANDROID=1
+    -DHANDSLICE_ANDROID=1 \
+    -DHANDSLICE_CLI_COMMIT="${CLI_COMMIT}"
 cmake --build "${CLI_BUILD_DIR}" -j "${JOBS}" --target handslice-cli
 
 mkdir -p "${BIN_DIR}"
 install -m 0755 "${CLI_BUILD_DIR}/handslice-cli" "${BIN_DIR}/handslice-cli-arm64"
+# Debug-Info strippen (sonst ca. 865 MB; stripped ~14 MB). jniLibs
+# werden in der APK als .so transportiert und am Geraet extrahiert –
+# jedes MB zaehlt. llvm-strip aus dem NDK, nicht die System-Variante,
+# damit das Format sicher passt.
+STRIP="${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+"${STRIP}" --strip-all "${BIN_DIR}/handslice-cli-arm64"
+# Side-car-Datei mit dem Commit-Hash – fuer den Build-Guard auf dem
+# x86-Host (der das arm64-Binary nicht ausfuehren kann, also nicht
+# --version aufrufen kann).
+echo -n "${CLI_COMMIT}" > "${BIN_DIR}/handslice-cli-arm64.commit"
 echo "--> ${BIN_DIR}/handslice-cli-arm64"
 file "${BIN_DIR}/handslice-cli-arm64"
+echo "HANDSLICE_CLI_COMMIT (eingebettet): ${CLI_COMMIT}"
