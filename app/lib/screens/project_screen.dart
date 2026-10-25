@@ -4,8 +4,10 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
+import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
+import '../widgets/printer_panel.dart';
 import '../widgets/workshop_card.dart';
 import '../widgets/workshop_row.dart';
 
@@ -14,10 +16,12 @@ class ProjectScreen extends StatefulWidget {
     super.key,
     required this.slicer,
     required this.projectState,
+    required this.printerState,
   });
 
   final SlicerService slicer;
   final ProjectState projectState;
+  final PrinterState printerState;
 
   @override
   State<ProjectScreen> createState() => _ProjectScreenState();
@@ -108,30 +112,13 @@ class _ProjectScreenState extends State<ProjectScreen> {
                   ),
                 ),
                 const Divider(),
-                WorkshopRow(
-                  label: l.projectZOffset,
-                  value: _formatZ(state.zOffsetFor(state.bedType)),
-                  mono: true,
-                ),
-                const Divider(),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(l.projectFilaments, style: theme.textTheme.bodySmall),
-                      const SizedBox(height: 8),
-                      const _FilamentSlotRow(
-                        index: 0,
-                        slot: 'A4',
-                        material: 'Elegoo RAPID PLA+ (weiß)',
-                      ),
-                    ],
-                  ),
-                ),
+                _ZOffsetRow(state: state),
               ],
             ),
           ),
+
+          const SizedBox(height: 12),
+          PrinterPanel(printer: widget.printerState),
 
           if (state.isSlicing) ...[
             const SizedBox(height: 12),
@@ -176,7 +163,120 @@ class _ProjectScreenState extends State<ProjectScreen> {
 
 String _formatZ(double mm) {
   final sign = mm >= 0 ? '+' : '−';
-  return '$sign${mm.abs().toStringAsFixed(3)} mm';
+  return '$sign${mm.abs().toStringAsFixed(2)} mm';
+}
+
+class _ZOffsetRow extends StatelessWidget {
+  const _ZOffsetRow({required this.state});
+
+  final ProjectState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final value = state.zOffsetFor(state.bedType);
+    final atMin = value <= ProjectState.zOffsetMin + 1e-9;
+    final atMax = value >= ProjectState.zOffsetMax - 1e-9;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(l.projectZOffset, style: theme.textTheme.bodySmall),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              _ZStepper(
+                icon: Icons.remove,
+                tooltip: l.projectZOffsetDecrement,
+                enabled: !atMin,
+                onTap: () => state.nudgeZOffset(
+                  state.bedType,
+                  -ProjectState.zOffsetStep,
+                ),
+              ),
+              Expanded(
+                child: Center(
+                  child: Text(
+                    _formatZ(value),
+                    style: monoStyle(context,
+                        fontSize: 18, fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ),
+              _ZStepper(
+                icon: Icons.add,
+                tooltip: l.projectZOffsetIncrement,
+                enabled: !atMax,
+                onTap: () => state.nudgeZOffset(
+                  state.bedType,
+                  ProjectState.zOffsetStep,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            l.projectZOffsetHint,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: WorkshopTokens.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ZStepper extends StatelessWidget {
+  const _ZStepper({
+    required this.icon,
+    required this.tooltip,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String tooltip;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      canRequestFocus: enabled,
+      child: Builder(
+        builder: (ctx) {
+          final focused = Focus.of(ctx).hasFocus;
+          final color = enabled ? WorkshopTokens.text : WorkshopTokens.textMuted;
+          return Semantics(
+            label: tooltip,
+            button: true,
+            enabled: enabled,
+            child: GestureDetector(
+              onTap: enabled ? onTap : null,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 90),
+                width: WorkshopTokens.minTapTarget,
+                height: WorkshopTokens.minTapTarget,
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: focused
+                        ? WorkshopTokens.accent
+                        : WorkshopTokens.border,
+                    width: focused ? 2 : 1,
+                  ),
+                  borderRadius: BorderRadius.circular(WorkshopTokens.radiusMedium),
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, color: color, size: 22),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
 class _PlateChooser extends StatelessWidget {
@@ -260,50 +360,6 @@ class _PlateButton extends StatelessWidget {
           );
         },
       ),
-    );
-  }
-}
-
-class _FilamentSlotRow extends StatelessWidget {
-  const _FilamentSlotRow({required this.index, required this.slot, required this.material});
-
-  final int index;
-  final String slot;
-  final String material;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            border: Border.all(color: WorkshopTokens.border),
-            borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
-          ),
-          alignment: Alignment.center,
-          child: Text('T$index',
-              style: monoStyle(context, fontSize: 12, color: WorkshopTokens.textMuted)),
-        ),
-        const SizedBox(width: 10),
-        const Icon(Icons.arrow_right_alt, color: WorkshopTokens.textMuted, size: 20),
-        const SizedBox(width: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: WorkshopTokens.accent.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
-          ),
-          child: Text(slot,
-              style: monoStyle(context,
-                  fontSize: 13,
-                  color: WorkshopTokens.accent,
-                  fontWeight: FontWeight.w500)),
-        ),
-        const SizedBox(width: 10),
-        Expanded(child: Text(material, style: Theme.of(context).textTheme.bodyMedium)),
-      ],
     );
   }
 }

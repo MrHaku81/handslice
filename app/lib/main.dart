@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'engine/slicer.dart';
@@ -7,6 +8,7 @@ import 'l10n/app_localizations.dart';
 import 'screens/project_screen.dart';
 import 'screens/print_screen.dart';
 import 'screens/settings_screen.dart';
+import 'state/printer_state.dart';
 import 'state/project_state.dart';
 import 'theme/workshop_theme.dart';
 
@@ -31,8 +33,18 @@ Future<void> main() async {
     debugPrint('SlicerService.init() fehlgeschlagen: $e');
   }
   final projectState = ProjectState(prefs);
+  // flutter_secure_storage 11.x: AndroidOptions nutzt EncryptedSharedPreferences
+  // als Default-Backend (JetSec); kein eigener Flag mehr noetig.
+  final printerState = PrinterState(
+    prefs: prefs,
+    secure: const FlutterSecureStorage(aOptions: AndroidOptions.defaultOptions),
+  );
 
-  runApp(HandsliceApp(slicer: slicer, projectState: projectState));
+  runApp(HandsliceApp(
+    slicer: slicer,
+    projectState: projectState,
+    printerState: printerState,
+  ));
 }
 
 class HandsliceApp extends StatelessWidget {
@@ -40,10 +52,12 @@ class HandsliceApp extends StatelessWidget {
     super.key,
     required this.slicer,
     required this.projectState,
+    required this.printerState,
   });
 
   final SlicerService slicer;
   final ProjectState projectState;
+  final PrinterState printerState;
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +67,11 @@ class HandsliceApp extends StatelessWidget {
       supportedLocales: AppLocalizations.supportedLocales,
       theme: buildWorkshopTheme(),
       debugShowCheckedModeBanner: false,
-      home: RootShell(slicer: slicer, projectState: projectState),
+      home: RootShell(
+        slicer: slicer,
+        projectState: projectState,
+        printerState: printerState,
+      ),
     );
   }
 }
@@ -63,10 +81,12 @@ class RootShell extends StatefulWidget {
     super.key,
     required this.slicer,
     required this.projectState,
+    required this.printerState,
   });
 
   final SlicerService slicer;
   final ProjectState projectState;
+  final PrinterState printerState;
 
   @override
   State<RootShell> createState() => _RootShellState();
@@ -79,8 +99,15 @@ class _RootShellState extends State<RootShell> {
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final screens = [
-      ProjectScreen(slicer: widget.slicer, projectState: widget.projectState),
-      PrintScreen(projectState: widget.projectState),
+      ProjectScreen(
+        slicer: widget.slicer,
+        projectState: widget.projectState,
+        printerState: widget.printerState,
+      ),
+      PrintScreen(
+        projectState: widget.projectState,
+        printerState: widget.printerState,
+      ),
       const SettingsScreen(),
     ];
 

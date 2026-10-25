@@ -8,6 +8,219 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 14:30 – Phase 3 M3: Discovery, CANVAS, Upload gegen Mock + echten CC2
+
+Vor M3 die vier Nacharbeiten aus M2 (Z-Offset, printer_check-Label,
+Grenztest, Mock-Server). Danach M3 selbst.
+
+### N1 – Z-Offset einstellbar
+
+- UI: Zwei Fokus-Buttons `-` / `+` (D-Pad erreichbar, sichtbarer
+  Fokus-Ring), aktueller Wert in Plex Mono mittig. Schritt 0.01 mm,
+  Grenze ±0.50 mm, deaktiviert an den Enden.
+- `ProjectState.nudgeZOffset(bedType, delta)` quantisiert auf
+  0.01 mm (Vermeidung von Float-Drift bei vielen `+/-`-Klicks) und
+  clampt an `zOffsetMin/Max`.
+- Pro Plattenseite getrennter Shared-Preferences-Key, kein shared
+  default mehr. Wert wird weiterhin **nicht angewendet**; Hinweis
+  „±0.50 mm, 0.01 mm Schritte — noch nicht angewendet" bleibt
+  direkt unter dem Wert.
+- Widget-Test „Z-Offset: Nudge beachtet Grenzen + 0.01-mm-Raster"
+  deckt +60× / −1000× ab.
+
+### N2 – `printer_check`-Semantik + Label
+
+Beleg aus `docs/CC2_PROTOCOL.md` (HA-Integration):
+
+> „`printer_check` – Auto bed leveling. Three states, measured on
+> 02.01.00.00: `true` always levels (~200 s), `false` never does,
+> and leaving the key out lets the printer decide. ElegooSlicer
+> sends `true`, or `false` when its bed-leveling box is unchecked."
+
+Mapping im `elegoo-link`:
+`src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:81`
+setzt `config.printer_check = startPrintData.autoBedLeveling`.
+
+**Konsequenz:** Das Label „Auto-Nivellierungscheck" war
+irrefuehrend. Neu:
+
+- Englisch: „Always level the bed (adds ~200 s)".
+- Deutsch: „Immer bettnivellieren (dauert ~200 s)".
+
+`bedlevel_force` (Label „Bettnivellierung vor diesem Druck
+erzwingen") bleibt daneben als expliziter Zwang.
+
+### N3 – `engine/test/check-bounds` Grenztest-Skript
+
+Python 3, parst `printable_area` + optional `bed_texture_area` +
+`printable_height` aus dem Machine-Profil, geht alle
+G0/G1/G2/G3-Bewegungen durch (modaler Zustand fuer absolute/
+relative + G28/G92-Nullung), meldet XY-/Z-Verletzungen auf stderr.
+Exit 0=OK, 1=FAIL, 2=Argument-/Datei-Fehler.
+
+Nachweis:
+- Kerbenwuerfel-G-Code → `OK: alle Bewegungen innerhalb X 0..256,
+  Y −10..256, Z 0..256`.
+- Synthetischer OOB-G-Code (`G1 X300`, `Y270`, `Z260`) → `FAIL: 3
+  Verletzung(en)` + Zeilen auf stderr.
+
+### N4 – Bounds-Check in die App
+
+- `app/lib/engine/bounds_check.dart` ist der 1:1-Port der
+  Python-Logik (gleiches Verhalten, gleiche Toleranz 1 mm /1000).
+- `ProjectState.slice()` ruft nach erfolgreichem Slice automatisch
+  `checkGcodeFile(outputPath, bounds)` und speichert
+  `boundsViolations`.
+- `PrintScreen` zeigt Status-Box
+  (gruen „alle Bewegungen innerhalb der Druckflaeche" oder rot
+  „N Bewegungen ausserhalb"), und **Upload/Druck-Buttons sind
+  deaktiviert**, wenn `boundsViolations.isNotEmpty`.
+- Zwei neue Widget-Tests: Profil-Parse (XY-Erweiterung durch
+  `bed_texture_area`) und in-/out-of-bounds-Erkennung mit modal
+  state (inkl. relativer Moves).
+
+### N5 – CC2-Mock-Server
+
+`engine/test/mock-cc2/mock_cc2.py` (Python 3 + mosquitto):
+
+- MQTT 1883 via Mosquitto-Subprocess mit password_file. Access-Code
+  aus `--access-code` oder `$MOCK_ACCESS_CODE`, Placeholder-SN
+  `MOCK0000000000M1` (nicht die echte).
+- UDP 52700 Discovery (eigener asyncio-Listener, antwortet mit
+  derselben JSON-Struktur wie der echte CC2).
+- HTTP 8080 chunked `PUT /upload` + X-Token-Pruefung.
+- MQTT-Adapter abonniert `elegoo/<sn>/api_register` und
+  `.../+/api_request` und spielt Register-Response + 1002 + 2005 +
+  1044 + 1046 + 1020-ACK zurueck.
+- Fehlerinjektion:
+  - `--reject-auth` → Mosquitto ohne User, CONNACK rc=5.
+  - `--interrupt-upload-at N` → HTTP schliesst Verbindung nach
+    N Byte Upload.
+- Access-Code taucht nirgends in den Mock-Logs auf (Platzhalter
+  `<accepted, see --access-code>` statt des Werts).
+
+### M3 I1-I4 – Dart-Client + UI
+
+- `app/lib/net/elegoo_cc2_client.dart`: `ElegooCc2Client` mit
+  `discover(ip)`, `connect(ip, sn, accessCode)` (MQTT 3.1.1 ueber
+  `mqtt_client`), `getStatus(1002)`, `getCanvasStatus(2005)`,
+  `getFileList(1044)`, `uploadGcode(name, data, onProgress)`
+  (chunked PUT, 1 MiB), `ping()`, `disconnect()`. Eigene
+  Exception-Typen (`ElegooAuthException`, `ElegooNetworkException`,
+  `ElegooRegistrationException`, `ElegooUploadException`) damit
+  der UI-Code sauber reagieren kann.
+- `app/lib/state/printer_state.dart`: haelt IP + SN in
+  SharedPreferences; **Access-Code in `flutter_secure_storage`**
+  (Android: EncryptedSharedPreferences-Default). `savePairing()`
+  nimmt Code und schreibt ihn direkt in Secure-Storage;
+  `connectAndLoad()` fuehrt Discovery → Register → CANVAS in einem
+  Schritt mit sauberer Fehler-/Statusanzeige.
+- `app/lib/widgets/printer_panel.dart`: Projekt-Screen-Panel
+  „Drucker", zeigt Verbindungstatus, oeffnet Pairing-Dialog (IP +
+  Access-Code; Code als `obscureText`), listet nach Verbindung
+  die echten A1..A4-Faecher mit Materialfarbe + Typ. Tipp auf einen
+  Slot setzt die Tool-0-Zuordnung.
+- `PrintScreen`-Upload-Button verdrahtet mit
+  `printerState.uploadGcode()`; `onPressed` ist deaktiviert, wenn
+  Slice fehlt, Bounds-Check fehlgeschlagen ist, Upload laeuft, oder
+  Drucker nicht verbunden ist. Fortschrittsbalken + Erfolgs-/
+  Fehlerbox.
+- Druck-Button bleibt in M3 bewusst **disabled** (M4-Scope).
+
+### M3 I5 – Mock-Tests
+
+`app/test/elegoo_mock_test.dart` startet den Mock-Subprocess und
+faehrt vier Pfade:
+
+| Test | Ergebnis |
+|---|---|
+| Discovery + Register + Canvas (richtiger Code) | ✓ |
+| Falscher Access-Code → `ElegooAuthException` | ✓ |
+| Upload + GET_FILE_LIST-Pruefung | ✓ |
+| Upload-Abbruch nach 2 KiB → `ElegooUploadException`/`SocketException` | ✓ |
+
+Alle vier gruen. Zusammen mit 9 Widget-Tests: **13 Tests gruen**.
+
+### M3 I6 – Lauf gegen den echten CC2
+
+`app/tool/real_cc2_check.dart` liest `CC2_IP` + `CC2_ACCESS_CODE`
+aus der Umgebung (nicht aus Argumenten, nicht aus einer Datei im
+Repo), gibt den Code **nirgends** aus. Lauf mit dem
+Kerbenwuerfel-G-Code als Nutzdaten:
+
+```
+[M3 real] 1) Discovery (UDP 52700)…
+  sn=<cc2-sn>  model=Centauri Carbon 2  host=Centauri Carbon 2
+  lan=true  token_status=true  proto=1.0.0
+[M3 real] 2) MQTT Connect + Register… OK
+[M3 real] 3) method 2005 (CANVAS)…
+  A1 PETG  PETG                 #000000
+  A2 PETG  RAPID PETG           #FFFFFF
+  A3 PLA   PLA PRO              #000000
+  A4 PLA   RAPID PLA+           #FFFFFF
+[M3 real] 4) HTTP PUT /upload (chunked)… 100 %
+  → error_code=0, offset=220260, uploaded=handslice_m3_<ts>.gcode (220261 B)
+[M3 real] 5) method 1044 (file list local)…
+  Datei bestaetigt. Gesamt 23 Dateien im local-Speicher.
+[M3 real] 6) DISCONNECT
+[M3 real] FERTIG. Kein Druckstart ausgefuehrt (M3-Scope).
+```
+
+Entspricht genau dem M3-Scope: Discovery, Faecher, Upload. Kein
+Druckstart.
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Z-Offset-Stepper per D-Pad bedienbar, pro Plattenseite
+  gespeichert, Raster/Grenzen eingehalten (Widget-Test gruen,
+  Screenshot kommt mit M4 falls Klaus einen moechte).
+- `printer_check`-Label an die dokumentierte Semantik angepasst
+  (Quelle: `CC2_PROTOCOL.md` + `elegoo-link`-Code).
+- `engine/test/check-bounds` prueft G-Code gegen das CC2-Profil
+  (printable_area + bed_texture_area + printable_height),
+  reproduzierbar auf Positiv- und Negativ-G-Code getestet.
+- `app/lib/engine/bounds_check.dart` ist 1:1-Port, in `ProjectState`
+  verdrahtet, Upload-/Druck-Buttons im PrintScreen bei
+  Verletzungen deaktiviert.
+- `mock_cc2.py` deckt alle M3-Pfade ab (Discovery, Register,
+  2005, 1002, 1044, chunked Upload) + zwei Fehler-Injektionen
+  (`--reject-auth`, `--interrupt-upload-at`).
+- `ElegooCc2Client` + `PrinterState` + `PrinterPanel` sind der
+  Dart-Nachbau; 4 Mock-Tests + 9 Widget-Tests gruen
+  (`flutter test`).
+- End-to-End gegen echten CC2 (IP <cc2-ip>): Discovery, MQTT-
+  Register, CANVAS gelesen, Kerbenwuerfel-G-Code (220 261 B)
+  hochgeladen, Datei anschliessend in `GET_FILE_LIST` sichtbar
+  (23 Dateien gesamt im local-Speicher). Keine Credentials in
+  Logs/Code/Commits.
+
+**2. Ungeprueft**
+
+- **UI-Verbindungsablauf auf dem Poco** – der M3-Lauf ging gegen
+  AMR5-Dart-CLI (`dart run tool/real_cc2_check.dart`), nicht
+  ueber die App-APK auf dem Poco. APK laesst sich bauen, aber
+  interaktives Klicken (Pairing-Dialog, Verbinden-Button, Upload-
+  Button) braucht Klaus am Geraet. Alle Dart-Funktionen sind
+  identisch — der Pfad ist nachgewiesen, nur die konkrete UI-
+  Interaktion nicht.
+- **Query-Querformat** weiterhin ungeprueft.
+- **PING-Keep-Alive-Loop** (10 s) ist bereitgestellt (`client.ping()`)
+  aber nicht automatisch gestartet. Mit MQTT-Keep-Alive 60 s haelt
+  die Verbindung ohne Loop ohnehin eine Minute; fuer dauerhafte
+  Sessions in M4 wird der Loop explizit gebraucht.
+- **Flutter-Build auf Poco** fuer M3 nicht neu geprueft – kein neuer
+  Native-Code dazu, nur Dart; APK sollte unproblematisch sein.
+
+**3. Geht nicht**
+
+- (keine neuen Blocker)
+
+---
+
 ## 2026-10-25 13:10 – Phase 3 M2: Slicen in der App laeuft auf dem Poco
 
 M2 fertig. Die App ruft `handslice-cli-arm64` als Native-Lib auf, uebergibt

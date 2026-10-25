@@ -49,10 +49,68 @@ class AppLocalizationsDe extends AppLocalizations {
   String get projectProfile => 'Profil';
 
   @override
+  String get projectPrinterSection => 'Drucker';
+
+  @override
+  String get projectPrinterNotPaired => 'Kein Drucker gekoppelt.';
+
+  @override
+  String get projectPrinterPair => 'Drucker koppeln…';
+
+  @override
+  String get projectPrinterConnect => 'Verbinden & Fächer laden';
+
+  @override
+  String get projectPrinterConnecting => 'Verbinde…';
+
+  @override
+  String projectPrinterConnected(String host) {
+    return 'Verbunden ($host).';
+  }
+
+  @override
+  String get projectPrinterAuthError =>
+      'Zugangscode abgelehnt. Erneut koppeln.';
+
+  @override
+  String projectPrinterNetError(String msg) {
+    return 'Netz-/Discovery-Fehler: $msg';
+  }
+
+  @override
+  String get projectPrinterLanOffHint =>
+      'Der Drucker lehnt LAN-Verbindungen ab. »Nur LAN« am Display einschalten.';
+
+  @override
+  String get pairDialogTitle => 'Mit CC2 koppeln';
+
+  @override
+  String get pairDialogIp => 'Drucker-IP (z. B. <cc2-ip>)';
+
+  @override
+  String get pairDialogCode => 'Zugangscode (Drucker-Display)';
+
+  @override
+  String get pairDialogSave => 'Speichern';
+
+  @override
+  String get pairDialogCancel => 'Abbrechen';
+
+  @override
   String get projectFilaments => 'Filamente / Slot-Zuordnung';
 
   @override
   String get projectZOffset => 'Z-Offset pro Seite (nur gespeichert)';
+
+  @override
+  String get projectZOffsetDecrement => 'Z-Offset um 0,01 mm verringern';
+
+  @override
+  String get projectZOffsetIncrement => 'Z-Offset um 0,01 mm erhöhen';
+
+  @override
+  String get projectZOffsetHint =>
+      '±0,50 mm, Schritte 0,01 mm — noch nicht angewendet.';
 
   @override
   String get projectSliceButton => 'Auf dem Gerät slicen';
@@ -79,13 +137,22 @@ class AppLocalizationsDe extends AppLocalizations {
   String get printFilamentLabel => 'Filament';
 
   @override
-  String get printBedLeveling => 'Bettnivellierung vor dem Druck erzwingen';
+  String get printBedLeveling => 'Bettnivellierung vor diesem Druck erzwingen';
 
   @override
-  String get printAutoLevelCheck => 'Auto-Nivellierungscheck';
+  String get printPrinterCheck => 'Immer bettnivellieren (dauert ~200 s)';
 
   @override
   String get printTimelapse => 'Zeitraffer aufnehmen';
+
+  @override
+  String get printBoundsOk =>
+      'Grenztest: alle Bewegungen innerhalb der Druckfläche.';
+
+  @override
+  String printBoundsFail(int count) {
+    return 'Grenztest fehlgeschlagen: $count Bewegung(en) außerhalb der Druckfläche/-höhe. Upload gesperrt.';
+  }
 
   @override
   String get printUploadButton => 'An den Drucker hochladen';

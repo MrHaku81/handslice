@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'bounds_check.dart';
+
 // Slice-Ergebnis. Spiegelt das JSON wider, das die CLI auf stdout
 // ausgibt (siehe handslice-cli.cpp emit_statistics).
 class SliceResult {
@@ -57,6 +59,17 @@ class SlicerService {
   String? _resourcesDir;
 
   bool get isReady => _binaryPath != null && _resourcesDir != null;
+
+  // Machine-Profil-Pfad fuer den Bounds-Check. Oeffentlich, damit die
+  // UI das Profil fuer BoundsRect laden kann, ohne die Pfade erneut
+  // zusammenzusetzen.
+  String get machineProfilePath =>
+      '${_resourcesDir!}/profiles/Elegoo/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json';
+
+  Future<BoundsRect> loadBounds() async {
+    final f = await File(machineProfilePath).readAsString();
+    return boundsFromProfile(jsonDecode(f) as Map<String, dynamic>);
+  }
 
   // Fuer Tests injizierbar. Produktion ruft Platform-Channel + Asset-Bundle.
   Future<void> init({

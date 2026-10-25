@@ -176,6 +176,90 @@ abstract class AppLocalizations {
   /// **'Profile'**
   String get projectProfile;
 
+  /// No description provided for @projectPrinterSection.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer'**
+  String get projectPrinterSection;
+
+  /// No description provided for @projectPrinterNotPaired.
+  ///
+  /// In en, this message translates to:
+  /// **'No printer paired.'**
+  String get projectPrinterNotPaired;
+
+  /// No description provided for @projectPrinterPair.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair printer…'**
+  String get projectPrinterPair;
+
+  /// No description provided for @projectPrinterConnect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect & load slots'**
+  String get projectPrinterConnect;
+
+  /// No description provided for @projectPrinterConnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting…'**
+  String get projectPrinterConnecting;
+
+  /// No description provided for @projectPrinterConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Connected ({host}).'**
+  String projectPrinterConnected(String host);
+
+  /// No description provided for @projectPrinterAuthError.
+  ///
+  /// In en, this message translates to:
+  /// **'Access-code rejected. Re-pair.'**
+  String get projectPrinterAuthError;
+
+  /// No description provided for @projectPrinterNetError.
+  ///
+  /// In en, this message translates to:
+  /// **'Network / discovery error: {msg}'**
+  String projectPrinterNetError(String msg);
+
+  /// No description provided for @projectPrinterLanOffHint.
+  ///
+  /// In en, this message translates to:
+  /// **'The printer rejects LAN connections. Enable \'LAN only\' at the printer display.'**
+  String get projectPrinterLanOffHint;
+
+  /// No description provided for @pairDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair with CC2'**
+  String get pairDialogTitle;
+
+  /// No description provided for @pairDialogIp.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer IP (e.g. <cc2-ip>)'**
+  String get pairDialogIp;
+
+  /// No description provided for @pairDialogCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Access code (printer display)'**
+  String get pairDialogCode;
+
+  /// No description provided for @pairDialogSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get pairDialogSave;
+
+  /// No description provided for @pairDialogCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get pairDialogCancel;
+
   /// No description provided for @projectFilaments.
   ///
   /// In en, this message translates to:
@@ -187,6 +271,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Z-offset per plate (saved only)'**
   String get projectZOffset;
+
+  /// No description provided for @projectZOffsetDecrement.
+  ///
+  /// In en, this message translates to:
+  /// **'Decrease Z-offset by 0.01 mm'**
+  String get projectZOffsetDecrement;
+
+  /// No description provided for @projectZOffsetIncrement.
+  ///
+  /// In en, this message translates to:
+  /// **'Increase Z-offset by 0.01 mm'**
+  String get projectZOffsetIncrement;
+
+  /// No description provided for @projectZOffsetHint.
+  ///
+  /// In en, this message translates to:
+  /// **'±0.50 mm, 0.01 mm steps — not applied yet.'**
+  String get projectZOffsetHint;
 
   /// No description provided for @projectSliceButton.
   ///
@@ -236,23 +338,35 @@ abstract class AppLocalizations {
   /// **'Filament'**
   String get printFilamentLabel;
 
-  /// No description provided for @printBedLeveling.
+  /// config.bedlevel_force
   ///
   /// In en, this message translates to:
-  /// **'Force bed leveling before print'**
+  /// **'Force bed leveling before this print'**
   String get printBedLeveling;
 
-  /// No description provided for @printAutoLevelCheck.
+  /// config.printer_check — per CC2_PROTOCOL.md: true always levels (~200 s), false never does, omitting the key lets the firmware decide.
   ///
   /// In en, this message translates to:
-  /// **'Auto bed-level check'**
-  String get printAutoLevelCheck;
+  /// **'Always level the bed (adds ~200 s)'**
+  String get printPrinterCheck;
 
   /// No description provided for @printTimelapse.
   ///
   /// In en, this message translates to:
   /// **'Record timelapse'**
   String get printTimelapse;
+
+  /// No description provided for @printBoundsOk.
+  ///
+  /// In en, this message translates to:
+  /// **'Bounds-check: all moves within printable area.'**
+  String get printBoundsOk;
+
+  /// No description provided for @printBoundsFail.
+  ///
+  /// In en, this message translates to:
+  /// **'Bounds-check failed: {count} move(s) outside the printable area / height. Upload blocked.'**
+  String printBoundsFail(int count);
 
   /// No description provided for @printUploadButton.
   ///

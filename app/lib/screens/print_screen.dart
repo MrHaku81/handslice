@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
+import '../net/elegoo_cc2_client.dart';
+import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
 import '../widgets/workshop_card.dart';
@@ -10,9 +12,14 @@ import '../widgets/workshop_row.dart';
 // Drucken-Screen fuer M2: zeigt den Slice-Status aus dem ProjectState.
 // Upload / Druckstart kommen in M3/M4.
 class PrintScreen extends StatefulWidget {
-  const PrintScreen({super.key, required this.projectState});
+  const PrintScreen({
+    super.key,
+    required this.projectState,
+    required this.printerState,
+  });
 
   final ProjectState projectState;
+  final PrinterState printerState;
 
   @override
   State<PrintScreen> createState() => _PrintScreenState();
@@ -23,20 +30,54 @@ class _PrintScreenState extends State<PrintScreen> {
   bool _printerCheck = true;
   bool _timelapse = false;
 
+  double? _uploadProgress; // 0..1 oder null
+  String? _uploadError;
+  String? _uploadOk;
+
   @override
   void initState() {
     super.initState();
     widget.projectState.addListener(_onStateChanged);
+    widget.printerState.addListener(_onStateChanged);
   }
 
   @override
   void dispose() {
     widget.projectState.removeListener(_onStateChanged);
+    widget.printerState.removeListener(_onStateChanged);
     super.dispose();
   }
 
   void _onStateChanged() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _upload() async {
+    final slice = widget.projectState.lastSlice;
+    if (slice == null) return;
+    setState(() {
+      _uploadError = null;
+      _uploadOk = null;
+      _uploadProgress = 0;
+    });
+    final remoteName = 'handslice_${DateTime.now().millisecondsSinceEpoch}.gcode';
+    final result = await widget.printerState.uploadGcode(
+      gcodePath: slice.gcodePath,
+      remoteName: remoteName,
+      onProgress: (sent, total) {
+        if (!mounted) return;
+        setState(() => _uploadProgress = total == 0 ? null : sent / total);
+      },
+    );
+    if (!mounted) return;
+    setState(() {
+      _uploadProgress = null;
+      if (result.ok) {
+        _uploadOk = '${result.message} (${result.sizeBytes ?? 0} B)';
+      } else {
+        _uploadError = result.message;
+      }
+    });
   }
 
   @override
@@ -79,7 +120,7 @@ class _PrintScreenState extends State<PrintScreen> {
                 ),
                 const Divider(),
                 _ToggleRow(
-                  label: l.printAutoLevelCheck,
+                  label: l.printPrinterCheck,
                   value: _printerCheck,
                   onChanged: (v) => setState(() => _printerCheck = v),
                 ),
@@ -93,18 +134,100 @@ class _PrintScreenState extends State<PrintScreen> {
             ),
           ),
 
+          if (slice != null) ...[
+            const SizedBox(height: 12),
+            _BoundsStatus(projectState: widget.projectState),
+          ],
+
           const SizedBox(height: 16),
           OutlinedButton.icon(
-            onPressed: slice == null ? null : () {},
+            onPressed: (slice == null ||
+                    !widget.projectState.boundsOk ||
+                    _uploadProgress != null ||
+                    widget.printerState.connection != CanvasConnection.connected)
+                ? null
+                : _upload,
             icon: const Icon(Icons.upload_outlined),
             label: Text(l.printUploadButton),
           ),
+          if (_uploadProgress != null) ...[
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: _uploadProgress),
+          ],
+          if (_uploadOk != null) ...[
+            const SizedBox(height: 8),
+            _UploadResultBox(ok: true, message: _uploadOk!),
+          ],
+          if (_uploadError != null) ...[
+            const SizedBox(height: 8),
+            _UploadResultBox(ok: false, message: _uploadError!),
+          ],
           const SizedBox(height: 8),
           FilledButton.icon(
-            onPressed: slice == null ? null : () {},
+            // M4 verdrahtet den eigentlichen Druckstart. In M3 bleibt
+            // der Button deaktiviert – Klaus startet ab hier manuell.
+            onPressed: null,
             icon: const Icon(Icons.play_arrow_outlined),
             label: Text(l.printStartButton),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _UploadResultBox extends StatelessWidget {
+  const _UploadResultBox({required this.ok, required this.message});
+  final bool ok;
+  final String message;
+  @override
+  Widget build(BuildContext context) {
+    final c = ok ? WorkshopTokens.accent : const Color(0xFFFF6B6B);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: c.withValues(alpha: 0.12),
+        border: Border.all(color: c.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
+      ),
+      child: Row(children: [
+        Icon(ok ? Icons.check_circle_outline : Icons.error_outline,
+            color: c, size: 18),
+        const SizedBox(width: 10),
+        Expanded(child: Text(message, style: TextStyle(color: c))),
+      ]),
+    );
+  }
+}
+
+class _BoundsStatus extends StatelessWidget {
+  const _BoundsStatus({required this.projectState});
+
+  final ProjectState projectState;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final violations = projectState.boundsViolations;
+    final ok = violations.isEmpty;
+    final color = ok ? WorkshopTokens.accent : const Color(0xFFFF6B6B);
+    final icon = ok ? Icons.check_circle_outline : Icons.error_outline;
+    final text = ok
+        ? l.printBoundsOk
+        : l.printBoundsFail(violations.length);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: TextStyle(color: color))),
         ],
       ),
     );

@@ -49,10 +49,66 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectProfile => 'Profile';
 
   @override
+  String get projectPrinterSection => 'Printer';
+
+  @override
+  String get projectPrinterNotPaired => 'No printer paired.';
+
+  @override
+  String get projectPrinterPair => 'Pair printer…';
+
+  @override
+  String get projectPrinterConnect => 'Connect & load slots';
+
+  @override
+  String get projectPrinterConnecting => 'Connecting…';
+
+  @override
+  String projectPrinterConnected(String host) {
+    return 'Connected ($host).';
+  }
+
+  @override
+  String get projectPrinterAuthError => 'Access-code rejected. Re-pair.';
+
+  @override
+  String projectPrinterNetError(String msg) {
+    return 'Network / discovery error: $msg';
+  }
+
+  @override
+  String get projectPrinterLanOffHint =>
+      'The printer rejects LAN connections. Enable \'LAN only\' at the printer display.';
+
+  @override
+  String get pairDialogTitle => 'Pair with CC2';
+
+  @override
+  String get pairDialogIp => 'Printer IP (e.g. <cc2-ip>)';
+
+  @override
+  String get pairDialogCode => 'Access code (printer display)';
+
+  @override
+  String get pairDialogSave => 'Save';
+
+  @override
+  String get pairDialogCancel => 'Cancel';
+
+  @override
   String get projectFilaments => 'Filaments / Slot assignment';
 
   @override
   String get projectZOffset => 'Z-offset per plate (saved only)';
+
+  @override
+  String get projectZOffsetDecrement => 'Decrease Z-offset by 0.01 mm';
+
+  @override
+  String get projectZOffsetIncrement => 'Increase Z-offset by 0.01 mm';
+
+  @override
+  String get projectZOffsetHint => '±0.50 mm, 0.01 mm steps — not applied yet.';
 
   @override
   String get projectSliceButton => 'Slice on device';
@@ -79,13 +135,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get printFilamentLabel => 'Filament';
 
   @override
-  String get printBedLeveling => 'Force bed leveling before print';
+  String get printBedLeveling => 'Force bed leveling before this print';
 
   @override
-  String get printAutoLevelCheck => 'Auto bed-level check';
+  String get printPrinterCheck => 'Always level the bed (adds ~200 s)';
 
   @override
   String get printTimelapse => 'Record timelapse';
+
+  @override
+  String get printBoundsOk => 'Bounds-check: all moves within printable area.';
+
+  @override
+  String printBoundsFail(int count) {
+    return 'Bounds-check failed: $count move(s) outside the printable area / height. Upload blocked.';
+  }
 
   @override
   String get printUploadButton => 'Upload to printer';

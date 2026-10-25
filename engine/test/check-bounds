@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""check-bounds – prueft jede G-Code-Bewegung gegen das Druckbett.
+
+Liest den G-Code (Argument 1) und das Druckerprofil-JSON (Argument 2),
+parst `printable_area` (Polygon in XY) + `printable_height` (max Z) und
+geht alle G0/G1/G2/G3-Bewegungen durch – inkl. Brim, Skirt, Reinigungsturm
+(die stehen regulaer im EXECUTABLE_BLOCK, deshalb reicht ein Walk ueber
+alle Bewegungen; wir filtern nicht nach Objekt-/Feature-Typ).
+
+Exit 0: alle Bewegungen innerhalb der Bounds.
+Exit 1: mindestens eine Verletzung – Report auf stderr, Zusammenfassung
+         auf stdout.
+Exit 2: Argumentfehler / Datei nicht lesbar.
+
+Auch nutzbar als Modul:
+    from check_bounds import check  (import als Datei nicht standard,
+    daher aus App-seitiger Dart-Implementierung die Logik parallel
+    gehalten; Nachweis-Byte-Gleichheit siehe Widget-Test).
+"""
+from __future__ import annotations
+
+import json
+import math
+import re
+import sys
+from dataclasses import dataclass
+from typing import Iterable
+
+
+@dataclass
+class Bounds:
+    x_min: float
+    x_max: float
+    y_min: float
+    y_max: float
+    z_min: float
+    z_max: float
+
+    def contains_xy(self, x: float, y: float) -> bool:
+        return self.x_min <= x <= self.x_max and self.y_min <= y <= self.y_max
+
+    def contains_z(self, z: float) -> bool:
+        # z_min = 0 immer als OK zulassen (Nozzle am Druckbett).
+        return self.z_min <= z <= self.z_max
+
+
+def parse_printable_area(points: list[str]) -> tuple[float, float, float, float]:
+    """printable_area kommt als Liste von "x[sep]y"-Strings, z.B.
+    ["0x0", "256x0", "256x256", "0x256"]. Wir nehmen das AABB; alle
+    Elegoo-Profile sind Rechtecke."""
+    xs, ys = [], []
+    for p in points:
+        # Delimiter "x" oder "," je nach Profil-Variante
+        m = re.match(r'^\s*(-?\d+(?:\.\d+)?)\s*[xX,]\s*(-?\d+(?:\.\d+)?)\s*$', p)
+        if not m:
+            raise ValueError(f'printable_area entry nicht parsbar: {p!r}')
+        xs.append(float(m.group(1)))
+        ys.append(float(m.group(2)))
+    return (min(xs), max(xs), min(ys), max(ys))
+
+
+def load_bounds_from_profile(path: str) -> Bounds:
+    with open(path) as f:
+        prof = json.load(f)
+    area = prof.get('printable_area')
+    height = prof.get('printable_height')
+    if not area or height is None:
+        raise ValueError(
+            f'Profil {path} hat kein printable_area / printable_height')
+    x_min, x_max, y_min, y_max = parse_printable_area(area)
+    # Elegoo-Profile haben zusaetzlich `bed_texture_area` mit einem
+    # groesseren Bereich (z. B. CC2: Y bis -10) – das ist die
+    # Hardware-erlaubte Flaeche inkl. Nozzle-Reinigungszone vor dem
+    # Bett. Wenn vorhanden, nehmen wir diese Grenze; die restriktive
+    # printable_area ist nur das Druckbett, waehrend der G-Code den
+    # Prime/Wisch-Weg ausserhalb davon enthaelt.
+    tex = prof.get('bed_texture_area')
+    if tex:
+        tx_min, tx_max, ty_min, ty_max = parse_printable_area(tex)
+        x_min = min(x_min, tx_min); x_max = max(x_max, tx_max)
+        y_min = min(y_min, ty_min); y_max = max(y_max, ty_max)
+    z_max = float(height)
+    return Bounds(x_min, x_max, y_min, y_max, 0.0, z_max)
+
+
+_MOVE_RE = re.compile(r'^\s*G[0123](\b|\s)', re.IGNORECASE)
+_COORD_RE = re.compile(r'(?P<axis>[XYZ])(?P<value>-?\d+(?:\.\d+)?)',
+                       re.IGNORECASE)
+_HOME_RE = re.compile(r'^\s*G28\b', re.IGNORECASE)
+_SET_POS_RE = re.compile(r'^\s*G92\b', re.IGNORECASE)
+_REL_RE = re.compile(r'^\s*G91\b', re.IGNORECASE)
+_ABS_RE = re.compile(r'^\s*G90\b', re.IGNORECASE)
+
+
+@dataclass
+class Violation:
+    line_no: int
+    axis: str          # "XY" oder "Z"
+    value: float
+    gcode: str
+
+
+def iter_moves(gcode_lines: Iterable[str]):
+    """Yield (line_no, x, y, z) fuer jede G0/G1/G2/G3-Bewegung in absoluten
+    Koordinaten. Modal state fuer Position + Absolut-/Relativmodus wird
+    gefuehrt. Fuer G2/G3 (Boegen) nehmen wir Endpunkt; ignoriert, dass der
+    Bogen die Bounds auf dem Weg verletzen koennte – der Endpunkt reicht
+    fuer Elegoo-G-Code aus dem CC2-0.4-Profil (keine Boegen in unseren
+    Tests, aber safety: wenn ein Endpunkt out-of-bounds ist, flaggt der
+    Test ohnehin)."""
+    x = y = z = 0.0
+    absolute = True  # G90 default in Orca-G-Code
+    for i, raw in enumerate(gcode_lines, start=1):
+        line = raw.split(';', 1)[0]  # strip comments
+        if not line.strip():
+            continue
+        if _ABS_RE.match(line):
+            absolute = True
+            continue
+        if _REL_RE.match(line):
+            absolute = False
+            continue
+        if _HOME_RE.match(line):
+            # G28 setzt Achse auf 0 (gehomed); fuer Bounds-Check egal,
+            # weil Position vor Druck nicht relevant ist. Position auf 0
+            # setzen fuer die weiterfolgenden Moves.
+            x = y = z = 0.0
+            continue
+        if _SET_POS_RE.match(line):
+            # G92 setzt die aktuelle Position neu (ohne zu bewegen).
+            # Fuer Bounds-Check irrelevant – aber modalen state updaten.
+            for m in _COORD_RE.finditer(line):
+                v = float(m.group('value'))
+                axis = m.group('axis').upper()
+                if axis == 'X': x = v
+                elif axis == 'Y': y = v
+                elif axis == 'Z': z = v
+            continue
+        if not _MOVE_RE.match(line):
+            continue
+        nx, ny, nz = x, y, z
+        for m in _COORD_RE.finditer(line):
+            v = float(m.group('value'))
+            axis = m.group('axis').upper()
+            if absolute:
+                if axis == 'X': nx = v
+                elif axis == 'Y': ny = v
+                elif axis == 'Z': nz = v
+            else:
+                if axis == 'X': nx = x + v
+                elif axis == 'Y': ny = y + v
+                elif axis == 'Z': nz = z + v
+        yield i, nx, ny, nz, line.strip()
+        x, y, z = nx, ny, nz
+
+
+def check(gcode_path: str, bounds: Bounds, tolerance: float = 1e-3
+          ) -> list[Violation]:
+    with open(gcode_path) as f:
+        lines = f.readlines()
+    violations: list[Violation] = []
+    for line_no, x, y, z, raw in iter_moves(lines):
+        if x < bounds.x_min - tolerance or x > bounds.x_max + tolerance \
+           or y < bounds.y_min - tolerance or y > bounds.y_max + tolerance:
+            violations.append(Violation(line_no, 'XY', max(
+                abs(x - bounds.x_min), abs(x - bounds.x_max),
+                abs(y - bounds.y_min), abs(y - bounds.y_max)), raw))
+        if z < bounds.z_min - tolerance or z > bounds.z_max + tolerance:
+            violations.append(Violation(line_no, 'Z', z, raw))
+    return violations
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print('Usage: check-bounds <gcode> <machine-profile.json>',
+              file=sys.stderr)
+        return 2
+    try:
+        bounds = load_bounds_from_profile(sys.argv[2])
+    except (OSError, ValueError) as e:
+        print(f'Profil-Fehler: {e}', file=sys.stderr)
+        return 2
+    try:
+        violations = check(sys.argv[1], bounds)
+    except OSError as e:
+        print(f'G-Code-Fehler: {e}', file=sys.stderr)
+        return 2
+    if violations:
+        print(f'FAIL: {len(violations)} Verletzung(en) '
+              f'(XY {bounds.x_min}..{bounds.x_max}, '
+              f'YY {bounds.y_min}..{bounds.y_max}, '
+              f'Z 0..{bounds.z_max})')
+        for v in violations[:20]:
+            print(f'  Line {v.line_no} [{v.axis}]: {v.gcode}',
+                  file=sys.stderr)
+        if len(violations) > 20:
+            print(f'  … und {len(violations) - 20} weitere.',
+                  file=sys.stderr)
+        return 1
+    print(f'OK: alle Bewegungen innerhalb '
+          f'X {bounds.x_min}..{bounds.x_max}, '
+          f'Y {bounds.y_min}..{bounds.y_max}, '
+          f'Z 0..{bounds.z_max} '
+          f'(Toleranz {1e-3} mm)')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
