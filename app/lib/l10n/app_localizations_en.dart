@@ -119,6 +119,26 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectSliceButton => 'Slice on device';
 
   @override
+  String sliceInProgress(String mm, String ss) {
+    return 'Slicing… $mm:$ss';
+  }
+
+  @override
+  String get sliceCancelling => 'Cancelling — waiting for the engine to stop…';
+
+  @override
+  String get sliceCancel => 'Cancel';
+
+  @override
+  String get sliceErrorOom =>
+      'Not enough memory — the slicer was stopped by the system. Try a lower resolution model, a thicker layer, or close other apps.';
+
+  @override
+  String sliceErrorExit(String code, String msg) {
+    return 'Slicer failed (exit $code): $msg';
+  }
+
+  @override
   String get printHeading => 'Print';
 
   @override

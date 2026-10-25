@@ -302,6 +302,36 @@ abstract class AppLocalizations {
   /// **'Slice on device'**
   String get projectSliceButton;
 
+  /// No description provided for @sliceInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Slicing… {mm}:{ss}'**
+  String sliceInProgress(String mm, String ss);
+
+  /// No description provided for @sliceCancelling.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelling — waiting for the engine to stop…'**
+  String get sliceCancelling;
+
+  /// No description provided for @sliceCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get sliceCancel;
+
+  /// No description provided for @sliceErrorOom.
+  ///
+  /// In en, this message translates to:
+  /// **'Not enough memory — the slicer was stopped by the system. Try a lower resolution model, a thicker layer, or close other apps.'**
+  String get sliceErrorOom;
+
+  /// No description provided for @sliceErrorExit.
+  ///
+  /// In en, this message translates to:
+  /// **'Slicer failed (exit {code}): {msg}'**
+  String sliceErrorExit(String code, String msg);
+
   /// No description provided for @printHeading.
   ///
   /// In en, this message translates to:

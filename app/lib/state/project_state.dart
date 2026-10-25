@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,6 +19,9 @@ class ProjectState extends ChangeNotifier {
   SliceResult? _lastSlice;
   String? _lastError;
   bool _slicing = false;
+  bool _cancelRequested = false;
+  Process? _activeProc;
+  DateTime? _sliceStartedAt;
   List<BoundsViolation> _boundsViolations = const [];
 
   // Keys fuer die z-offset-Persistenz
@@ -34,6 +39,8 @@ class ProjectState extends ChangeNotifier {
   SliceResult? get lastSlice => _lastSlice;
   String? get lastError => _lastError;
   bool get isSlicing => _slicing;
+  bool get cancelRequested => _cancelRequested;
+  DateTime? get sliceStartedAt => _sliceStartedAt;
   List<BoundsViolation> get boundsViolations => _boundsViolations;
   bool get boundsOk =>
       _lastSlice != null && _boundsViolations.isEmpty;
@@ -73,6 +80,9 @@ class ProjectState extends ChangeNotifier {
   Future<void> slice(SlicerService slicer, String outputPath) async {
     if (_modelPath == null) return;
     _slicing = true;
+    _cancelRequested = false;
+    _activeProc = null;
+    _sliceStartedAt = DateTime.now();
     _lastError = null;
     _boundsViolations = const [];
     notifyListeners();
@@ -82,6 +92,11 @@ class ProjectState extends ChangeNotifier {
         bedType: _bedType,
         outputPath: outputPath,
         zOffsetMm: zOffsetFor(_bedType),
+        onProcessStarted: (p) {
+          _activeProc = p;
+          // Falls Cancel vor dem Hochfahren kam: direkt beenden.
+          if (_cancelRequested) p.kill();
+        },
       );
       _lastSlice = r;
       // Grenztest sofort nach dem Slice. Uploads werden spaeter
@@ -91,8 +106,6 @@ class ProjectState extends ChangeNotifier {
         final bounds = await slicer.loadBounds();
         _boundsViolations = await checkGcodeFile(outputPath, bounds);
       } catch (e) {
-        // Bounds-Check-Fehler wird nicht als Slice-Fehler gemeldet,
-        // aber in den Violations-Count als Platzhalter sichtbar.
         _boundsViolations = [
           BoundsViolation(
               lineNo: 0,
@@ -101,12 +114,42 @@ class ProjectState extends ChangeNotifier {
               x: 0, y: 0, z: 0)
         ];
       }
+    } on SliceProcessException catch (e) {
+      // Vom Nutzer abgebrochen: nicht als Fehler melden.
+      if (_cancelRequested) {
+        _lastError = null;
+      } else if (e.killedBySignal) {
+        // Signal-Kill ohne Cancel-Request: fast immer der LMK/OOM-
+        // Killer auf Android bei grossen Modellen.
+        _lastError = 'slice.oom';
+      } else {
+        _lastError = 'slice.error:${e.exitCode}:${e.stderr.trim()}';
+      }
+      _lastSlice = null;
     } catch (e) {
       _lastError = e.toString();
       _lastSlice = null;
     } finally {
       _slicing = false;
+      _activeProc = null;
       notifyListeners();
+    }
+  }
+
+  /// Bricht einen laufenden Slice ab. Der CLI-Prozess wird mit SIGTERM
+  /// beendet und sein Output-Pfad geloescht, damit keine
+  /// Halbfertig-G-Code-Datei zurueckbleibt. Idempotent.
+  Future<void> cancelSlice({String? cleanupOutputPath}) async {
+    if (!_slicing) return;
+    _cancelRequested = true;
+    notifyListeners();
+    final p = _activeProc;
+    if (p != null) p.kill();
+    if (cleanupOutputPath != null) {
+      try {
+        final f = File(cleanupOutputPath);
+        if (await f.exists()) await f.delete();
+      } catch (_) {}
     }
   }
 }

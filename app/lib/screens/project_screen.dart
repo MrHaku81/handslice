@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -60,7 +62,14 @@ class _ProjectScreenState extends State<ProjectScreen> {
     if (state.modelPath == null) return;
     final dir = await getApplicationSupportDirectory();
     final outPath = '${dir.path}/handslice_project.gcode';
+    _lastOutPath = outPath;
     await state.slice(widget.slicer, outPath);
+  }
+
+  String? _lastOutPath;
+
+  Future<void> _cancel() async {
+    await widget.projectState.cancelSlice(cleanupOutputPath: _lastOutPath);
   }
 
   @override
@@ -132,11 +141,15 @@ class _ProjectScreenState extends State<ProjectScreen> {
 
           if (state.isSlicing) ...[
             const SizedBox(height: 12),
-            const LinearProgressIndicator(),
+            _SlicingProgress(
+              startedAt: state.sliceStartedAt,
+              cancelRequested: state.cancelRequested,
+              onCancel: _cancel,
+            ),
           ],
           if (state.lastError != null) ...[
             const SizedBox(height: 12),
-            _ErrorBox(message: state.lastError!),
+            _ErrorBox(message: _formatSliceError(context, state.lastError!)),
           ],
           if (state.lastSlice != null) ...[
             const SizedBox(height: 12),
@@ -166,6 +179,89 @@ class _ProjectScreenState extends State<ProjectScreen> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+String _formatSliceError(BuildContext context, String raw) {
+  final l = AppLocalizations.of(context);
+  if (raw == 'slice.oom') return l.sliceErrorOom;
+  if (raw.startsWith('slice.error:')) {
+    final parts = raw.split(':');
+    return l.sliceErrorExit(parts.length > 1 ? parts[1] : '?',
+        parts.length > 2 ? parts.sublist(2).join(':') : '');
+  }
+  return raw;
+}
+
+class _SlicingProgress extends StatefulWidget {
+  const _SlicingProgress({
+    required this.startedAt,
+    required this.cancelRequested,
+    required this.onCancel,
+  });
+  final DateTime? startedAt;
+  final bool cancelRequested;
+  final VoidCallback onCancel;
+
+  @override
+  State<_SlicingProgress> createState() => _SlicingProgressState();
+}
+
+class _SlicingProgressState extends State<_SlicingProgress> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final secs = widget.startedAt == null
+        ? 0
+        : DateTime.now().difference(widget.startedAt!).inSeconds;
+    final mm = (secs ~/ 60).toString().padLeft(2, '0');
+    final ss = (secs % 60).toString().padLeft(2, '0');
+    return WorkshopCard(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    widget.cancelRequested
+                        ? l.sliceCancelling
+                        : l.sliceInProgress(mm, ss),
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed:
+                      widget.cancelRequested ? null : widget.onCancel,
+                  icon: const Icon(Icons.cancel_outlined),
+                  label: Text(l.sliceCancel),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const LinearProgressIndicator(),
+          ],
+        ),
       ),
     );
   }

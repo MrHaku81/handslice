@@ -69,3 +69,4 @@ __pycache__/
 # eincheckbar, falls spaeter angelegt – nur der User-lokale Override wird
 # ignoriert)
 .claude/settings.local.json
+/local-test/

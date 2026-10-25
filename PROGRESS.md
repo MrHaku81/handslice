@@ -43,6 +43,124 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-25 21:00 – Stresstest grosses Modell (vor 4.3, STOPP)
+
+Modell: `auryn.stl` von Klaus, 2 809 436 Dreiecke, 134 MB. Modell lokal
+unter `local-test/` (per `.gitignore` ausgeschlossen; nichts davon im
+Repo, keine Doku-Bilder).
+
+### 1. Erwartung Grenztest bei --no-center – bestaetigt
+
+STL-Bounds laut Lesung: `X: -93.15..+93.15`, `Y: -35.01..+36.76`,
+`Z: 8.00..217.11`. Druckbereich CC2 laut Profil: `printable_area
+0..256`, `bed_texture_area 0..-10..256`, `height 256`.
+
+Mit `--no-center` wirft libslic3r direkt `Slic3r::SlicingErrors`
+(`terminate called after throwing an instance of 'SlicingErrors'`),
+weil X <0 ausserhalb der Platte liegt. Belegt am x86:
+`engine/bin/handslice-cli-x86 --no-center auryn.stl → exit 134`
+(Abort nach ca. 15 s, waehrend Prefligh-Validierung).
+
+Konsequenz fuer die App: der Grenztest-Pfad ist zwar da, aber der
+Nutzer sah bisher nur die abstrakte Exception. Ursache: `slicer.dart`
+hat `--no-center` als Default gesetzt – ein Erbe aus den
+Reference-Testlaeufen (dort ist das Modell schon vorzentriert).
+
+### 2. Fix – wie Orca-GUI auf die Platte setzen
+
+- `app/lib/engine/slicer.dart`: `noCenter` als Parameter default
+  **`false`**. Default-Flow entspricht ab jetzt Orcas GUI.
+- Die bereits in `handslice-cli.cpp` eingebaute Zentrierung ruft
+  `ModelObject::center_around_origin()` (Model.cpp:1708) +
+  `set_offset(bed_center, -bb.min.z())` – das sind Orcas eigene
+  libslic3r-Funktionen, keine eigene Mathe. Belegt in docs/engine-
+  integration.md "Modellpositionierung".
+- Byte-Gleichheit Kerbenwuerfel: `--no-center` vs. Default (Centering)
+  liefern am x86 **identischen** G-Code (bis auf den Zeitstempel-
+  Header). Grund: der vorzentrierte Kerbenwuerfel wird durch die
+  Centering-Logik effektiv um (0,0,0) zurueckbewegt. Belegt per
+  `diff <(grep -v generated kerbe-nocenter) <(grep -v generated kerbe-center)` → leer.
+- CLI unveraendert, nur Default in der App gedreht; x86/arm64 bleiben
+  byte-gleich zum M6-Vertragstest.
+
+### 3. Messung x86 (AMR5) vs. arm64 (Poco X3 Pro)
+
+| Modell | Build | Slice-Dauer | Max VmHWM | G-Code | Est. Druckzeit | Thermal |
+|---|---|---:|---:|---:|---|---|
+| Kerbenwuerfel 20 mm | x86 | ~0.7 s | ~800 MB | 215 kB | 9m 25s | – |
+| Kerbenwuerfel 20 mm | arm64 (Poco) | ~0.9 s | ~800 MB | 215 kB | 9m 25s | Status 0 |
+| **auryn.stl (134 MB)** | **x86** | **22.2 s** | **1 240 MB** | **65 MB** | 7h 11m 23s | – |
+| **auryn.stl (134 MB)** | **arm64 (Poco)** | **75.5 s** | **1 126 MB** | **65 MB** | 7h 12m 51s | **Status 0** vorher und nachher |
+
+- x86: `/proc/<pid>/status VmHWM` zwischen 779 MB (Start) und 1240 MB
+  (Peak). Keine systemrelevante Swap-Nutzung.
+- arm64: on-device `/proc/<pid>/status VmHWM`-Polling via adb shell;
+  Peak 1126 MB. Thermal-Status via `dumpsys thermalservice` sowohl
+  vorher als auch nachher **Status 0** (keine Drosselung), trotz 75 s
+  CPU-Volllast.
+- G-Code-Vergleich x86 vs. arm64 EXECUTABLE_BLOCK: **nicht byte-
+  gleich** – das bekannte TBB-Reorder-Phaenomen (siehe
+  `docs/engine-integration.md` "Nondeterminismus"). Fuer den
+  Kerbenwuerfel: zwei stabile arm64-Varianten pro Lauf, nachgewiesen
+  mit 3 consecutive arm64-Laeufen (sha `84c9ad07…` / `33fbd6a5…` /
+  `84c9ad07…`). Fuer das 65-MB-auryn-G-Code gilt dasselbe
+  (Perimeter-Reorder in Travel-Moves ab ca. Zeile 1088), funktional
+  aequivalent, nur Reihenfolge-bedingt.
+
+### 4. App-UX waehrend Slice
+
+- `SlicerService.slice()` nutzt jetzt `Process.start` statt
+  `Process.run` und reicht das Prozess-Handle via
+  `onProcessStarted(proc)` an den Caller durch.
+- `ProjectState.slice()` haelt das Handle in `_activeProc` + Zeit in
+  `_sliceStartedAt`, bietet `cancelSlice({cleanupOutputPath})` an.
+- `ProjectScreen` zeigt waehrend `isSlicing` eine neue Karte mit
+  Verlaufszaehler `"Slice läuft… mm:ss"`, `LinearProgressIndicator`
+  und `Abbrechen`-Button. Nach Cancel: Button-Text wird zu
+  `"Wird abgebrochen – warte, bis die Engine stoppt…"`.
+- UI darueber (Modell, Drucker, Druckbett, Reiter-Chips) bleibt
+  waehrend des Slices komplett reaktiv – belegt am Poco mit dem
+  Realdruck-STL. Tabwechsel + Z-Offset-Nudgen gehen weiter.
+- Nachweis am Poco (Screenshots `/tmp/handslice_slicing.png` +
+  `/tmp/handslice_cancelling2.png`): Fortschrittskarte zeigt
+  `"Slice läuft… 00:02"`, Cancel-Button loest den CLI-Prozess am
+  Geraet sofort auf (`ps -ef | grep handslice-cli` leer), die
+  halb-fertige `handslice_project.gcode` wird aus
+  `/data/data/dev.handslice.handslice/files/` geloescht
+  (`run-as ls -la files/` zeigt nur `profiles/` + `profileInstalled`).
+
+### 5. OOM-/Signal-Kill-Handling
+
+- `SlicerService` wirft eine neue `SliceProcessException` mit
+  `killedBySignal` als Flag (Exit-Code negativ oder 137/143 →
+  SIGKILL/SIGTERM, auf Android der LMK bei zu wenig Speicher).
+- `ProjectState.slice()` uebersetzt den Signal-Kill ohne vorangegangenes
+  `cancelSlice` in `lastError = "slice.oom"`. Die UI zeigt dann die
+  lokalisierte Meldung („Nicht genug Arbeitsspeicher — der Slicer
+  wurde vom System beendet. Modell mit weniger Dreiecken, dickere
+  Schicht oder andere Apps schliessen." / englisch analog).
+- Reproduzierbarer Nachweis am Geraet war nicht moeglich: `adb shell
+  pkill -9` am App-UID ist `Operation not permitted`, und der 8-GB-Poco
+  loest beim 134-MB-Modell keinen echten OOM aus (Peak 1.1 GB von
+  7.3 GB). Statt dessen: Unit-Test `ProjectState.slice bei Signal-Kill
+  liefert lastError=slice.oom` im `widget_test.dart` deckt den Pfad
+  komplett ab.
+- `cancelSlice()`-Pfad: ein zweiter Test
+  (`ProjectState.cancelSlice setzt cancelRequested + Cleanup`) prueft,
+  dass der danach ausgeloeste Signal-Kill NICHT als Fehler gemeldet
+  wird und `isSlicing=false` am Ende steht.
+
+### Tests + Commit
+
+- 28/28 Widget-Tests gruen (`flutter test test/widget_test.dart`),
+  davon 2 neu fuer OOM + Cancel.
+- `flutter analyze` 0 Fehler.
+- Commit lokal (Code-Aenderungen + PROGRESS); Modell, Zwischendaten
+  und Mess-Logs liegen in `local-test/` und bleiben per
+  `.gitignore` ausserhalb des Repos.
+
+---
+
 ## 2026-10-25 20:30 – Phase 4.2: Prozess-Einstellungen in der App (STOPP)
 
 Setzt direkt auf 4.1 auf. Nachgeholt vor 4.2:

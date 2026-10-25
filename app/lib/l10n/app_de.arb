@@ -36,6 +36,11 @@
   "projectZOffsetIncrement": "Z-Offset um 0,01 mm erhöhen",
   "projectZOffsetHint": "±0,50 mm, Schritte 0,01 mm — wird beim Slicen angewendet.",
   "projectSliceButton": "Auf dem Gerät slicen",
+  "sliceInProgress": "Slice läuft… {mm}:{ss}",
+  "sliceCancelling": "Wird abgebrochen – warte, bis die Engine stoppt…",
+  "sliceCancel": "Abbrechen",
+  "sliceErrorOom": "Nicht genug Arbeitsspeicher — der Slicer wurde vom System beendet. Modell mit weniger Dreiecken, dickere Schicht oder andere Apps schließen.",
+  "sliceErrorExit": "Slicer fehlgeschlagen (Exit {code}): {msg}",
 
   "printHeading": "Drucken",
   "printNoGcode": "Kein G-Code – vorher ein Projekt slicen",

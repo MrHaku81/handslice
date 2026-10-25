@@ -121,6 +121,27 @@ class AppLocalizationsDe extends AppLocalizations {
   String get projectSliceButton => 'Auf dem Gerät slicen';
 
   @override
+  String sliceInProgress(String mm, String ss) {
+    return 'Slice läuft… $mm:$ss';
+  }
+
+  @override
+  String get sliceCancelling =>
+      'Wird abgebrochen – warte, bis die Engine stoppt…';
+
+  @override
+  String get sliceCancel => 'Abbrechen';
+
+  @override
+  String get sliceErrorOom =>
+      'Nicht genug Arbeitsspeicher — der Slicer wurde vom System beendet. Modell mit weniger Dreiecken, dickere Schicht oder andere Apps schließen.';
+
+  @override
+  String sliceErrorExit(String code, String msg) {
+    return 'Slicer fehlgeschlagen (Exit $code): $msg';
+  }
+
+  @override
   String get printHeading => 'Drucken';
 
   @override

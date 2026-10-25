@@ -42,6 +42,13 @@
   "projectZOffsetIncrement": "Increase Z-offset by 0.01 mm",
   "projectZOffsetHint": "±0.50 mm, 0.01 mm steps — applied when slicing.",
   "projectSliceButton": "Slice on device",
+  "sliceInProgress": "Slicing… {mm}:{ss}",
+  "@sliceInProgress": {"placeholders": {"mm": {"type": "String"}, "ss": {"type": "String"}}},
+  "sliceCancelling": "Cancelling — waiting for the engine to stop…",
+  "sliceCancel": "Cancel",
+  "sliceErrorOom": "Not enough memory — the slicer was stopped by the system. Try a lower resolution model, a thicker layer, or close other apps.",
+  "sliceErrorExit": "Slicer failed (exit {code}): {msg}",
+  "@sliceErrorExit": {"placeholders": {"code": {"type": "String"}, "msg": {"type": "String"}}},
 
   "printHeading": "Print",
   "printNoGcode": "No G-code — slice a project first",
