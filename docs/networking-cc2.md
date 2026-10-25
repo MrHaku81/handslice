@@ -436,6 +436,223 @@ einen zweiten Testlauf mit `method 2005` oder laengeres Delta-
 Sammeln. Nicht als Blocker, sondern als Phase-2-Prototyp-Aufgabe
 notiert.
 
+### Nachweislauf 2026-10-25 09:00: method 1002 Vollstatus + method 2005 CANVAS
+
+Direkt nach dem Register-Handshake aus 08:35 zwei Request/Response-
+Paare gefahren (nur Lesen):
+
+**method 1002 (GET_STATUS):** vollstaendige Snapshot-Antwort,
+Hauptbefunde:
+
+```
+machine_status.status      = 1  (Idle)
+extruder.temperature       = 28 °C,  target = 0
+heater_bed.temperature     = 24 °C,  target = 0
+ztemperature_sensor.temp   = 25 °C
+gcode_move                 = x=52.5, y=264.0, z=4.97  (geparkt)
+print_status.enable        = false, filename=""
+tool_head.homed_axes       = "xyz"
+external_device            = camera=true, u_disk=false
+```
+
+**Kein `plate_type` / `bed_type`-Feld im Status.** Der CC2 meldet
+nicht, welche Druckbettseite montiert ist. **Nicht geraten** – im
+Statusschema (`extruder`, `heater_bed`, `print_status`, `tool_head`,
+`external_device`, `fans`, `gcode_move`, `led`, `machine_status`,
+`ztemperature_sensor`) gibt es dafuer kein Feld. Konsequenz: der
+`curr_bed_type`-Wert aus dem G-Code (vom Slicer) laesst sich nicht
+gegen den tatsaechlich am Drucker montierten Belag abgleichen – die
+App kann den Nutzer nur bitten, zu bestaetigen, dass der Belag passt.
+
+**method 2005 (GET_CANVAS_STATUS):** CANVAS-Slot-Belegung
+(`canvas_info.canvas_list[0].tray_list[]`):
+
+| Slot | tray_id | filament_type | filament_name  | filament_color |
+|---|---|---|---|---|
+| A1 | 0 | PETG | ELEGOO PETG            | #000000 schwarz |
+| A2 | 1 | PETG | ELEGOO RAPID PETG      | #FFFFFF weiss   |
+| A3 | 2 | PLA  | ELEGOO PLA PRO         | #000000 schwarz |
+| A4 | 3 | PLA  | ELEGOO RAPID PLA+      | #FFFFFF weiss   |
+
+**Erwartung A1+A2 PETG, A3+A4 PLA bestaetigt.** `active_canvas_id=0`,
+`active_tray_id=-1` (kein aktiver Tray – Drucker idle),
+`auto_refill=false`.
+
+### Nachweislauf 2026-10-25 09:05: Slice + Upload Kerbenwuerfel
+
+**Slice auf dem Poco X3 Pro:**
+
+```
+Modell: engine/test/cube_notched_20mm_centered_cc2.stl (20mm, +X+Y+Z
+        Kerbe, 24 Dreiecke, pre-centered)
+Profile: CC2 0.4 nozzle + 0.20mm Standard + Elegoo PLA @ECC2
+Binary: engine/bin/handslice-cli-arm64 (arm64-v8a, Android 29)
+Laufzeit: 0.83 s (adb-shell incl. overhead; davon ~0.7 s Compute)
+G-Code: handslice_kerbenwuerfel.gcode, 220 261 Byte, 100 Layer
+Stats-JSON: 1172.33 mm Filament, 2819.79 mm³, 3.52 g, 9m 25s
+```
+
+Im G-Code-Header stehen:
+
+- `curr_bed_type = High Temp Plate`
+- `first_layer_bed_temperature = 60`, `hot_plate_temp = 60`,
+  `hot_plate_temp_initial_layer = 60`
+- `M140 S60` als erster M140 im Executable-Block
+- `M190 S[bed_temperature_initial_layer_single]` im
+  `machine_start_gcode` → Heizen + Warten auf 60 °C vor dem Druck
+  (Platzhalter wird in der Firmware aus dem Config-Block
+  substituiert)
+
+**Abgleich mit dem Druckerstatus:** Da der CC2 kein `plate_type`-Feld
+meldet (siehe oben), ist ein maschineller Abgleich nicht moeglich.
+Der Slicer hat „High Temp Plate" gewaehlt, weil das der
+`default_bed_type`-Default aus dem CC2-Profil ist – unabhaengig
+davon, welcher Belag am Drucker tatsaechlich montiert ist.
+**Nicht als Widerspruch markiert, aber als blinder Punkt
+dokumentiert.**
+
+**Upload per HTTP PUT auf Port 80 (chunked, 1 MiB max):**
+
+Port-80-Status nach `lan_status=1`: **open** (gestern 08:15 noch
+closed – „Nur LAN"-Modus schaltet also neben MQTT auch den
+Upload-Port frei).
+
+```
+PUT http://<ip>/upload
+Headers:
+  Content-Range: bytes 0-220260/220261
+  Content-Type:  application/octet-stream
+  X-File-Name:   handslice_kerbenwuerfel.gcode
+  X-File-MD5:    49f070da14eabe095aba554478bdbe59
+  X-Token:       <Access-Code aus .env>
+Body:  Chunk 0..220260 (gesamter G-Code, <1 MiB, deshalb nur ein PUT)
+```
+
+Antwort HTTP 200 in 1507 ms:
+
+```
+{"error_code": 0, "offset": 220260}
+```
+
+`offset=220260` = letztes Byte-Index. Pro Chunk antwortet der CC2 mit
+dem letzten quittierten Offset – fuer Resume-Logik bei groesseren
+Dateien ist das der Marker, ab dem der naechste Chunk anfaengt.
+
+**Dateiliste-Pruefung per MQTT (method 1044 GET_FILE_LIST):** die
+Datei erscheint **sofort** im Listing (`storage_media=local`):
+
+```
+file count: 21
+  - handslice_kerbenwuerfel.gcode     ← NEU
+  - ECC2_0.4_alle_stempel_linien_2farbig_Elegoo PETG _0.12_3h10m.gcode
+  - ...
+```
+
+**File-Detail (method 1046)** liefert:
+
+```
+filename:            handslice_kerbenwuerfel.gcode
+size:                220 261 byte
+layer:               100
+print_time:          565 s  (= 9m 25s, deckt sich mit Slicer-Stats)
+total_filament_used: 3.52 g
+last_print_time:     0        (noch nicht gedruckt)
+color_map:
+  - { t: 0, name: "PLA", color: "#F2754E" }
+```
+
+Der `color_map[0]` kommt aus dem G-Code-Header (Orca schreibt da pro
+Extruder einen Eintrag) und ordnet Tool-Index `t=0` einem PLA
+zu – wichtig fuer das Slot-Mapping im Druckstart (siehe naechster
+Abschnitt).
+
+### Druckstart-Befehl vorbereitet (NICHT ausgefuehrt)
+
+Fertige `method 1020`-Payload fuer den naechsten Lauf durch Klaus
+(nach Sichtkontrolle am Drucker). Nicht gesendet. CANVAS-Slot A4
+(= `tray_id=3`, RAPID PLA+ weiss) wird dem einzigen Tool-Index 0
+zugewiesen; `printer_check=true` **und** `bedlevel_force=true`
+schalten die Bettnivellierung vor dem Druck ein (die Protokoll-
+Quelle beschreibt beide als unabhaengige Flags, siehe
+`CC2_PROTOCOL.md` Tabelle `config`-Optionen; `bedlevel_force` ist
+der dokumentierte Weg, Leveling vor jedem Druck zu erzwingen,
+`printer_check=true` ergaenzt den auto-Leveling-Check):
+
+```
+Topic:   elegoo/<cc2-sn>/<client_id>/api_request
+Payload:
+{
+  "id": 1,
+  "method": 1020,
+  "params": {
+    "storage_media": "local",
+    "filename": "handslice_kerbenwuerfel.gcode",
+    "config": {
+      "delay_video": false,
+      "printer_check": true,
+      "print_layout": "A",
+      "bedlevel_force": true,
+      "slot_map": [
+        {"t": 0, "canvas_id": 0, "tray_id": 3}
+      ]
+    }
+  }
+}
+```
+
+Antwort kommt auf `elegoo/<sn>/<client_id>/api_response` mit
+derselben `id`. Erfolgs-Payload (laut Quelle): `{"error_code": 0}`.
+
+**Vor dem tatsaechlichen Senden pruefen (Klaus-Checkliste):**
+
+- Belag „High Temp Plate" ist montiert und sauber (siehe
+  `curr_bed_type` im G-Code; der Drucker meldet den nicht).
+- A4-Slot enthaelt tatsaechlich das vorgesehene PLA-Filament und
+  nicht leer / falschen Typ.
+- Z-Offset ist aktuell, falls kuerzlich Belag gewechselt.
+- Nozzle ist sauber.
+
+### Fernzugriff: VPN zuerst, Elegoo-Cloud optional
+
+LAN ist der primaere Pfad fuer den MVP. Fuer den Alltag ausserhalb
+des Heim-WLANs stehen zwei Optionen, in dieser Reihenfolge:
+
+**Weg 1 (empfohlen fuer die meisten Benutzer): VPN ins Heimnetz.**
+
+Tailscale (einfach einrichtbar, kostenlos fuer bis zu drei Benutzer)
+oder WireGuard (voll selbst gehostet, aber mehr Setup) im Heimnetz.
+Das Smartphone verbindet sich wie zu Hause: die App spricht
+weiterhin dasselbe LAN-Protokoll (`MQTT 1883`, `HTTP 80`), und der
+Drucker denkt, der Client sei im Heim-WLAN. **Kein eigener App-Code
+noetig** – wir dokumentieren die Einrichtung in einer kurzen
+Anleitung, implementieren aber nichts selbst. Vorteil: funktioniert
+sofort mit der LAN-Code-Base, keine Elegoo-API-Abhaengigkeit,
+Daten verlassen das Heimnetz nicht.
+
+**Weg 2 (nach MVP, optional): Elegoo-Cloud-Modul.**
+
+PIN-basierte Kopplung ueber Elegoo-Server. Fuer Benutzer, die kein
+VPN einrichten koennen oder wollen. In der App:
+
+- Standardmaessig **AUS** (opt-in in den Einstellungen).
+- In der UI klar als „ueber Elegoo-Server" gekennzeichnet, mit
+  Hinweis dass Druckauftraege dadurch die Haende von Elegoo
+  passieren.
+- Zugangsdaten in `flutter_secure_storage` /
+  Keychain / Android-Keystore, nicht im App-State.
+- Implementierung aus **ElegooSlicer** (AGPL-3.0) ableitbar – AGPL
+  ist mit unserer AGPL-Lizenz kompatibel, kein Lizenzkonflikt. Das
+  Reverse-Engineering ist dort schon fuer die Desktop-Version
+  gemacht; der Cloud-MQTT-Broker und das Pairing-API sind dort
+  sichtbar.
+- **Risiko:** Elegoo kann die Cloud-API jederzeit stillegend
+  umbauen. Das Modul braucht Pflege; faellt es aus, fallen nur die
+  Cloud-Benutzer darueber, nicht die LAN-/VPN-Benutzer. Deshalb
+  bewusst **nachgereicht**, nicht Teil des MVP.
+
+Reihenfolge in `docs/roadmap.md` Phase 2: **LAN (MVP) → VPN
+(Doku, kein Code) → Cloud-Modul (nach MVP)**.
+
 ### Zusammenfassung des Pfads (nach erfolgreichem Handshake)
 
 Zum spaeteren Nachbau in Dart:

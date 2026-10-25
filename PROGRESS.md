@@ -8,6 +8,136 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 09:10 – CC2-Vollstatus, CANVAS-Belegung bestaetigt, Kerbenwuerfel auf CC2 hochgeladen
+
+Fortsetzung des Netzwerk-Durchstichs; Druck selbst steht Klaus zur
+Sichtkontrolle an.
+
+### Vollstatus + CANVAS gelesen (2 MQTT-Requests, read-only)
+
+- **method 1002 GET_STATUS**: Drucker idle (`machine_status.status=1`),
+  Bett 24 °C, Nozzle 28 °C, geparkt bei x=52.5, y=264, z=4.97.
+  **Kein `plate_type`/`bed_type`-Feld im Statusschema** – der CC2
+  meldet nicht, welche Druckbettseite montiert ist. Als blinder Punkt
+  dokumentiert, nicht geraten.
+- **method 2005 GET_CANVAS_STATUS**: Erwartung A1+A2 PETG, A3+A4 PLA
+  **bestaetigt**. Konkret:
+  - A1 (tray 0) = ELEGOO PETG, schwarz
+  - A2 (tray 1) = ELEGOO RAPID PETG, weiss
+  - A3 (tray 2) = ELEGOO PLA PRO, schwarz
+  - **A4 (tray 3) = ELEGOO RAPID PLA+, weiss** → Ziel-Slot fuer den
+    Testdruck
+
+### Kerbenwuerfel auf Poco sliceen
+
+- Modell: `cube_notched_20mm_centered_cc2.stl` (vorzentriert, 24
+  Dreiecke, +X+Y+Z-Kerbe).
+- Profile: CC2 0.4 nozzle + 0.20mm Standard + Elegoo PLA @ECC2.
+- Binary: `engine/bin/handslice-cli-arm64`.
+- Laufzeit: 0.83 s (adb-shell incl. overhead; davon ~0.7 s compute).
+- Output: `engine/test/out-device/handslice_kerbenwuerfel.gcode`,
+  **220 261 Byte, 100 Layer, 9m 25s, 3.52 g**.
+- Im G-Code-Header steht `curr_bed_type = High Temp Plate` und
+  `first_layer_bed_temperature = 60`. Abgleich mit dem Drucker-
+  Status: **nicht moeglich**, weil der CC2 kein `plate_type`
+  meldet. Dokumentiert, kein Widerspruch markiert.
+
+### HTTP-PUT-Upload (chunked)
+
+Nach „Nur LAN"=ON ist Port 80 **jetzt offen** (gestern 08:15 noch
+closed – „Nur LAN" schaltet neben MQTT auch den Upload-Port frei).
+Datei ist <1 MiB, deshalb 1 Chunk:
+
+```
+PUT http://<ip>/upload
+Content-Range: bytes 0-220260/220261
+X-File-Name: handslice_kerbenwuerfel.gcode
+X-File-MD5:  49f070da14eabe095aba554478bdbe59
+X-Token:     <Access-Code aus .env, nicht geloggt>
+→ HTTP 200 in 1507 ms
+→ {"error_code": 0, "offset": 220260}
+```
+
+Dateiliste-Pruefung per MQTT (`method 1044 GET_FILE_LIST`):
+`handslice_kerbenwuerfel.gcode` erscheint sofort im Listing (jetzt
+21 Dateien). `method 1046 GET_FILE_DETAIL`: 100 Layer,
+`print_time=565s`, `color_map=[{t:0, name:"PLA", color:"#F2754E"}]`.
+
+### Druckstart-Befehl vorbereitet, NICHT gesendet
+
+Vollstaendiger `method 1020`-Aufruf in `docs/networking-cc2.md`
+Abschnitt „Druckstart-Befehl vorbereitet". Zusammengefasst:
+
+- `slot_map: [{"t": 0, "canvas_id": 0, "tray_id": 3}]`  → Tool 0
+  → CANVAS A4 (RAPID PLA+ weiss).
+- `printer_check: true` + `bedlevel_force: true` → Bettnivellierung
+  vor dem Druck eingeschaltet (`bedlevel_force` ist laut
+  CC2_PROTOCOL.md der dokumentierte Weg, `printer_check=true`
+  ergaenzt den „immer-leveln"-Modus).
+- `storage_media: "local"`, `print_layout: "A"`,
+  `delay_video: false`.
+
+Klaus kontrolliert A4-Belegung und Belag am Drucker und startet
+dann manuell. **Nicht aus dem Script heraus starten.**
+
+### Roadmap + networking-cc2.md: Fernzugriff dokumentiert
+
+Phase 2 der Roadmap umsortiert und erweitert:
+
+1. **LAN (MVP)** – `lan_status=1` erforderlich, direkte MQTT+HTTP.
+2. **VPN (gratis, kein App-Code)** – Tailscale / WireGuard ins
+   Heimnetz. Nutzer verbindet sich wie zu Hause, LAN-Protokoll
+   greift. Nur Doku, keine Implementierung.
+3. **Elegoo-Cloud-Modul (nach MVP, optional)** – PIN-Kopplung ueber
+   Elegoo-Server. Standardmaessig AUS, UI-Hinweis „ueber Elegoo-
+   Server", Credentials in Secure-Storage. Implementierung aus
+   ElegooSlicer (AGPL) ableitbar – AGPL-kompatibel.
+   Risiko: Elegoo kann die Cloud-API jederzeit aendern.
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Vollstatus via `method 1002` liest den gesamten Zustand des CC2
+  in einem Request/Response-Paar. Beweis: 1476 Byte Antwort
+  (`/tmp/cc2_status/method_1002_get_status.json`, nicht
+  committet weil kein geteiltes Material).
+- CANVAS-Belegung via `method 2005` passt zur Erwartung (A1+A2
+  PETG, A3+A4 PLA). Beweis: `/tmp/cc2_status/method_2005_get_canvas.json`
+  Vollantwort, Zusammenfassung als Tabelle in
+  `docs/networking-cc2.md`.
+- Kerbenwuerfel-G-Code auf Poco gebaut (`handslice-cli-arm64`,
+  0.83 s inkl. adb-Overhead), 220 261 Byte, 100 Layer.
+- Chunked HTTP-PUT-Upload auf Port 80 funktioniert: `HTTP 200`,
+  `error_code=0`. Datei anschliessend im `GET_FILE_LIST`
+  (method 1044) sichtbar; `GET_FILE_DETAIL` (method 1046) liefert
+  korrekten Layer-Count, print_time und color_map.
+- Fertige `method 1020`-Druckstart-Payload in Doku vorbereitet, mit
+  slot_map auf A4 und `bedlevel_force=true` fuer die
+  Bettnivellierung.
+
+**2. Ungeprueft**
+
+- **Druckstart selbst.** Nach Klaus-Vorgabe bewusst nicht ausgefuehrt.
+  Erfolg steht erst nach manuellem Start durch Klaus und
+  Sichtkontrolle am Drucker fest.
+- **plate_type/bed_type im Status.** Nicht vorhanden (bestaetigt
+  nicht geraten) – damit auch kein Abgleich gegen den
+  `curr_bed_type` im G-Code moeglich.
+- **Resume-Verhalten bei Upload-Abbruch.** Mit einer <1 MiB-Datei
+  nicht getestet; der `offset`-Wert im Response-Body koennte als
+  Resume-Marker genutzt werden, braucht aber einen groesseren
+  Testfile fuer einen echten Nachweis.
+- **VPN- und Cloud-Pfad** – nur dokumentiert, nicht implementiert.
+
+**3. Geht nicht**
+
+- (keine neuen Blocker)
+
+---
+
 ## 2026-10-25 08:40 – CC2-MQTT-Handshake erfolgreich (lan_status=1), api_status ist Delta-only
 
 Klaus hat „Nur LAN" am CC2 eingeschaltet und den Testlauf freigegeben.
