@@ -57,3 +57,9 @@ __pycache__/
 
 # Referenz-AppImage und sonstige externe Build-Artefakte (nicht einchecken)
 /engine/reference/
+.env
+
+# Claude Code lokale Settings (geteilte Projekt-Settings in .claude/ bleiben
+# eincheckbar, falls spaeter angelegt – nur der User-lokale Override wird
+# ignoriert)
+.claude/settings.local.json

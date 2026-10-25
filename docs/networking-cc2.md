@@ -324,6 +324,81 @@ MQTT CONNACK: session_present=0 return_code=5 (Not authorized) in 52ms
 Erwartet – ohne `elegoo`-Username + Access-Code-Passwort wird der
 Connect zurueckgewiesen. CC2 erzwingt also Auth (gut).
 
+### MQTT 1883 Connect MIT Auth (2026-10-25 08:15)
+
+Zugangsdaten vorbereitet: `~/handslice/.env` enthaelt `CC2_IP` und
+`CC2_ACCESS_CODE` (6 Zeichen). `.env` ist in `.gitignore` und auf
+`chmod 600`. Der Code wird aus der Variable in das MQTT-Password-Feld
+gesetzt und niemals in Logs/stdout/Docs geschrieben.
+
+Discovery direkt davor erneut gelaufen – `token_status=1`,
+**`lan_status=0`** (Nur-LAN-Modus bewusst aus, siehe Klaus-Vorgabe).
+
+Testablauf mit `paho-mqtt 1.6.1` (`python-paho-mqtt`-Pacman-Paket):
+
+- `username="elegoo"`, `password=<Access-Code aus .env>`
+- `client_id="hsltest<4-hex>"` (lokal zufaellig)
+- `request_id=<27 hex Zeichen>` (lokal zufaellig)
+- MQTT 3.1.1, Clean Session, Keep-Alive 60 s
+- Geplant: CONNECT → SUBSCRIBE 3 Topics → PUBLISH `api_register` →
+  einmal `api_status` lesen → PING → DISCONNECT.
+
+**Ergebnis:**
+
+```
+CONNACK rc=5  (0=accepted, 4=badcred, 5=notauthz)
+```
+
+Verbindung wird vom CC2 abgelehnt. Nach Klaus-Vorgabe
+(„Wenn die Verbindung mit `Nur LAN` aus abgelehnt wird: Befund
+dokumentieren und stoppen – NICHT selbst nach Workarounds suchen")
+hier gestoppt. Kein Register-Request, kein Status-Lesen, kein PING.
+Sauberer `DISCONNECT`.
+
+**Mutmassliche Ursache:**
+
+- **lan_status=0 ist der primaere Verdacht.** `rc=5` kam identisch
+  schon beim Connect ohne Auth zurueck – also bevor Credentials
+  ueberhaupt gegen irgendwas abgeglichen werden konnten. Der CC2
+  reserviert den LAN-MQTT-Pfad vermutlich fuer den „Nur LAN"-Modus
+  und akzeptiert sonst nur die Cloud-Session.
+- Alternativ, aber weniger wahrscheinlich: der Access-Code wurde
+  seit der Anzeige am Display inzwischen rotiert.
+
+**Was Klaus entscheidet:**
+
+- „Nur LAN" am Drucker-Display einschalten und Test wiederholen
+  (hier dann weiterlaufen: Register-Handshake, api_status, PONG,
+  CANVAS-Slot-Belegung lesen). ODER
+- Cloud-Pfad fuer Phase 2 ausarbeiten – braeuchte Elegoo-Konto-API
+  (Reverse-Engineering noch nicht gemacht).
+
+Bis zur Entscheidung bleibt dieser Abschnitt in `networking-cc2.md`
+als „geprueft, abgelehnt wegen Policy" stehen; der weiterfuehrende
+Protokoll-Teil (Register-Response-Parse, CANVAS-Slot-Map) bleibt
+Theorie aus den Reverse-Engineering-Quellen.
+
+### CANVAS-Slot-Belegung (noch nicht am Geraet verifiziert)
+
+Erwartung laut Klaus: Slot 1+2 PETG, Slot 3+4 PLA. Pruefung
+erfordert `api_status` oder `method 2005`-Request ueber einen
+erfolgreichen MQTT-Handshake. Steht aus (siehe Rubrik oben). Format
+laut Protokoll-Quelle:
+
+```
+canvas_list[].tray_list[]  — pro Slot 9 Felder, u. a.
+   type   ("PLA"/"PETG"/"PETG-CF"/…)
+   color  (6-Hex-String)
+   nozzle_temp_min / _max
+   remain (optional, kann null sein)
+   tag_uid (optional, kann null sein)
+```
+
+Erwartung-Nachweis-Lauf: nach aktivierter „Nur LAN"-Freischaltung
+pruefen, ob die Datenstruktur die vier Slots in der dokumentierten
+Reihenfolge liefert und die Materialien stimmen. Das ist der Input
+fuer die App-seitige Slot-Mapping-UI im MVP.
+
 ### HTTP-Probes
 
 ```

@@ -8,6 +8,112 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 08:20 – CC2-MQTT-Handshake mit Access-Code: Policy-Ablehnung (lan_status=0)
+
+Klaus hat IP + Zugangscode fuer den CC2 in `~/handslice/.env`
+hinterlegt (`CC2_IP`, `CC2_ACCESS_CODE`; `.env` ist in `.gitignore`,
+`chmod 600`). Klaus hat „Nur LAN" am Drucker bewusst **aus** gelassen
+(Cloud-Verbindung soll nicht ohne Grund gekappt werden).
+
+**Was gemacht:**
+
+- `.gitignore` ergaenzt: `.claude/settings.local.json` (nicht der ganze
+  `.claude/`-Ordner).
+- UDP-52700-Discovery wiederholt: `sn=<cc2-sn>`,
+  `token_status=1`, **`lan_status=0`**.
+- `python-paho-mqtt` ueber Pacman installiert.
+- MQTT-Testscript gegen den CC2: `username="elegoo"`,
+  `password=<Access-Code aus .env, nie in Logs>`,
+  `client_id="hsltest<4-hex>"` (lokal zufaellig),
+  `request_id=<27 hex>` (lokal zufaellig). Plan: CONNECT → SUBSCRIBE
+  → `api_register` → `api_status` 1x → PING → DISCONNECT.
+
+**Ergebnis:**
+
+```
+CONNACK rc=5  (Not authorized)
+```
+
+Direkt vom CC2 abgelehnt, bevor Register-Handshake moeglich war.
+`rc=5` kommt identisch zur anonymen Verbindung ohne Auth zurueck –
+der Drucker lehnt also schon den Connect-Versuch ab, nicht erst die
+Credentials.
+
+Nach Klaus-Vorgabe („bei Ablehnung mit „Nur LAN" aus: dokumentieren
+und stoppen – nicht nach Workarounds suchen") hier **gestoppt**.
+Kein Register-Request, kein Status-Lesen, kein PING.
+
+**Access-Code-Pruefung (ohne Inhalt zu zeigen):** Variable korrekt
+aus `.env` geladen, Laenge 6 Zeichen (plausibles Format fuer
+CC2-PIN). Loesung mit anderer Credential-Form nicht probiert.
+
+Daten im Repo-Doku:
+
+- `docs/networking-cc2.md` Abschnitt „MQTT 1883 Connect MIT Auth
+  (2026-10-25 08:15)" enthaelt den Nachweislauf und die Hypothese
+  (lan_status=0 blockt den LAN-MQTT-Pfad). Ausserdem neuer Abschnitt
+  „CANVAS-Slot-Belegung (noch nicht am Geraet verifiziert)" mit der
+  Erwartung Slot 1+2 PETG / 3+4 PLA und dem Feld-Schema aus den
+  Reverse-Engineering-Quellen.
+
+**Entscheidungsfrage an Klaus:**
+
+- „Nur LAN" am Drucker-Display einschalten → naechster Testlauf
+  kann Register-Handshake durchfuehren und CANVAS-Slot-Belegung
+  gegen die Erwartung verifizieren. **Oder**
+- Cloud-Pfad fuer Phase 2 ausarbeiten (Elegoo-Konto-API, deutlich
+  mehr Reverse-Engineering-Aufwand).
+
+Credentials-Hygiene nachgewiesen:
+
+- `.env` nicht eingecheckt (`git status` zeigt sie nicht als
+  „unversioniert").
+- Access-Code taucht nirgends im Terminal, in Logs, in Doku, in
+  PROGRESS.md oder in Commits auf. Script `/tmp/mqtt_test.py` liest
+  die Datei zur Laufzeit, speichert den Code nicht in Variablen
+  ausserhalb der Session und wird nach dem Commit nicht gebraucht.
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- `.gitignore` ignoriert jetzt `.claude/settings.local.json`
+  (gezielt), nicht den ganzen `.claude/`-Ordner. Beweis: `git check-
+  ignore .claude/settings.local.json` → ignoriert, `git status`
+  listet `.claude/` weiterhin als unversioniert (dort nur
+  `scheduled_tasks.lock`, der von Klaus bei Bedarf separat
+  entschieden werden kann).
+- CC2-Discovery UDP 52700 reproduziert mit identischer Antwort wie
+  gestern: `sn=<cc2-sn>`, `token_status=1`, `lan_status=0`.
+- MQTT-Client-Setup gegen den CC2 mit Credentials aus `.env`:
+  Variable korrekt geladen, Laenge 6 Zeichen plausibel, TCP-Connect
+  auf 1883 geht durch, MQTT-CONNACK wird empfangen – also die
+  gesamte Transport-Kette ist belastbar.
+
+**2. Ungeprueft**
+
+- **Register-Handshake, api_status-Snapshot, CANVAS-Slot-Belegung**.
+  Alle drei nicht geprueft, weil der CONNACK=5-Abbruch frueher kommt.
+  Erwartung Slot 1+2 PETG / 3+4 PLA bleibt theoretisch, bis „Nur
+  LAN" aktiviert ist.
+- **Access-Code-Validitaet**. Wenn der Grund fuer `rc=5` nicht
+  `lan_status=0` ist, sondern ein inzwischen rotierter Code am
+  Display, waere auch das noch zu klaeren. Hier aber ausdruecklich
+  **nicht** blind nachprobiert.
+
+**3. Geht nicht**
+
+- **CC2-LAN-MQTT-Register mit lan_status=0.** CONNACK rc=5. Nicht
+  als Blocker im Drei-Versuche-Sinn eingetragen – das ist eine
+  **Policy-Entscheidung des Drucker-Herstellers / des Benutzers**,
+  nicht ein Code- oder Konfigurationsfehler, der hier auf AMR5
+  reparierbar waere. Siehe `docs/networking-cc2.md` fuer den
+  Nachweislauf und die Entscheidungsfrage an Klaus.
+
+---
+
 ## 2026-10-25 07:50 – Divergenz-Ursache gefunden: TBB-Race auf arm64; CC2-LAN-Protokoll geklaert; UI-Stack Flutter
 
 Nachtlauf. Zehn Punkte, alle abgearbeitet:
