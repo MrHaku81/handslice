@@ -566,6 +566,79 @@ Extruder einen Eintrag) und ordnet Tool-Index `t=0` einem PLA
 zu – wichtig fuer das Slot-Mapping im Druckstart (siehe naechster
 Abschnitt).
 
+### Nachweislauf 2026-10-25 09:18–09:34: Druck handslice_kerbenwuerfel.gcode (erfolgreich)
+
+Klaus hat die Sichtkontrolle am Drucker gemacht (Bett sauber, Belag passt
+zu „High Temp Plate", A4 mit RAPID PLA+ bestueckt) und den vorbereiteten
+`method 1020`-Aufruf freigegeben.
+
+**Druckstart-Request** (identisch zum vorbereiteten Payload im Abschnitt
+darunter):
+
+```
+PUB elegoo/<cc2-sn>/<client_id>/api_request
+    {"id":1914939019,"method":1020,"params":{
+      "storage_media":"local",
+      "filename":"handslice_kerbenwuerfel.gcode",
+      "config":{"delay_video":false,"printer_check":true,"print_layout":"A",
+                "bedlevel_force":true,"slot_map":[{"t":0,"canvas_id":0,"tray_id":3}]}}}
+
+Antwort (nach 1 s):
+{"id":1914939019,"method":1020,"result":{"error_code":0}}
+```
+
+**Verlauf (api_status-Delta-Merge, Zeit relativ zum Request):**
+
+| t      | Phase | Beobachtung |
+|---|---|---|
+| 0 s      | Start-Response             | `error_code=0` |
+| +1 s     | machine_status.status 2    | `None → 2` (Printing). Bett-Target 60, Nozzle-Target 140 (Pre-Heat laut `machine_start_gcode`). `bed_mesh_detect=true`. |
+| +60 s    | Pre-Heat erreicht          | Bett 61/60, Nozzle 140/140, Toolhead geparkt. |
+| +120 s   | Nivellierung Probe 1       | Position (120, 261, z=-0.6), Nozzle schwingt auf 164. |
+| +180 s   | Nivellierung Probe 2       | (132, 124, z=3.06). |
+| +240 s   | Nivellierung Probe 3       | (116, 140, z=3.03). |
+| +300 s   | Finales Heizen             | Nozzle 209/210 (Drucktemp PLA), zurueck geparkt. |
+| **+369 s (6:09)** | **Layer 1 erreicht** | `current_layer=1`. Druck beginnt. |
+| +420 s   | Layer 6                    | (130.5, 135.6, z=1.2) |
+| +480 s   | Layer 19                   | (137.8, 136.3, z=3.8) |
+| +540 s   | Layer 32                   | (118.2, 136.3, z=6.4) |
+| +600 s   | Layer 45                   | (118.6, 117.1, z=9.0) |
+| +660 s   | Layer 58                   | (120.6, 135.1, z=11.7) |
+| +720 s   | Layer 70                   | (119.0, 135.6, z=14.0) |
+| +780 s   | Layer 82                   | (137.1, 125.1, z=16.4) |
+| +840 s   | Layer 95                   | (137.8, 131.3, z=19.0) |
+| +900 s   | Layer 100 erreicht, Cooldown | Bett-Target auf 0, Position (254.5, 3.5, z=80) – Toolhead parkt oben. |
+| **+914 s (15:14)** | **Druck fertig** | `machine_status.status=2 → 1` (Idle). `print_status.state="complete"`. `print_duration=628s`, `total_duration=912s`, `current_layer=100`. |
+
+**Keine Fehlermeldung.** `machine_status.exception_status` blieb leer, kein
+error_code aus den api_response-Topics. Monitor exit nach 30 s im Idle.
+
+**Zeit-Aufteilung:**
+
+- Pre-Heat + Nivellierung + finaler Heat: 6 min 9 s (369 s).
+- Reiner Druck Layer 1–100: 9 min 5 s (545 s).
+  Slicer-Estimate aus den Stats: 565 s (9m 25s). Reale Zeit war
+  **4 % unter dem Estimate** – akzeptabel.
+- Gesamtzeit vom Request bis Idle: 15 min 14 s.
+
+**Beobachtung zu `total_layer`:** Im finalen Snapshot steht
+`total_layer=0`, obwohl `current_layer=100` erreicht wurde. Entweder
+setzt der CC2 das Feld beim Abschluss zurueck, oder es wird nur im
+Verlauf gepusht und nicht im End-Delta. **Nicht problematisch**, aber
+fuer die App-UI-Logik: `current_layer` ist der verlaessliche Fortschritt,
+`total_layer` nur solange `state in {"printing","paused"}`.
+
+**Beobachtung zu `print_duration` vs. `total_duration`:**
+
+- `total_duration=912s` ≈ Request-bis-Idle (914s), also die
+  Komplett-Zeit inkl. Pre-Heat + Nivellierung.
+- `print_duration=628s` ≈ reine Druckzeit + ein Teil des Setups
+  (nicht exakt die 545s pur Druck).
+
+Fuer die App-UI reichen beide als „geschaetzt verbleibend" ohnehin
+nicht – wichtig ist `remaining_time_sec`, das waehrend des Drucks
+in jedem api_status mitwandert.
+
 ### Druckstart-Befehl vorbereitet (NICHT ausgefuehrt)
 
 Fertige `method 1020`-Payload fuer den naechsten Lauf durch Klaus

@@ -8,6 +8,116 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 09:34 – Phase-2-MVP-Durchstich: Kerbenwuerfel erfolgreich auf CC2 gedruckt
+
+Klaus hat Sichtkontrolle gemacht (Bett sauber, Belag passt zu „High Temp
+Plate", A4 mit RAPID PLA+ bestueckt) und den vorbereiteten
+`method 1020`-Aufruf freigegeben.
+
+### Druckstart
+
+`method 1020` gesendet mit dem Payload aus dem Vortag:
+
+- `storage_media="local"`, `filename="handslice_kerbenwuerfel.gcode"`
+- `slot_map=[{t:0, canvas_id:0, tray_id:3}]` → Tool 0 → CANVAS A4
+  (RAPID PLA+ weiss)
+- `printer_check=true` + `bedlevel_force=true` → Bettnivellierung
+  vor dem Druck
+- `print_layout="A"`, `delay_video=false`
+
+Antwort: `{"id":1914939019,"method":1020,"result":{"error_code":0}}`.
+
+### Monitor-Verlauf (api_status Delta-Merge)
+
+Zeit relativ zum Druckstart:
+
+- **t+1 s:** `machine_status.status: None→2` (Printing). Pre-Heat
+  Nozzle 140 °C, Bett 60 °C. `bed_mesh_detect=true`.
+- **t+60 s:** Pre-Heat erreicht (Nozzle 140, Bett 61).
+- **t+120 … 240 s:** Nivellierung – Probe-Positionen (120, 261),
+  (132, 124), (116, 140). Z-Werte zwischen z=-0.6 und z=3.0.
+- **t+300 s:** Finales Heizen auf Drucktemp 210 °C (PLA).
+- **t+6:09 (369 s): Layer 1 erreicht.** Druck beginnt.
+- **t+7:00:** Layer 6. **t+8:00:** 19. **t+9:00:** 32. **t+10:00:** 45.
+  **t+11:00:** 58. **t+12:00:** 70. **t+13:00:** 82. **t+14:00:** 95.
+- **t+15:00:** Layer 100, Bett-Target auf 0, Toolhead parkt oben
+  (254.5, 3.5, z=80).
+- **t+15:14 (914 s): Druck fertig.** `machine_status.status: 2→1`.
+  `print_status.state="complete"`, `print_duration=628 s`,
+  `total_duration=912 s`.
+
+### Keine Fehlermeldung
+
+`machine_status.exception_status` blieb den gesamten Lauf leer. Kein
+`error_code!=0` auf irgendeinem api_response oder api_status. Monitor
+hat 30 s im Idle gewartet und sich dann sauber getrennt (DISCONNECT).
+
+### Zeit-Aufteilung
+
+- Pre-Heat + Nivellierung + finaler Heat: 6 min 9 s.
+- Reiner Druck Layer 1–100: 9 min 5 s. Slicer-Estimate: 9 min 25 s –
+  **4 % unter dem Estimate**. Keine Pausen, keine Verzoegerungen.
+- Gesamtzeit vom MQTT-Request bis Idle: 15 min 14 s.
+
+### Phase-2-Erfolgskriterium erfuellt
+
+Laut `docs/roadmap.md` Phase 2: „Vom Poco gesendeter Druck startet
+auf dem CC2 im Heim-WLAN, mit korrektem CANVAS-Slot-Mapping und
+aktivierter Bettnivellierung" – **jetzt nachweislich erfuellt**.
+
+Wichtig: Der Druck selbst wurde durch das Testscript auf dem AMR5
+gestartet (nicht vom Poco), weil die App noch nicht existiert. Der
+Transport-Pfad (MQTT 1883 + HTTP PUT 80) ist aber derselbe, den die
+App spaeter nehmen wird. Fuer den App-seitigen MVP-Nachweis braucht
+es noch den Flutter-Client (Phase 2 Code-Umsetzung).
+
+Nachweis dokumentiert in `docs/networking-cc2.md`, Abschnitt
+„Nachweislauf 2026-10-25 09:18–09:34: Druck handslice_kerbenwuerfel.gcode".
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- `method 1020` nimmt den vorbereiteten Druckstart-Payload an und
+  loest den Druck aus. Beweis: `{"result":{"error_code":0}}` im
+  api_response (siehe Log).
+- Bettnivellierung mit `bedlevel_force=true` laeuft tatsaechlich
+  (Probing-Bewegungen zwischen t+60 s und t+300 s, `bed_mesh_detect`
+  bleibt true).
+- Pre-Heat auf 140 °C → Vollheizen auf 210 °C → Layer 1 beginnt
+  bei t+6:09.
+- 100 Layer in 9 min 5 s abgezogen, dann sauberes Shutdown
+  (Toolhead parkt, Bett-Target 0, status 2→1).
+- `print_status.state="complete"` am Ende, keine
+  `exception_status`-Eintraege.
+- Credentials-Hygiene: Access-Code weiterhin in `.env` (chmod 600,
+  gitignored), nirgends in Logs, Doku, Terminal oder Commit
+  ausgegeben. Temp-Script `/tmp/mqtt_print.py` und Logs
+  `/tmp/cc2_print_log.txt` + `/tmp/cc2_print_run/` werden nach dem
+  Commit geloescht.
+
+**2. Ungeprueft**
+
+- **Qualitaet des gedruckten Objekts.** Fortschritt und State
+  stimmen, aber ob die Kerbe sauber ausgedruckt wurde / Adhesion /
+  Pfadqualitaet – das sieht Klaus am Drucker. Hier nur die
+  Transportschicht validiert.
+- **Resume nach Netz-Abbruch waehrend des Drucks.** Nicht getestet
+  (Verbindung lief die ganze Zeit stabil, PING alle 10 s). Fuer
+  die App ist das aber ein wichtiger Error-Pfad – naechster
+  Auftrag.
+- **CANVAS-Multimaterial-Switch mitten im Druck.** Dieser Lauf
+  hatte `total_toolchanges=0`. Das echte Multimaterial-Verhalten
+  (`slot_map` mit mehreren Tool-Indizes) ist noch nicht getestet.
+
+**3. Geht nicht**
+
+- (keine neuen Blocker)
+
+---
+
 ## 2026-10-25 09:10 – CC2-Vollstatus, CANVAS-Belegung bestaetigt, Kerbenwuerfel auf CC2 hochgeladen
 
 Fortsetzung des Netzwerk-Durchstichs; Druck selbst steht Klaus zur
