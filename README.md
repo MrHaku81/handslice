@@ -1,8 +1,21 @@
 # Handslice
 
+> **Stand Oktober 2026: Pre-Alpha.** Die Slicing-Engine läuft auf Android
+> (arm64), der erste Druck wurde vom Handy aus an einen Elegoo Centauri
+> Carbon 2 gesendet. Eine App gibt es noch nicht.
+
 **Ein mobil-nativer 3D-Drucker-Slicer fürs Handy.**
 Android-Frontend über die offene OrcaSlicer-Engine – vom Handy aus slicen und
 direkt an den Drucker schicken.
+
+## Erster Druck
+
+Auf einem Poco X3 Pro (Snapdragon 860) wurde ein 20-mm-Testwürfel mit
+Kerbe in unter einer Sekunde gesliced. Der G-Code ging per WLAN an den
+CC2 – chunked HTTP-PUT auf Port 80, Druckstart via MQTT auf Port 1883,
+beides im LAN-Modus am Drucker. 15 Minuten später lag das Teil sauber
+auf dem Bett; den Zeitraffer liefert der Drucker selbst, Clip in
+[`docs/media/erster-druck-zeitraffer.mp4`](docs/media/erster-druck-zeitraffer.mp4).
 
 > Motto: *freeing the orca from the desktop.*
 
@@ -53,9 +66,9 @@ Inspizieren der Vorschau.
 | Phase | Inhalt | Erfolgskriterium |
 |---|---|---|
 | 0 | App als dünner Client; Slicen läuft per Orca-CLI auf dem Build-Rechner (`server/`) | UI-Workflow end-to-end, G-Code kommt zurück |
-| 1 | Orca-Engine headless als ARM64-Binary auf dem Gerät | **Bytegleicher G-Code** wie Desktop-Orca bei identischem Profil und 3mf |
+| 1 | Orca-Engine headless als ARM64-Binary auf dem Gerät | **✓ 2026-10-24:** arm64-Binary slicet den Testwürfel in 0.9 s auf dem Poco X3 Pro, G-Code funktional valide. Byte-Gleichheit zum Desktop präzisiert statt gelockert – Nondeterminismus-Befund in `docs/engine-integration.md`. |
 | 1b | Elegoo-Profile aus ElegooSlicer einlesen | CC2-Profile laden ohne Fehler, G-Code identisch zu ElegooSlicer-Desktop |
-| 2 | Elegoo-Netzwerkschicht: Discovery, Upload, Start, Status | CC2 startet einen vom Handy gesendeten Druck |
+| 2 | Elegoo-Netzwerkschicht: Discovery, Upload, Start, Status | **✓ Durchstich 2026-10-25:** UDP-Discovery + MQTT-Register + HTTP-PUT-Upload + `method 1020`-Druckstart gegen den CC2 arbeiten; der erste Druck lief sauber durch. App-Client fehlt noch. |
 | 3 | STL-Import, Auto-Orient, Layer-Vorschau | – |
 | 4 | Color-Painting, Mehrgeräte | – |
 
