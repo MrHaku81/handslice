@@ -29,6 +29,27 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 
+# Stufenzuordnung (Klaus-Vorgabe 2026-10-25):
+#   Basis           = simple
+#   Fortgeschritten = simple + advanced
+#   Experte         = simple + advanced + expert + develop
+# Umsetzung: pro Option kleinster Tier, in dem sie zuerst erscheint.
+# ("develop" wird in die Experte-Stufe gezogen – kein eigener UI-Schalter.)
+TIER_FOR_MODE = {
+    "simple":   "basis",
+    "advanced": "fortgeschritten",
+    "expert":   "experte",
+    "develop":  "experte",
+}
+TIERS = ("basis", "fortgeschritten", "experte")
+# "Welche Tiers blenden eine Option mit mode=X ein?"
+TIER_INCLUDES_MODE: dict[str, set[str]] = {
+    "basis":           {"simple"},
+    "fortgeschritten": {"simple", "advanced"},
+    "experte":         {"simple", "advanced", "expert", "develop"},
+}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--schema", required=True, type=Path)
@@ -82,6 +103,9 @@ def main() -> int:
                         "type":   od["type"],
                         "mode":   od["mode"],
                         "mode_int": od["mode_int"],
+                        # Kleinster Stufen-Schalter, bei dem diese Option
+                        # auftaucht. Konsumiert von der App-UI.
+                        "tier":   TIER_FOR_MODE.get(od["mode"], "experte"),
                         "label_en": label_en,
                         "label_de": de.get(label_en, "") if label_en else "",
                         "tooltip_en": tip_en,
@@ -121,8 +145,12 @@ def main() -> int:
     rl = report_lines.append
     rl("# Phase 4.1 – Einstellungsbaum: Schema-Report")
     rl("")
-    rl(f"- OrcaSlicer-Version (aus `--dump-schema`): `{raw.get('orca_version')}`")
-    rl(f"- Options-Definitionen gesamt (print_config_def.options): **{raw['option_count']}**")
+    rl(f"- OrcaSlicer-Release (`SoftFever_VERSION` aus `version.inc:10`, "
+       f"deckt sich mit Submodul-Tag): `{raw.get('orca_version')}`")
+    rl(f"- Interne libslic3r-Config-Format-Version (`SLIC3R_VERSION` aus "
+       f"`version.inc:17`, Legacy aus Slic3r/PrusaSlicer, NICHT das Nutzer-"
+       f"Release): `{raw.get('slic3r_internal_version')}`")
+    rl(f"- Options-Definitionen gesamt (`print_config_def.options`): **{raw['option_count']}**")
     rl(f"- Layout-Quelle: `{layout['source']['file']}` (Tag `{layout['source']['orca_tag']}`)")
     rl(f"- Uebersetzungs-Quelle: `OrcaSlicer_de.po` mit **{len(de)}** Eintraegen")
     rl("")
@@ -165,6 +193,27 @@ def main() -> int:
                         c[k["mode"]] += 1
         total = sum(c.values())
         rl(f"| {area} | {c['simple']} | {c['advanced']} | {c['expert']} | {c['develop']} | {total} |")
+    rl("")
+    rl("## Zuordnung zu Stufen-Schaltern (Klaus-Vorgabe)")
+    rl("")
+    rl("- **Basis** zeigt: `simple`")
+    rl("- **Fortgeschritten** zeigt: `simple + advanced`")
+    rl("- **Experte** zeigt: `simple + advanced + expert + develop`")
+    rl("")
+    rl("Das Mapping ist monoton: wer eine hoehere Stufe waehlt, sieht alles der niedrigeren Stufen plus mehr.")
+    rl("")
+    rl("| Bereich | Basis | Fortgeschritten | Experte |")
+    rl("|---|---:|---:|---:|")
+    for area in ("print", "filament", "printer"):
+        counts = {t: 0 for t in TIERS}
+        for p in settings_schema["areas"][area]:
+            for g in p["groups"]:
+                for k in g["keys"]:
+                    if "mode" not in k: continue
+                    for tier in TIERS:
+                        if k["mode"] in TIER_INCLUDES_MODE[tier]:
+                            counts[tier] += 1
+        rl(f"| {area} | {counts['basis']} | {counts['fortgeschritten']} | {counts['experte']} |")
     rl("")
 
     # 3. Nicht zuordenbare Optionen (im Schema, aber nicht im Layout)

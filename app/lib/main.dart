@@ -8,6 +8,8 @@ import 'l10n/app_localizations.dart';
 import 'screens/project_screen.dart';
 import 'screens/print_screen.dart';
 import 'screens/settings_screen.dart';
+import 'settings/settings_overrides.dart';
+import 'settings/settings_schema.dart';
 import 'state/printer_state.dart';
 import 'state/project_state.dart';
 import 'theme/workshop_theme.dart';
@@ -39,11 +41,24 @@ Future<void> main() async {
     prefs: prefs,
     secure: const FlutterSecureStorage(aOptions: AndroidOptions.defaultOptions),
   );
+  // Phase 4.2: Einstellungs-Schema aus Asset laden. Schlaegt fehl, wenn
+  // der Asset-Bundle nicht da ist (etwa im Test ohne pumpAsset) – dann
+  // leeres Schema, damit die App weiterhin startet.
+  SettingsSchema settings;
+  try {
+    settings = await SettingsSchema.loadFromAsset();
+  } catch (e) {
+    debugPrint('SettingsSchema.loadFromAsset() fehlgeschlagen: $e');
+    settings = const SettingsSchema(orcaVersion: '', pagesByArea: {});
+  }
+  final overrides = SettingsOverrides();
 
   runApp(HandsliceApp(
     slicer: slicer,
     projectState: projectState,
     printerState: printerState,
+    settingsSchema: settings,
+    overrides: overrides,
   ));
 }
 
@@ -53,11 +68,15 @@ class HandsliceApp extends StatelessWidget {
     required this.slicer,
     required this.projectState,
     required this.printerState,
+    required this.settingsSchema,
+    required this.overrides,
   });
 
   final SlicerService slicer;
   final ProjectState projectState;
   final PrinterState printerState;
+  final SettingsSchema settingsSchema;
+  final SettingsOverrides overrides;
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +90,8 @@ class HandsliceApp extends StatelessWidget {
         slicer: slicer,
         projectState: projectState,
         printerState: printerState,
+        settingsSchema: settingsSchema,
+        overrides: overrides,
       ),
     );
   }
@@ -82,11 +103,15 @@ class RootShell extends StatefulWidget {
     required this.slicer,
     required this.projectState,
     required this.printerState,
+    required this.settingsSchema,
+    required this.overrides,
   });
 
   final SlicerService slicer;
   final ProjectState projectState;
   final PrinterState printerState;
+  final SettingsSchema settingsSchema;
+  final SettingsOverrides overrides;
 
   @override
   State<RootShell> createState() => _RootShellState();
@@ -108,7 +133,10 @@ class _RootShellState extends State<RootShell> {
         projectState: widget.projectState,
         printerState: widget.printerState,
       ),
-      const SettingsScreen(),
+      SettingsScreen(
+        schema: widget.settingsSchema,
+        overrides: widget.overrides,
+      ),
     ];
 
     return FocusTraversalGroup(

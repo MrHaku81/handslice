@@ -1,7 +1,8 @@
 # Phase 4.1 – Einstellungsbaum: Schema-Report
 
-- OrcaSlicer-Version (aus `--dump-schema`): `02.06.00.51`
-- Options-Definitionen gesamt (print_config_def.options): **751**
+- OrcaSlicer-Release (`SoftFever_VERSION` aus `version.inc:10`, deckt sich mit Submodul-Tag): `2.4.2`
+- Interne libslic3r-Config-Format-Version (`SLIC3R_VERSION` aus `version.inc:17`, Legacy aus Slic3r/PrusaSlicer, NICHT das Nutzer-Release): `02.06.00.51`
+- Options-Definitionen gesamt (`print_config_def.options`): **751**
 - Layout-Quelle: `src/slic3r/GUI/Tab.cpp` (Tag `v2.4.2`)
 - Uebersetzungs-Quelle: `OrcaSlicer_de.po` mit **5491** Eintraegen
 
@@ -139,6 +140,20 @@ Werte aus `libslic3r/Config.hpp:199-204`: `comSimple=0, comAdvanced=1, comExpert
 | print | 50 | 274 | 11 | 2 | 337 |
 | filament | 38 | 43 | 0 | 2 | 83 |
 | printer | 5 | 63 | 0 | 5 | 73 |
+
+## Zuordnung zu Stufen-Schaltern (Klaus-Vorgabe)
+
+- **Basis** zeigt: `simple`
+- **Fortgeschritten** zeigt: `simple + advanced`
+- **Experte** zeigt: `simple + advanced + expert + develop`
+
+Das Mapping ist monoton: wer eine hoehere Stufe waehlt, sieht alles der niedrigeren Stufen plus mehr.
+
+| Bereich | Basis | Fortgeschritten | Experte |
+|---|---:|---:|---:|
+| print | 50 | 324 | 337 |
+| filament | 38 | 81 | 83 |
+| printer | 5 | 68 | 73 |
 
 ## Nicht zuordenbare Optionen (im Schema, nicht im Tab.cpp-Layout)
 

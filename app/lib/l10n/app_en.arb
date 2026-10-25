@@ -89,6 +89,14 @@
 
   "settingsHeading": "Settings",
   "settingsPlaceholder": "The generated settings tree comes in a later milestone.",
+  "settingsSourceCaption": "Process settings — generated from OrcaSlicer {version}.",
+  "@settingsSourceCaption": {"placeholders": {"version": {"type": "String"}}},
+  "settingsTierBasis": "Basics",
+  "settingsTierAdvanced": "Advanced",
+  "settingsTierExpert": "Expert",
+  "settingsSearchHint": "Search (option, label, help)…",
+  "settingsResetTooltip": "Reset to profile default",
+  "settingsNoMatches": "No settings match the current filter.",
 
   "focusHintDpad": "Use D-pad / Tab to move focus, Enter / Space to activate.",
   "sampleBannerPlaceholder": "Milestone 1 scaffold with sample data — nothing is wired yet."

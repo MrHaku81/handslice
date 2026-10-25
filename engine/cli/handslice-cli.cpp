@@ -359,7 +359,13 @@ json dump_options_schema() {
     const PrintConfigDef& def = print_config_def;
     json out = json::object();
     out["schema_version"] = 1;
-    out["orca_version"]   = SLIC3R_VERSION;
+    // SoftFever_VERSION ist die Orca-Release-Nummer (version.inc:10) – was
+    // Nutzer unter "Orca 2.4.2" verstehen. SLIC3R_VERSION (version.inc:17)
+    // ist die interne libslic3r-Config-Format-Version (Legacy aus
+    // Slic3r/PrusaSlicer, "02.06.00.51"). Beide separat ausgeben, damit
+    // die Belegstelle sauber ist.
+    out["orca_version"]            = SoftFever_VERSION;
+    out["slic3r_internal_version"] = SLIC3R_VERSION;
     json options = json::object();
     // Enum ConfigOptionType -> Kurzname (Config.hpp:159+).
     auto type_name = [](ConfigOptionType t) -> std::string {

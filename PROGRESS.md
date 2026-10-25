@@ -43,6 +43,81 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-25 20:30 – Phase 4.2: Prozess-Einstellungen in der App (STOPP)
+
+Setzt direkt auf 4.1 auf. Nachgeholt vor 4.2:
+- `--dump-schema` liefert jetzt `orca_version` (aus `SoftFever_VERSION`,
+  version.inc:10) und `slic3r_internal_version` (SLIC3R_VERSION,
+  version.inc:17) getrennt. Submodul steht nachweislich auf `v2.4.2`
+  (Commit `8500fcdcc`); die `02.06.00.51` ist das interne libslic3r-
+  Config-Format-Legacy aus Slic3r/PrusaSlicer, nicht die Nutzer-Version.
+- `build_settings_schema.py` berechnet pro Option `tier` nach Klaus-
+  Vorgabe (`simple → basis`, `advanced → fortgeschritten`,
+  `expert|develop → experte`) und zeigt im Report die monotone
+  Ansammlung pro Stufe:
+  print 50/324/337, filament 38/81/83, printer 5/68/73.
+- arm64 `--dump-schema` am Poco gegen x86 diffen: steht aus (ADB-Device
+  war bei Abschluss nicht erreichbar). Build-Guard sichert gleichen
+  Quellstand; inhaltlich zwingend identisch, weil beide dieselbe
+  statische `print_config_def`-Instanz introspizieren.
+
+### Was in 4.2 gebaut wurde
+
+- **`app/assets/settings-schema.json`** (634 KB) als App-Asset gebuendelt.
+  Produziert von `engine/scripts/build_settings_schema.py` – rein
+  mechanisch aus Orca v2.4.2.
+- **`app/lib/settings/settings_schema.dart`**: Loader + Model
+  (`SettingsSchema`, `SettingPage`, `SettingGroup`, `SettingOption`) +
+  `enum SettingTier { basis, fortgeschritten, experte }` mit der
+  monotonen `includes(mode)`-Logik.
+- **`app/lib/settings/settings_overrides.dart`**: `SettingsOverrides`
+  (ChangeNotifier) haelt pro Options-Key den vom Nutzer gesetzten
+  Wert als serialisierten String; Reset entfernt ihn. Persistenz
+  pro Profil ("Als Profil speichern") kommt in 4.3.
+- **`app/lib/screens/settings_screen.dart`**: Prozess-Oberflaeche
+  - Stufen-Umschalter oben (Basis/Fortgeschritten/Experte), fokussierbar.
+  - Suchfeld filtert ueber Key/Label-de/Label-en/Tooltip-de/Tooltip-en.
+  - Reiter-Chips (horizontal scrollbar) fuer die Prozess-Seiten;
+    bei aktiver Suche sind alle Seiten gleichzeitig sichtbar.
+  - Pro Gruppe eine Karte, pro Option eine Zeile mit lokalisiertem
+    Label, aufklappbarem Tooltip (Info-Icon), rohem Key + Mode-Marker.
+  - Reset-Icon ↺ nur bei geaenderter Option; Label dann farbig
+    hervorgehoben.
+  - Bedienelemente je Typ: Switch (bool), Dropdown mit lokalisierten
+    enum-Labels (enum), Zahlfeld mit −/+-Steppern inkl. min/max aus
+    dem Schema (int/float/percent/float_or_percent), Textfeld (string),
+    Textfeld-Fallback fuer Vektor-/Spezial-Typen.
+  - Komplett per `Focus`+`Builder` fokus-navigierbar (D-Pad, Tab,
+    Controller).
+- **l10n**: 7 neue ARB-Keys (en + de) in `app_en.arb` + `app_de.arb`
+  (`settingsSourceCaption`, `settingsTierBasis/Advanced/Expert`,
+  `settingsSearchHint`, `settingsResetTooltip`, `settingsNoMatches`).
+
+### Tests
+
+- 5 neue Widget-Tests in `app/test/widget_test.dart`:
+  - `SettingTier.includes` mappt Klaus-Stufen korrekt.
+  - `SettingsSchema` laedt eine Mini-Fixture.
+  - `SettingsScreen` filtert nach Stufe (Basis zeigt nur simple,
+    Fortgeschritten + Experte wie erwartet).
+  - Override via Switch wird im `SettingsOverrides` gespeichert;
+    Reset-Icon nimmt ihn zurueck.
+  - Suchfeld filtert ueber alle Seiten (ignoriert das aktive Reiter-
+    Chip).
+- Alle 26/26 Tests gruen (`flutter test test/widget_test.dart`).
+
+### Nicht in 4.2 (bewusst)
+
+- "Als Profil speichern" (gehoert nach 4.3, dort wird auch der CLI-
+  Overrides-Pfad gebaut).
+- Filament- und Drucker-Reiter.
+- Vektor-/Spezial-Typen bekommen in 4.3 eigene Bedienelemente.
+- Interaktive Werkzeuge (Mal-Pfad fuer Stuetzen/Naht/Farbe,
+  Fuzzy-Skin-Painter) sind laut Klaus-Auftrag nicht Teil des
+  Einstellungsbaums und bleiben draussen.
+
+---
+
 ## 2026-10-25 19:00 – Phase 4.1: Einstellungsbaum-Schema aus OrcaSlicer erzeugt (STOPP)
 
 Grundsatz Phase 4: **nichts von Hand pflegen**. Alles mechanisch aus

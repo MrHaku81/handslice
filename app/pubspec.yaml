@@ -44,6 +44,10 @@ flutter:
     - assets/profiles/Elegoo/filament/fdm_filament_pla.json
     - assets/profiles/Elegoo/filament/BASE/Elegoo PLA @base.json
     - assets/profiles/Elegoo/filament/ECC2/Elegoo PLA @ECC2.json
+    # Phase 4.1: aus Orca v2.4.2 mechanisch erzeugter Options-Baum
+    # (engine/scripts/build_settings_schema.py). Enthaelt Reiter,
+    # Gruppen, Stufen und Deutsch-Uebersetzungen.
+    - assets/settings-schema.json
   fonts:
     - family: IBMPlexSans
       fonts:

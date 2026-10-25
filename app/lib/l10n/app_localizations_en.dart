@@ -245,6 +245,29 @@ class AppLocalizationsEn extends AppLocalizations {
       'The generated settings tree comes in a later milestone.';
 
   @override
+  String settingsSourceCaption(String version) {
+    return 'Process settings — generated from OrcaSlicer $version.';
+  }
+
+  @override
+  String get settingsTierBasis => 'Basics';
+
+  @override
+  String get settingsTierAdvanced => 'Advanced';
+
+  @override
+  String get settingsTierExpert => 'Expert';
+
+  @override
+  String get settingsSearchHint => 'Search (option, label, help)…';
+
+  @override
+  String get settingsResetTooltip => 'Reset to profile default';
+
+  @override
+  String get settingsNoMatches => 'No settings match the current filter.';
+
+  @override
   String get focusHintDpad =>
       'Use D-pad / Tab to move focus, Enter / Space to activate.';
 

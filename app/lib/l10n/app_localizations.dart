@@ -524,6 +524,48 @@ abstract class AppLocalizations {
   /// **'The generated settings tree comes in a later milestone.'**
   String get settingsPlaceholder;
 
+  /// No description provided for @settingsSourceCaption.
+  ///
+  /// In en, this message translates to:
+  /// **'Process settings — generated from OrcaSlicer {version}.'**
+  String settingsSourceCaption(String version);
+
+  /// No description provided for @settingsTierBasis.
+  ///
+  /// In en, this message translates to:
+  /// **'Basics'**
+  String get settingsTierBasis;
+
+  /// No description provided for @settingsTierAdvanced.
+  ///
+  /// In en, this message translates to:
+  /// **'Advanced'**
+  String get settingsTierAdvanced;
+
+  /// No description provided for @settingsTierExpert.
+  ///
+  /// In en, this message translates to:
+  /// **'Expert'**
+  String get settingsTierExpert;
+
+  /// No description provided for @settingsSearchHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search (option, label, help)…'**
+  String get settingsSearchHint;
+
+  /// No description provided for @settingsResetTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset to profile default'**
+  String get settingsResetTooltip;
+
+  /// No description provided for @settingsNoMatches.
+  ///
+  /// In en, this message translates to:
+  /// **'No settings match the current filter.'**
+  String get settingsNoMatches;
+
   /// No description provided for @focusHintDpad.
   ///
   /// In en, this message translates to:

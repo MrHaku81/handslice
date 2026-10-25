@@ -248,6 +248,30 @@ class AppLocalizationsDe extends AppLocalizations {
       'Der generierte Einstellungsbaum kommt in einer späteren Phase.';
 
   @override
+  String settingsSourceCaption(String version) {
+    return 'Prozess-Einstellungen — erzeugt aus OrcaSlicer $version.';
+  }
+
+  @override
+  String get settingsTierBasis => 'Basis';
+
+  @override
+  String get settingsTierAdvanced => 'Fortgeschritten';
+
+  @override
+  String get settingsTierExpert => 'Experte';
+
+  @override
+  String get settingsSearchHint => 'Suchen (Option, Beschriftung, Hilfe)…';
+
+  @override
+  String get settingsResetTooltip => 'Auf Profil-Standard zurücksetzen';
+
+  @override
+  String get settingsNoMatches =>
+      'Keine Einstellungen passen zum aktuellen Filter.';
+
+  @override
   String get focusHintDpad =>
       'D-Pad / Tab bewegen den Fokus, Enter / Leertaste aktivieren.';
 

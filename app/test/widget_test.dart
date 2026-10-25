@@ -14,6 +14,8 @@ import 'package:handslice/net/elegoo_cc2_client.dart';
 import 'package:handslice/screens/print_screen.dart';
 import 'package:handslice/screens/project_screen.dart';
 import 'package:handslice/screens/settings_screen.dart';
+import 'package:handslice/settings/settings_overrides.dart';
+import 'package:handslice/settings/settings_schema.dart';
 import 'package:handslice/state/printer_state.dart';
 import 'package:handslice/state/project_state.dart';
 import 'package:handslice/theme/workshop_theme.dart';
@@ -171,11 +173,176 @@ void main() {
     expect(find.textContaining('1172 mm'), findsOneWidget);
   });
 
-  testWidgets('SettingsScreen bleibt Platzhalter', (tester) async {
-    await tester.pumpWidget(_wrap(const SettingsScreen()));
+  // Phase 4.2: SettingsScreen rendert nur noch gegen ein echtes Schema.
+  // Fixture: Mini-Schema mit vier Options (bool simple/advanced/expert/develop)
+  // in einer Gruppe, plus einer Enum in einer zweiten Seite, damit alle
+  // Stufen-Pfade geprueft werden koennen.
+  SettingsSchema miniSchema() => SettingsSchema.fromJson({
+        'source': {'orca_version': '2.4.2'},
+        'areas': {
+          'print': [
+            {
+              'page': 'Quality', 'page_label_de': 'Qualität',
+              'page_line': 1,
+              'groups': [
+                {
+                  'group': 'Layer height', 'group_label_de': 'Schichthöhe',
+                  'group_line': 2,
+                  'keys': [
+                    {'key': 'opt_simple', 'line': 3, 'type': 'bool',
+                     'mode': 'simple', 'mode_int': 0, 'tier': 'basis',
+                     'label_en': 'Simple option', 'label_de': 'Einfache Option',
+                     'tooltip_en': 'simple tip', 'tooltip_de': 'einfacher Hinweis',
+                     'default': '0'},
+                    {'key': 'opt_advanced', 'line': 4, 'type': 'bool',
+                     'mode': 'advanced', 'mode_int': 1, 'tier': 'fortgeschritten',
+                     'label_en': 'Advanced option', 'label_de': 'Fortgeschrittene Option',
+                     'tooltip_en': 'adv tip', 'tooltip_de': '',
+                     'default': '0'},
+                    {'key': 'opt_expert', 'line': 5, 'type': 'bool',
+                     'mode': 'expert', 'mode_int': 2, 'tier': 'experte',
+                     'label_en': 'Expert option', 'label_de': 'Experten-Option',
+                     'tooltip_en': '', 'tooltip_de': '',
+                     'default': '0'},
+                    {'key': 'opt_develop', 'line': 6, 'type': 'bool',
+                     'mode': 'develop', 'mode_int': 3, 'tier': 'experte',
+                     'label_en': 'Develop option', 'label_de': '',
+                     'tooltip_en': '', 'tooltip_de': '',
+                     'default': '0'},
+                  ],
+                },
+              ],
+            },
+            {
+              'page': 'Strength', 'page_label_de': 'Struktur',
+              'page_line': 10,
+              'groups': [
+                {
+                  'group': 'Infill', 'group_label_de': 'Füllung',
+                  'group_line': 11,
+                  'keys': [
+                    {'key': 'sparse_infill_density', 'line': 12,
+                     'type': 'percent',
+                     'mode': 'simple', 'mode_int': 0, 'tier': 'basis',
+                     'label_en': 'Sparse infill density',
+                     'label_de': 'Fülldichte',
+                     'tooltip_en': 'density', 'tooltip_de': 'Dichte',
+                     'sidetext': '%', 'default': '15',
+                     'min': 0, 'max': 100},
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+  testWidgets('SettingsScreen Basis zeigt nur simple Options',
+      (tester) async {
+    final sch = miniSchema();
+    final ov  = SettingsOverrides();
+    await tester.pumpWidget(_wrap(
+      SettingsScreen(schema: sch, overrides: ov),
+    ));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('settings tree'), findsOneWidget);
+    // Default-Stufe im Screen ist "Fortgeschritten"
+    expect(find.text('Simple option'), findsOneWidget);
+    expect(find.text('Advanced option'), findsOneWidget);
+    expect(find.text('Expert option'), findsNothing);
+
+    // Auf Basis umschalten
+    await tester.tap(find.text('Basics'));
+    await tester.pumpAndSettle();
+    expect(find.text('Simple option'), findsOneWidget);
+    expect(find.text('Advanced option'), findsNothing);
+
+    // Auf Experte: alle sichtbar
+    await tester.tap(find.text('Expert'));
+    await tester.pumpAndSettle();
+    expect(find.text('Simple option'), findsOneWidget);
+    expect(find.text('Advanced option'), findsOneWidget);
+    expect(find.text('Expert option'), findsOneWidget);
+    expect(find.text('Develop option'), findsOneWidget);
+  });
+
+  testWidgets('SettingsScreen: Override setzen + per Reset-Icon zuruecknehmen',
+      (tester) async {
+    final sch = miniSchema();
+    final ov  = SettingsOverrides();
+    await tester.pumpWidget(_wrap(
+      SettingsScreen(schema: sch, overrides: ov),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(ov.has('opt_simple'), isFalse);
+
+    // Switch-Toggle setzen
+    final sw = find.descendant(
+        of: find.ancestor(of: find.text('Simple option'), matching: find.byType(Column)),
+        matching: find.byType(Switch));
+    await tester.tap(sw.first);
+    await tester.pumpAndSettle();
+    expect(ov.has('opt_simple'), isTrue);
+    expect(ov.get('opt_simple'), '1');
+
+    // Reset-Icon muss jetzt da sein; Druecken setzt zurueck.
+    expect(find.byIcon(Icons.restore), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.restore));
+    await tester.pumpAndSettle();
+    expect(ov.has('opt_simple'), isFalse);
+  });
+
+  testWidgets('SettingsScreen: Suchfeld filtert ueber alle Seiten',
+      (tester) async {
+    final sch = miniSchema();
+    final ov  = SettingsOverrides();
+    await tester.pumpWidget(_wrap(
+      SettingsScreen(schema: sch, overrides: ov),
+    ));
+    await tester.pumpAndSettle();
+
+    // Aktiv ist Seite 1 (Quality) – "Sparse infill density" von Seite 2
+    // sollte nicht sichtbar sein.
+    expect(find.text('Sparse infill density'), findsNothing);
+
+    // Suche
+    await tester.enterText(find.byType(TextField).first, 'infill');
+    await tester.pumpAndSettle();
+    expect(find.text('Sparse infill density'), findsOneWidget);
+
+    // Leeren
+    await tester.enterText(find.byType(TextField).first, '');
+    await tester.pumpAndSettle();
+    expect(find.text('Sparse infill density'), findsNothing);
+  });
+
+  test('SettingTier.includes mappt Klaus-Stufen', () {
+    expect(SettingTier.basis.includes('simple'), isTrue);
+    expect(SettingTier.basis.includes('advanced'), isFalse);
+    expect(SettingTier.fortgeschritten.includes('advanced'), isTrue);
+    expect(SettingTier.fortgeschritten.includes('expert'), isFalse);
+    expect(SettingTier.experte.includes('expert'), isTrue);
+    expect(SettingTier.experte.includes('develop'), isTrue);
+  });
+
+  test('SettingsSchema laedt Mini-Fixture', () {
+    final s = SettingsSchema.fromJson({
+      'source': {'orca_version': '2.4.2'},
+      'areas': {
+        'print': [
+          {'page': 'A', 'page_label_de': '', 'page_line': 1,
+           'groups': [{'group': 'G', 'group_label_de': '', 'group_line': 2,
+            'keys': [{'key': 'foo', 'type': 'bool', 'mode': 'simple',
+                      'mode_int': 0, 'tier': 'basis', 'label_en': 'Foo',
+                      'label_de': 'Foo', 'tooltip_en': '', 'tooltip_de': '',
+                      'default': '0', 'line': 3}]}]}
+        ],
+      },
+    });
+    expect(s.orcaVersion, '2.4.2');
+    expect(s.pagesFor('print').length, 1);
+    expect(s.pagesFor('print').first.groups.first.options.first.key, 'foo');
   });
 
   test('ProjectState persistiert z-offset pro Plattenseite', () async {

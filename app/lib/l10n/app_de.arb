@@ -76,6 +76,13 @@
 
   "settingsHeading": "Einstellungen",
   "settingsPlaceholder": "Der generierte Einstellungsbaum kommt in einer späteren Phase.",
+  "settingsSourceCaption": "Prozess-Einstellungen — erzeugt aus OrcaSlicer {version}.",
+  "settingsTierBasis": "Basis",
+  "settingsTierAdvanced": "Fortgeschritten",
+  "settingsTierExpert": "Experte",
+  "settingsSearchHint": "Suchen (Option, Beschriftung, Hilfe)…",
+  "settingsResetTooltip": "Auf Profil-Standard zurücksetzen",
+  "settingsNoMatches": "Keine Einstellungen passen zum aktuellen Filter.",
 
   "focusHintDpad": "D-Pad / Tab bewegen den Fokus, Enter / Leertaste aktivieren.",
   "sampleBannerPlaceholder": "Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet."
