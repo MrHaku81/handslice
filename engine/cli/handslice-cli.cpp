@@ -44,6 +44,7 @@
 
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/libslic3r_version.h"
+#include "libslic3r/Exception.hpp"
 #include "libslic3r/Config.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Model.hpp"
@@ -475,7 +476,44 @@ json dump_options_schema() {
 
 }  // namespace
 
+// Exit-Codes:
+//   0  OK
+//   2  Argument- / Benutzereingabefehler (siehe die())
+//   10 Slicing-Validate (SlicingErrors aus Print::validate / plate check)
+//   11 Konfigurationsfehler (ConfigurationError, Unknown/BadOption)
+//   12 sonstige Slic3r::Exception (RuntimeError, FileIOError, …)
+//   13 sonstige std::exception
+//
+// Die App unterscheidet via exit-code und zeigt die auf stderr
+// geschriebenen Zeilen 1:1 an (lastError = 'slice.error:<code>:<msg>').
+static int run(int argc, char** argv);
+
 int main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const Slic3r::SlicingErrors& e) {
+        std::cerr << "handslice-cli: Plausibilitaetspruefung fehlgeschlagen ("
+                  << e.errors_.size() << " Meldung(en)):\n";
+        for (const auto& err : e.errors_)
+            std::cerr << "  - " << err.what() << "\n";
+        return 10;
+    } catch (const Slic3r::SlicingError& e) {
+        std::cerr << "handslice-cli: Plausibilitaetspruefung fehlgeschlagen:\n";
+        std::cerr << "  - " << e.what() << "\n";
+        return 10;
+    } catch (const Slic3r::ConfigurationError& e) {
+        std::cerr << "handslice-cli: Konfigurationsfehler: " << e.what() << "\n";
+        return 11;
+    } catch (const Slic3r::Exception& e) {
+        std::cerr << "handslice-cli: Slic3r-Fehler: " << e.what() << "\n";
+        return 12;
+    } catch (const std::exception& e) {
+        std::cerr << "handslice-cli: unerwarteter Fehler: " << e.what() << "\n";
+        return 13;
+    }
+}
+
+static int run(int argc, char** argv) {
     boost::nowide::args a(argc, argv);
     Args args = parse_args(argc, argv);
     setup_logging(args.quiet);

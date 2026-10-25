@@ -43,6 +43,87 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-25 22:10 – Phase 4.3 Nachtrag: Metrik + Einzel-Beleg + saubere SlicingErrors (STOPP)
+
+### 1. Metrik angleichen (1172 vs 1367 mm Filament)
+
+Keine Byte-Divergenz zwischen x86 und arm64, sondern **zwei
+verschiedene Messgroessen** im alten Vertragstest-Script:
+
+- Alt (Vertragstest): rohe Summe aller **positiven E-Werte** aus
+  `G1 ... E<float>`-Zeilen – zaehlte zusaetzlich die Prime-Pumpen
+  nach Retract mit (`G1 E.728 F1800`, kein X/Y). Ergibt im Kerben-
+  wuerfel-Baseline **1367 mm**.
+- Richtig (Orca-kanonisch): `total_filament_used_mm` aus dem Stats-
+  JSON = Summe positiver E **nur bei G1 mit X oder Y** (echte
+  Extrusion, ohne Prime-Pumpen). Ergibt **1172.33 mm**.
+
+Belegt: `extrusion_canonical()` im Vertragstest-Script liefert aus
+dem G-Code exakt denselben Wert wie das Stats-JSON (Differenz unter
+1 mm). Rohe-E-Summe ist um die Retract-/Prime-Zahl aufgeblaeht
+(Kerbenwuerfel: 190 mm Retracts → 1367 − 1172 = 195 mm Differenz).
+
+**Fix:** Vertragstest nutzt jetzt `total_filament_used_mm` aus dem
+Stats-JSON und validiert zusaetzlich, dass die G-Code-Rekonstruktion
+sich damit deckt.
+
+### 2. Einzel-Beleg der drei Overrides (Kerbenwuerfel, Poco)
+
+Jeweils genau EINE Aenderung, Metrik passt zur Aenderung:
+
+| Lauf | Z-Moves | Wall-Linien | Infill-Linien | Filament (mm) |
+|---|---:|---:|---:|---:|
+| baseline                 | 239 |  97 | 126 | 1172.3 |
+| nur `layer_height=0.28`  | **175** |  –  |  –  | 1101.0 |
+| nur `wall_loops=4`       |  –  | **185** |  –  | 1403.9 |
+| nur `sparse_infill=40%`  |  –  |  –  | **229** | 1393.5 |
+| alle drei zusammen       | 174 | 185 | 229 | 2016.3 |
+
+- `layer_height=0.28`: Z-Moves 239 → 175 (−27 %) – weniger Schichten
+  bei dickerer Schicht; Filament sogar leicht geringer, weil die
+  Dickenerhoehung durch die Linienbreite ausgeglichen wird.
+- `wall_loops=4`: Wall-Linien (Outer + Inner) 97 → 185 (+91 %); mehr
+  Perimeter.
+- `sparse_infill_density=40%`: Sparse-Infill-Linien 126 → 229 (+82 %);
+  mehr Fuellbahnen.
+
+### 3. SlicingErrors/Validate sauber abfangen
+
+- `engine/cli/handslice-cli.cpp`: `main` wrappt `run(argc, argv)`
+  mit try/catch-Kette:
+  ```
+  SlicingErrors   → exit 10, pro Error eine '-'-Zeile
+  SlicingError    → exit 10
+  ConfigurationError → exit 11
+  Slic3r::Exception  → exit 12
+  std::exception     → exit 13
+  ```
+  (Argument-Fehler bleiben bei exit 2 ueber `die()`.)
+- Lokaler Test mit `--overrides '{"layer_height":"2.0"}'` am x86:
+  ```
+  exit=12
+  handslice-cli: Slic3r-Fehler: Flow::spacing() produced negative
+    spacing. Did you set some extrusion width too small?
+  ```
+  Kein `terminate called`, kein abort/coredump mehr.
+- Vertragstest-Schritt 7 am Poco prueft: Meldung enthaelt
+  "slicing"/"validate"/"invalid"/"layer_height", KEIN "terminate called",
+  Exit != 0.
+
+Die App zeigt die Meldung bereits ueber den bestehenden
+`SliceProcessException` → `lastError = 'slice.error:<exit>:<stderr>'` →
+`_formatSliceError` → `l.sliceErrorExit(code, msg)` lesbar an
+("Slicer fehlgeschlagen (Exit 12): handslice-cli: Slic3r-Fehler …").
+
+### Tests + Build
+
+- 28/28 Widget-Tests gruen (`flutter test test/widget_test.dart`).
+- x86-CLI + arm64-CLI mit M10-Hash neu gebaut (Guard: Side-Cars
+  identisch).
+- Vertragstest `cli-contract-arm64.sh` 7/7 am Poco gruen.
+
+---
+
 ## 2026-10-25 21:40 – Phase 4.3: Overrides ins Slicen + Profil speichern (STOPP)
 
 ### CLI `--overrides` (`engine/cli/handslice-cli.cpp`)
