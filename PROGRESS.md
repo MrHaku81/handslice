@@ -66,7 +66,7 @@ tauchte in `PROGRESS.md` (6×), `docs/networking-cc2.md` (6× +
 1× verkuerzt) und `engine/test/mock-cc2/mock_cc2.py` (1×) auf.
 
 - **Working-Tree:** alle 14 Fundstellen durch Platzhalter `<cc2-sn>`
-  (bzw. „CC2 im Haus" in einer Tabelle) ersetzt. `git grep F01TDL`
+  (bzw. „CC2 im Haus" in einer Tabelle) ersetzt. `git grep <cc2-sn>`
   liefert jetzt leer.
 - **Git-History seit letztem Push (origin/main..HEAD):** nur
   Commit `828ff96` enthielt die SN (3 Treffer). Dieser Scrub-Commit
@@ -97,7 +97,7 @@ tauchte in `PROGRESS.md` (6×), `docs/networking-cc2.md` (6× +
 - `app/scripts/build_apk.sh` setzt die Build-Info automatisch aus
   Git.
 - SN `<cc2-sn>` nirgends mehr im Working-Tree
-  (`git grep F01TDL` ist leer).
+  (`git grep <cc2-sn>` ist leer).
 
 **2. Ungeprueft**
 
