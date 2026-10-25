@@ -43,6 +43,48 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-26 – Offene Punkte für morgen
+
+Nach Abnahme von Phase 4.3 + Stresstest-Nachtrag (A–D) stehen für
+morgen vier Themen an:
+
+1. **Neptun-Testmodell skalieren**, damit der `--download`-Stresstest
+   bis zum G-Code durchlaeuft. Rohscale 3970 × 15 475 × 5 828 mm
+   triggert aktuell libslic3rs Preflight-Grenztest. Umsetzung:
+   `scale_factor`-Feld in `engine/test/stress-models.json` + neue
+   CLI-Option `--scale <factor>` in `handslice-cli` (Orca-eigene
+   Funktion `ModelObject::scale(Vec3d)` aus `libslic3r/Model.cpp`,
+   NICHT selbst gebastelt). Vertragstest-Schritt ergaenzen.
+
+2. **Three D Scans Lizenzangabe an der Quelle belegen**. Das Sidecar
+   nennt die Lage ehrlich ("Free 3D scan archive, keine CC-Lizenz
+   zertifiziert"), aber die Rechtssituation ist unklar. Vor weiterer
+   Nutzung die Lizenz an der Quelle klaeren (contact@threedscans.com
+   anschreiben oder Terms/Impressum nachlesen) und das Sidecar
+   entsprechend scharf stellen. Falls nicht freigegeben: Default-
+   Entry austauschen (Stanford XYZ RGB Statuette oder konkrete
+   Smithsonian-URL, siehe stress-models.json "smithsonian_hinweis").
+
+3. **"Als Profil speichern" am Gerät durchklicken und Profil wieder
+   laden**. In Phase 4.3 ist der Schreib-Pfad komplett
+   (`ProfileWriter` → `ApplicationSupportDirectory/profiles/user/
+   <slug>.json`), aber am Poco nur per Unit-Test belegt – noch kein
+   End-to-End-Lauf mit Settings-Overrides → Save → App neu laden →
+   Preset-Pick → Slice. Dafuer braucht's auch den Preset-Picker im
+   SettingsScreen (bisher nicht gebaut).
+
+4. **Filament-Einstellungen als naechste Etappe** (Phase 4.4). Das
+   Schema aus 4.1 enthaelt den `filament`-Bereich bereits
+   vollstaendig (7 Reiter, 22 Gruppen, 83 Options, 38/81/83
+   nach Basis/Fortgeschritten/Experte). UI-Pfad analog zu 4.2 Prozess,
+   plus Multi-Material-Toggle fuer A1..A4. **Vorsicht:** anders als
+   Prozess greifen Filament-Werte in die Druckdynamik ein
+   (Temperaturen, Fluss, Retract) – Validate-Fehler sind
+   wahrscheinlicher. Die SlicingErrors-Pipeline aus 4.3 sollte das
+   abfangen.
+
+---
+
 ## 2026-10-25 22:30 – Stresstest ins Repo (eigener Commit)
 
 - `engine/test/stress-test.sh <modell.stl> [--out <dir>]
