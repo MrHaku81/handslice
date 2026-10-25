@@ -8,6 +8,98 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 08:40 – CC2-MQTT-Handshake erfolgreich (lan_status=1), api_status ist Delta-only
+
+Klaus hat „Nur LAN" am CC2 eingeschaltet und den Testlauf freigegeben.
+
+### Was gemacht
+
+- Discovery UDP 52700 erneut: `sn=<cc2-sn>`, `token_status=1`,
+  **`lan_status=1`** (umgeschaltet, wie erwartet).
+- MQTT-Script `/tmp/mqtt_test.py` wiederholt (identisch zum
+  vorigen Lauf, nur neue zufaellige Client-/Request-ID).
+  user=`elegoo`, Password aus `.env` (nirgends ausgegeben).
+
+### Ergebnis
+
+```
+CONNACK rc=0  (accepted)
+SUBACK #1  granted_qos=(0, 0, 0)
+PUB api_register {"client_id":"hsltest1582","request_id":"140e5e9..."}
+→ register_response: {"client_id":"hsltest1582","error":"ok"}
+RX api_status (65 byte): {"id":3,"method":6000,
+   "result":{"heater_bed":{"temperature":24}}}
+PUB api_request {"type":"PING"}
+→ api_response: {"type":"PONG"}
+DISCONNECT
+```
+
+**Alles wie dokumentiert.** `lan_status=1` schaltet den LAN-MQTT-
+Pfad frei; mit `lan_status=0` kommt gleich CONNACK rc=5 zurueck
+(voriger Lauf). Register-Handshake, Status-Push und PING/PONG
+roundtrip funktionieren.
+
+### api_status ist Delta-only
+
+Das Payload des ersten `api_status` enthaelt nur eine Aenderung
+(hier: Druckbett-Temperatur 24 °C, Drucker idle). Volle Zustands-
+abbildung braucht entweder laengeres Aggregieren der Deltas oder
+eine explizite Query (`method 2005` fuer CANVAS). Beide sind reine
+Lese-Operationen; `method 2005` war in dieser Nachtrunde ausdruecklich
+**nicht** Teil des Auftrags („einmal api_status lesen").
+
+### CANVAS-Slot-Belegung (A1+A2 PETG, A3+A4 PLA) – nicht geprueft
+
+Nicht im Delta enthalten. Erfordert naechsten Lauf. Vorhandenes
+Format aus den Reverse-Engineering-Quellen in
+`docs/networking-cc2.md`, Abschnitt „CANVAS-Slot-Belegung" beschrieben.
+
+### Phase-2-Pfad schriftlich zusammengefasst
+
+In `docs/networking-cc2.md` neuer Unterabschnitt „Zusammenfassung
+des Pfads (nach erfolgreichem Handshake)" – sieben Schritte vom
+UDP-Broadcast bis zum ersten API-Response, als Grundlage fuer den
+spaeteren Dart-Client (`ElegooMqttClient`).
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- `lan_status` flippt wie erwartet von 0 → 1, wenn „Nur LAN" am
+  Display eingeschaltet wird. Beweis: zweimalige Discovery-Antwort
+  (gestern 08:15: `lan_status=0`, heute 08:35: `lan_status=1`).
+- MQTT-CONNACK rc=0 mit user=`elegoo` + Access-Code aus `.env`.
+  Beweis: Script-Output oben, Zeile `CONNACK rc=0 (accepted)`.
+- Register-Handshake liefert `{"error":"ok"}`. Round-Trip
+  `register_response` kommt auf dem erwarteten Topic
+  `elegoo/<sn>/<request_id>/register_response`.
+- api_status-Topic liefert push-Events, PING/PONG-Roundtrip auf
+  `api_request`/`api_response` funktioniert.
+- Credentials-Hygiene weiterhin: Access-Code taucht nirgends in
+  Terminal, Logs, Doku, Commit auf. Temp-Script `/tmp/mqtt_test.py`
+  wird nach dem Commit geloescht.
+
+**2. Ungeprueft**
+
+- **CANVAS-Slot-Belegung A1..A4** (erwartet PETG, PETG, PLA, PLA).
+  Nicht im ersten Delta-`api_status` enthalten; Pruefung erfordert
+  entweder `method 2005`-Request oder laengeres Delta-Sammeln.
+  Nicht in diesem Lauf, weil „einmal api_status lesen" woertlich
+  befolgt.
+- **Volle State-Snapshot-Struktur**. Nur ein Delta gesehen; die
+  uebrigen Felder (`machine_status`, `print_status`,
+  `extruder`-Temperatur, `gcode_move_inf`) sind theoretisch aus der
+  Protokoll-Quelle bekannt, hier aber nicht beobachtet.
+
+**3. Geht nicht**
+
+- (keine neuen Blocker; `docs/blockers.md` unveraendert bei „keine
+  offenen").
+
+---
+
 ## 2026-10-25 08:20 – CC2-MQTT-Handshake mit Access-Code: Policy-Ablehnung (lan_status=0)
 
 Klaus hat IP + Zugangscode fuer den CC2 in `~/handslice/.env`

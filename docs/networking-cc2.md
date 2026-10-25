@@ -373,17 +373,98 @@ Sauberer `DISCONNECT`.
 - Cloud-Pfad fuer Phase 2 ausarbeiten – braeuchte Elegoo-Konto-API
   (Reverse-Engineering noch nicht gemacht).
 
-Bis zur Entscheidung bleibt dieser Abschnitt in `networking-cc2.md`
-als „geprueft, abgelehnt wegen Policy" stehen; der weiterfuehrende
-Protokoll-Teil (Register-Response-Parse, CANVAS-Slot-Map) bleibt
-Theorie aus den Reverse-Engineering-Quellen.
+### MQTT 1883 Register mit lan_status=1 (2026-10-25 08:35)
+
+Klaus hat „Nur LAN" am CC2-Display aktiviert. Discovery erneut
+gelaufen – `token_status=1`, **`lan_status=1`**. Alles andere wie
+beim vorigen Lauf.
+
+Testablauf identisch zum vorigen Script (gleiches Client-ID- und
+Request-ID-Schema, user=`elegoo`, password aus `.env`):
+
+```
+CONNACK rc=0  (accepted)
+SUBACK #1  granted_qos=(0, 0, 0)
+
+PUB elegoo/<cc2-sn>/api_register
+    {"client_id": "hsltest1582", "request_id": "140e5e96129c233ba9b12a95291"}
+RX  …/register_response  (40 byte)
+→ {"client_id": "hsltest1582", "error": "ok"}
+
+Warte auf ersten api_status …
+RX  …/api_status  (65 byte)
+→ {"id": 3, "method": 6000, "result": {"heater_bed": {"temperature": 24}}}
+
+PUB elegoo/<cc2-sn>/hsltest1582/api_request  {"type": "PING"}
+RX  …/api_response  (15 byte)
+→ {"type": "PONG"}
+
+DISCONNECT
+```
+
+**Alles wie dokumentiert.** `lan_status=1` ist tatsaechlich der
+Schluessel zur Freigabe des LAN-MQTT-Pfads. Register-Response-Fehler-
+Feld = `"ok"`. PING/PONG ist round-trip-fertig. Keep-Alive-Loop
+koennte jetzt stabil laufen.
+
+**api_status ist Delta-only, nicht Snapshot.**
+
+Der erste empfangene `api_status` enthaelt genau *eine* Aenderung
+(hier: `heater_bed.temperature=24` → Drucker steht idle bei
+Raumtemperatur). Volle Zustandsabbildung braucht einen von zwei
+Pfaden:
+
+- **Deltas aggregieren.** Beim Verbindungsstart alle Felder auf
+  „unbekannt" setzen und mit jedem eingehenden `api_status` den
+  lokalen State nach-mergen. In Phase 2 sinnvoll fuer die
+  Live-Fortschritts-UI (Temperaturen, Progress, Position), weil
+  der Drucker ohnehin kontinuierlich pusht, sobald sich was
+  bewegt.
+- **Explizite Query.** `method 2005` auf `api_request` (CANVAS-
+  Slot-Request) fordert die aktuelle Slot-Belegung direkt an – ein
+  Request/Response-Paar auf `api_response`. Fuer das initiale
+  Slot-Mapping-UI (vor dem ersten Slice) der direkte Weg.
+
+Beide Mechanismen sind reine READ-Operationen und beeinflussen den
+Drucker nicht.
+
+**CANVAS-Slot-Belegung (A1..A4):** war nicht im ersten
+Delta-`api_status` enthalten. **Nicht geprueft** in diesem Lauf,
+weil Klaus-Vorgabe „einmal api_status lesen" woertlich befolgt wurde.
+Pruefung A1+A2 PETG, A3+A4 PLA bleibt offen und erfordert entweder
+einen zweiten Testlauf mit `method 2005` oder laengeres Delta-
+Sammeln. Nicht als Blocker, sondern als Phase-2-Prototyp-Aufgabe
+notiert.
+
+### Zusammenfassung des Pfads (nach erfolgreichem Handshake)
+
+Zum spaeteren Nachbau in Dart:
+
+1. UDP-Broadcast `{"id":0,"method":7000}` auf 52700,
+   Antwort parsen → `sn`, `token_status`, `lan_status`.
+2. Wenn `lan_status=0`: Nutzer bitten, „Nur LAN" am Drucker-Display
+   einzuschalten (sonst CONNACK rc=5).
+3. MQTT-Connect auf `<ip>:1883`, user=`elegoo`, password=Access-Code
+   vom Display (bzw. aus Secure-Storage).
+4. Subscribe `elegoo/<sn>/<request_id>/register_response`,
+   `elegoo/<sn>/api_status`,
+   `elegoo/<sn>/<client_id>/api_response`.
+5. Publish `{"client_id","request_id"}` auf
+   `elegoo/<sn>/api_register`; auf `{"error":"ok"}` warten.
+6. Alle ≤ 10 s `{"type":"PING"}` auf
+   `elegoo/<sn>/<client_id>/api_request`, Keep-Alive sichern.
+7. Fuer initialen Snapshot: `method 2005` fuer CANVAS,
+   `method <GET_STATUS>` fuer die uebrigen Felder (Zahl aus den
+   Quellen zu klaeren) – oder einfach ein paar Sekunden `api_status`-
+   Deltas aufsammeln.
 
 ### CANVAS-Slot-Belegung (noch nicht am Geraet verifiziert)
 
-Erwartung laut Klaus: Slot 1+2 PETG, Slot 3+4 PLA. Pruefung
-erfordert `api_status` oder `method 2005`-Request ueber einen
-erfolgreichen MQTT-Handshake. Steht aus (siehe Rubrik oben). Format
-laut Protokoll-Quelle:
+Erwartung laut Klaus: Slot A1+A2 PETG, Slot A3+A4 PLA. Pruefung
+erfordert `method 2005`-Request ueber den jetzt funktionierenden
+MQTT-Handshake oder laengeres Delta-Sammeln auf `api_status`. In
+dieser Nachtrunde explizit nicht ausgefuehrt (Klaus-Vorgabe „einmal
+api_status lesen"). Format laut Protokoll-Quelle:
 
 ```
 canvas_list[].tray_list[]  — pro Slot 9 Felder, u. a.
