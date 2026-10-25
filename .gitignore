@@ -55,6 +55,11 @@ __pycache__/
 # Large bundled engine binaries (über Release-Assets verteilen)
 /engine/bin/*-arm64
 /engine/bin/*-x86
+# Side-Car-Hash-Dateien, die die Build-Scripts neben die Binaries schreiben
+/engine/bin/*.commit
+# Schema-Join-Zwischendateien (aus engine/scripts/*.py); eingecheckt
+# werden nur die Scripts selbst und ggf. finale Artefakte.
+/engine/out/
 
 # Referenz-AppImage und sonstige externe Build-Artefakte (nicht einchecken)
 /engine/reference/

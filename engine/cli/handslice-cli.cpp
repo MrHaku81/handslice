@@ -43,6 +43,7 @@
 #include "nlohmann/json.hpp"
 
 #include "libslic3r/libslic3r.h"
+#include "libslic3r/libslic3r_version.h"
 #include "libslic3r/Config.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Model.hpp"
@@ -68,6 +69,7 @@ struct Args {
     std::string input_path;
     bool quiet = false;
     bool no_center = false;
+    bool dump_schema = false;
     int threads = 0;  // 0 = TBB-Default (alle Cores); >0 = Obergrenze
     // --bed-type ueberschreibt die aus default_bed_type abgeleitete
     // curr_bed_type-Wahl. Werte: "" (kein Override), "A"/"textured"
@@ -134,6 +136,7 @@ Args parse_args(int argc, char** argv) {
             if (a.threads < 1) die("--threads must be >= 1");
         }
         else if (arg == "--bed-type") a.bed_type = need_val("--bed-type");
+        else if (arg == "--dump-schema") a.dump_schema = true;
         else if (arg == "--z-offset") {
             const std::string v = need_val("--z-offset");
             try {
@@ -164,6 +167,10 @@ Args parse_args(int argc, char** argv) {
             a.input_path = arg;
         }
     }
+    // --dump-schema laeuft ohne Modell/Profile – nur Introspektion der
+    // libslic3r-Options-Definitionen. Alle anderen Argumente werden
+    // ignoriert.
+    if (a.dump_schema) return a;
     if (a.machine.empty() || a.process.empty() || a.filaments.empty()
         || a.resources_dir.empty() || a.output_path.empty() || a.input_path.empty()) {
         usage(std::cerr);
@@ -341,12 +348,133 @@ json emit_statistics(const Print& print,
     return j;
 }
 
+// Dump der libslic3r-Options-Definitionen nach JSON.
+//
+// Quelle: `Slic3r::print_config_def` (PrintConfig.hpp:598 – statische
+// ConfigDef-Instanz). Felder pro Option entsprechen ConfigOptionDef
+// (Config.hpp:2204+). Keine eigenen Interpretationen, keine Hand-
+// gepflegten Zuordnungen – reines Weitergeben dessen, was Orca selbst
+// in seinen Metadaten fuehrt.
+json dump_options_schema() {
+    const PrintConfigDef& def = print_config_def;
+    json out = json::object();
+    out["schema_version"] = 1;
+    out["orca_version"]   = SLIC3R_VERSION;
+    json options = json::object();
+    // Enum ConfigOptionType -> Kurzname (Config.hpp:159+).
+    auto type_name = [](ConfigOptionType t) -> std::string {
+        switch (t) {
+            case coFloat:              return "float";
+            case coFloats:             return "floats";
+            case coInt:                return "int";
+            case coInts:               return "ints";
+            case coString:             return "string";
+            case coStrings:            return "strings";
+            case coPercent:            return "percent";
+            case coPercents:           return "percents";
+            case coFloatOrPercent:     return "float_or_percent";
+            case coFloatsOrPercents:   return "floats_or_percents";
+            case coPoint:              return "point";
+            case coPoints:             return "points";
+            case coPoint3:             return "point3";
+            case coBool:               return "bool";
+            case coBools:              return "bools";
+            case coEnum:               return "enum";
+            case coEnums:              return "enums";
+            case coPointsGroups:       return "points_groups";
+            case coIntsGroups:         return "ints_groups";
+            case coNone:               return "none";
+            default:                   return "unknown";
+        }
+    };
+    auto gui_type_name = [](ConfigOptionDef::GUIType g) -> std::string {
+        using G = ConfigOptionDef::GUIType;
+        switch (g) {
+            case G::undefined:   return "";
+            case G::i_enum_open: return "i_enum_open";
+            case G::f_enum_open: return "f_enum_open";
+            case G::color:       return "color";
+            case G::select_open: return "select_open";
+            case G::slider:      return "slider";
+            case G::legend:      return "legend";
+            case G::one_string:  return "one_string";
+        }
+        return "";
+    };
+    auto pt_name = [](PrinterTechnology p) -> std::string {
+        switch (p) {
+            case ptFFF:     return "FFF";
+            case ptSLA:     return "SLA";
+            case ptUnknown: return "unknown";
+            case ptAny:     return "any";
+        }
+        return "unknown";
+    };
+    // ConfigOptionMode-Werte 1:1 (Config.hpp:199-204). Mapping zu
+    // Basis/Fortgeschritten/Experte macht die UI; wir geben die Zahl
+    // plus Kurznamen weiter, damit Klaus die Clusterung sieht.
+    auto mode_name = [](ConfigOptionMode m) -> std::string {
+        switch (m) {
+            case comSimple:   return "simple";
+            case comAdvanced: return "advanced";
+            case comExpert:   return "expert";
+            case comDevelop:  return "develop";
+        }
+        return "unknown";
+    };
+
+    for (const auto& [key, od] : def.options) {
+        json j = json::object();
+        j["key"]      = key;
+        j["type"]     = type_name(od.type);
+        j["nullable"] = od.nullable;
+        j["mode"]     = mode_name(od.mode);
+        j["mode_int"] = int(od.mode);
+        j["gui_type"] = gui_type_name(od.gui_type);
+        j["gui_flags"]= od.gui_flags;
+        j["label"]    = od.label;
+        j["full_label"] = od.full_label;
+        j["category"] = od.category;
+        j["tooltip"]  = od.tooltip;
+        j["sidetext"] = od.sidetext;
+        j["printer_technology"] = pt_name(od.printer_technology);
+        j["multiline"] = od.multiline;
+        j["readonly"]  = od.readonly;
+        j["is_code"]   = od.is_code;
+        j["ratio_over"] = od.ratio_over;
+        // Grenzen nur sinnvoll fuer numerische Typen – aber hier roh
+        // weitergeben; die App-UI filtert selbst.
+        if (od.min > -FLT_MAX) j["min"] = od.min;
+        if (od.max <  FLT_MAX) j["max"] = od.max;
+        if (!od.enum_values.empty()) {
+            j["enum_values"] = od.enum_values;
+            j["enum_labels"] = od.enum_labels;
+        }
+        if (!od.aliases.empty())  j["aliases"]  = od.aliases;
+        if (!od.shortcut.empty()) j["shortcut"] = od.shortcut;
+        if (od.default_value)      j["default"]  = od.default_value->serialize();
+        options[key] = j;
+    }
+    out["options"] = options;
+    out["option_count"] = def.options.size();
+    return out;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     boost::nowide::args a(argc, argv);
     Args args = parse_args(argc, argv);
     setup_logging(args.quiet);
+
+    // --dump-schema: nur die Options-Definitionen aus libslic3r als JSON
+    // auf stdout ausgeben und sofort beenden. Kein Modell, keine Profile,
+    // kein Slicen.
+    if (args.dump_schema) {
+        json out = dump_options_schema();
+        std::cout << out.dump(2) << "\n";
+        return 0;
+    }
 
     // TBB-Parallelitaet optional begrenzen. Muss vor dem ersten
     // parallel_for der Pipeline konstruiert werden und ueber die gesamte

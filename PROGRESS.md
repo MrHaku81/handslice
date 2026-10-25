@@ -43,6 +43,103 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-25 19:00 – Phase 4.1: Einstellungsbaum-Schema aus OrcaSlicer erzeugt (STOPP)
+
+Grundsatz Phase 4: **nichts von Hand pflegen**. Alles mechanisch aus
+OrcaSlicer v2.4.2 abgeleitet.
+
+### Was gebaut wurde
+
+1. **`handslice-cli --dump-schema`** (`engine/cli/handslice-cli.cpp`)
+   dumpt `Slic3r::print_config_def` (PrintConfig.hpp:598). Pro Option:
+   `key, type, nullable, default, mode (simple/advanced/expert/develop),
+   gui_type, label, full_label, category, tooltip, sidetext,
+   printer_technology, min/max, enum_values + enum_labels, aliases,
+   shortcut, ratio_over, readonly, is_code, multiline`. Keine Interp-
+   retation – reine Pass-Through-Spiegelung dessen, was in
+   `ConfigOptionDef` (Config.hpp:2204+) steht.
+2. **`engine/scripts/extract_tab_layout.py`** parst
+   `src/slic3r/GUI/Tab.cpp` mechanisch:
+   - `TabPrint::build()` (Zeilen 2311–2802)
+   - `TabFilament::build()` + `add_filament_overrides_page()` (3892–4245)
+   - `TabPrinter::build_fff()` + `build_unregular_pages()` (4457–5230)
+   Erkennt `add_options_page(L("…"))`, `page->new_optgroup(L("…"))`,
+   `optgroup->append_single_option_line("key", …)`, Line-Objekte mit
+   `optgroup->get_option("key")` und den Wrapper
+   `append_option_line(optgroup, "key", …)`. Jede Zuordnung belegt mit
+   Datei+Zeile.
+3. **`engine/scripts/build_de_catalog.py`** liest
+   `localization/i18n/de/OrcaSlicer_de.po` und baut dict msgid→msgstr.
+   PO-Multi-Line + Escape-Handling (nur `\\`, `\"`, `\n`, `\t` –
+   kein Python-`unicode_escape`, das wuerde UTF-8-Bytes zerreissen und
+   Umlaute kaputt machen).
+4. **`engine/scripts/build_settings_schema.py`** joined Schema + Layout
+   + Deutsch zu `engine/out/settings-schema.json` + Report.
+
+### Report (`engine/out/settings-report.md`)
+
+- OrcaSlicer-Version: `02.06.00.51` (laut `--dump-schema`)
+- **751 Options** im `print_config_def` gesamt.
+- **5491 Deutsch-Eintraege** aus `OrcaSlicer_de.po`.
+
+Zuordnung Tab.cpp → Bereich/Reiter/Gruppen/Options:
+
+| Bereich | Reiter | Gruppen | Options (einzigartig) |
+|---|---|---|---|
+| print    | 6 | 41 | 337 |
+| filament | 7 | 22 | 83 |
+| printer  | 4 | 29 | 73 |
+
+Verteilung nach Stufe:
+
+| Bereich | Simple | Advanced | Expert | Develop | Σ |
+|---|---:|---:|---:|---:|---:|
+| print    | 50 | 274 | 11 | 2 | 337 |
+| filament | 38 |  43 |  0 | 2 |  83 |
+| printer  |  5 |  63 |  0 | 5 |  73 |
+
+Nicht zuordenbar (im Schema, nicht im Layout): **258 von 751** – mit
+Gruenden gruppiert:
+- SLA-only: 76
+- Unbenutzt in Tab.cpp (FFF, ohne category): 91
+- Ohne Label (interne/Legacy): 40
+- any-Technologie (bed_custom, print_host*, printable_area …): 20
+- G-Code-Templates (eigener Tab.cpp-Pfad, nicht `append_single_option_line`): 17
+- Diverse (Rest in kleinen Kategorien): 14
+
+Uebersetzungsabdeckung Deutsch (nur Layout-Options):
+
+| Bereich | Label | Tooltip | Reiter | Gruppen |
+|---|---|---|---|---|
+| print    | 333/337 (99%) | 333/333 (100%) | 6/6 (100%) | 41/41 (100%) |
+| filament | 80/81 (99%)   | 78/79 (99%)   | 7/7 (100%) | 22/22 (100%) |
+| printer  | 71/72 (99%)   | 70/71 (99%)   | 4/4 (100%) | 29/29 (100%) |
+
+**Gruppen mit 0 Keys** (im Report mit Datei+Zeile aufgelistet):
+G-Code-Textfelder (`Machine start G-code` etc.) + Notes/Compatible-
+Printers – die Felder stehen in Tab.cpp nicht ueber den
+Standard-Options-Pfad. Fuer Phase 4.2 (Prozess) nicht relevant;
+fuer 4.3/5 (Drucker) spaeter explizit zu adressieren.
+
+### Nachweise
+
+- `engine/bin/handslice-cli-x86 --dump-schema > engine/out/schema-raw.json`
+  (16528 Zeilen, OrcaSlicer-Version eingebettet).
+- `python3 engine/scripts/extract_tab_layout.py > engine/out/layout.json`
+  (2613 Zeilen, pro Key `line` als Belegstelle in Tab.cpp).
+- `python3 engine/scripts/build_de_catalog.py > engine/out/de.json`
+  (5499 Zeilen, 5491 echte Uebersetzungen; Umlaute korrekt).
+- `python3 engine/scripts/build_settings_schema.py …` erzeugt
+  `settings-schema.json` + `settings-report.md`.
+- `handslice-cli-arm64` ist frisch gebaut (gestript 14 MB, Side-Car
+  `d57f8cacd5`); der Device-Lauf (`--dump-schema` am Poco) steht aus,
+  weil ADB beim Abschluss nicht verfuegbar war. Der Build-Guard
+  (M6) stellt sicher, dass x86- und arm64-Binaries vom selben
+  Quellstand kommen – inhaltlich sind beide `--dump-schema`-Ausgaben
+  zwingend identisch (reine Introspektion derselben `print_config_def`).
+
+---
+
 ## 2026-10-25 18:20 – Zweiter Realdruck aus der App (Commit ac57b14, Seite B, Z-Offset −0,04)
 
 - Klaus hat am Poco den zweiten echten Druck mit der M6-APK ausgeloest:
