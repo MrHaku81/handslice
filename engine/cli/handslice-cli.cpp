@@ -24,6 +24,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -36,6 +37,8 @@
 #include <boost/log/utility/setup/common_attributes.hpp>
 #include <boost/log/utility/setup/console.hpp>
 #include <boost/nowide/args.hpp>
+
+#include <tbb/global_control.h>
 
 #include "nlohmann/json.hpp"
 
@@ -65,6 +68,7 @@ struct Args {
     std::string input_path;
     bool quiet = false;
     bool no_center = false;
+    int threads = 0;  // 0 = TBB-Default (alle Cores); >0 = Obergrenze
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -77,12 +81,17 @@ void usage(std::ostream& os) {
         "Usage: handslice-cli --machine <machine.json> --process <process.json>\n"
         "                     --filament <filament.json> [--filament ...]\n"
         "                     --resources <orca-resources-dir>\n"
-        "                     --output <out.gcode> [--no-center] <input.stl|input.3mf>\n"
+        "                     --output <out.gcode> [--no-center] [--threads N]\n"
+        "                     <input.stl|input.3mf>\n"
         "\n"
         "Minimaler Headless-Slicer gegen OrcaSlicer-libslic3r.\n"
         "Modellposition: Plattenmitte (abgeleitet aus printable_area) oder\n"
         "unveraendert mit --no-center.\n"
-        "Kein Arrange, kein PartPlate, keine Thumbnails.\n";
+        "Kein Arrange, kein PartPlate, keine Thumbnails.\n"
+        "\n"
+        "--threads N  begrenzt die TBB-Parallelitaet auf N (N=1 serialisiert\n"
+        "             alle parallel_for/parallel_reduce). Diagnostisch, um\n"
+        "             TBB-reihenfolgebedingte Byte-Divergenzen auszuschliessen.\n";
 }
 
 Args parse_args(int argc, char** argv) {
@@ -100,6 +109,15 @@ Args parse_args(int argc, char** argv) {
         else if (arg == "--output") a.output_path = need_val("--output");
         else if (arg == "--quiet" || arg == "-q") a.quiet = true;
         else if (arg == "--no-center") a.no_center = true;
+        else if (arg == "--threads") {
+            const std::string v = need_val("--threads");
+            try {
+                a.threads = std::stoi(v);
+            } catch (const std::exception&) {
+                die("--threads needs a positive integer, got: " + v);
+            }
+            if (a.threads < 1) die("--threads must be >= 1");
+        }
         else if (arg == "--help" || arg == "-h") { usage(std::cout); std::exit(0); }
         else if (!arg.empty() && arg[0] == '-') die("unknown flag: " + arg);
         else {
@@ -291,6 +309,18 @@ int main(int argc, char** argv) {
     boost::nowide::args a(argc, argv);
     Args args = parse_args(argc, argv);
     setup_logging(args.quiet);
+
+    // TBB-Parallelitaet optional begrenzen. Muss vor dem ersten
+    // parallel_for der Pipeline konstruiert werden und ueber die gesamte
+    // Slice-Dauer am Leben bleiben; `global_control` ist stackbasiert.
+    std::unique_ptr<tbb::global_control> tbb_limit;
+    if (args.threads > 0) {
+        tbb_limit = std::make_unique<tbb::global_control>(
+            tbb::global_control::max_allowed_parallelism,
+            static_cast<std::size_t>(args.threads));
+        if (!args.quiet)
+            std::cerr << "TBB max_allowed_parallelism = " << args.threads << "\n";
+    }
 
     // Orca-Interna: Resource-Pfad bekannt machen (fuer system_paths-Default).
     set_resources_dir(args.resources_dir);

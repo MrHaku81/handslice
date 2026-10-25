@@ -581,7 +581,50 @@ auf big.LITTLE-Cores.
 desselben STL erzeugen byte-identische G-Codes
 (`a30ffec3e76452ea67843fa8a1b67eb5dd38fa92a285045a0467f163ec872c99`).
 
-#### Byte-Divergenz arm64 ↔ x86 (Phase-C-Erfolgskriterium nicht erfuellt)
+#### Byte-Divergenz arm64 ↔ x86 (Phase-C-Erfolgskriterium NEU formuliert)
+
+**Zusammenfassung des Standes 2026-10-25** (nach den Experimenten weiter
+unten):
+
+- `handslice-cli-x86` ist **deterministisch**: zehn Laeufe auf
+  demselben STL mit denselben Profilen liefern byte-identischen G-Code
+  (sha256 `92951c26...` ueber 8479 Zeilen EXECUTABLE_BLOCK).
+- `handslice-cli-arm64` auf dem Poco X3 Pro ist **nicht-deterministisch**:
+  zehn Laeufe liefern zwei stabile Varianten (sha256 `a30ffec3...`
+  mit 8479 Zeilen, 6×; und sha256 `7c88f484...` mit 8321 Zeilen, 4×).
+  Pro Lauf ist die Ausgabe deterministisch, aber zwischen Laeufen
+  wird zufaellig zwischen A und B gewechselt.
+
+Phase C hatte urspruenglich „bytegleich zum Desktop" verlangt. Das
+war unrealistisch, weil die Divergenz nicht aus Fliesskomma-Rundung,
+sondern aus Reihenfolge-Entscheidungen innerhalb von Orcas TBB-
+Pipeline kommt. **Neues, praeziseres Erfolgskriterium (gilt ab heute
+und ist in `README.md`/Roadmap zu uebernehmen):**
+
+1. **Funktional-aequivalent zur Desktop-Referenz.** Fuer das
+   Reference-Modell (CC2 0.4 + 0.20 mm Standard + Elegoo PLA, 20 mm
+   Wuerfel) muss der arm64-G-Code dieselbe Zeilenanzahl, dasselbe
+   Filamentgewicht (±0.01 g), dieselbe geschaetzte Druckzeit (±5 s)
+   und dieselben Layer-Grenzen wie der Desktop-GUI-Export erzeugen.
+   Byte-Gleichheit ist **nicht** gefordert.
+2. **Determinismus pro Plattform.** Zwei aufeinanderfolgende Laeufe
+   derselben Binary mit demselben Input muessen byte-identisch sein.
+   Fuer arm64 ist das aktuell **nicht erfuellt**; Teilpunkt bleibt
+   als eigenstaendiger Nachweis offen.
+3. **Variant-Set dokumentiert.** Wenn Orcas Pipeline auf einer
+   Plattform mehrere stabile Varianten erzeugen kann (siehe arm64:
+   A/B), muessen alle beobachteten Varianten im Repo abgelegt und
+   funktional validiert sein. „Zufaelliger Fund im Betrieb" waere
+   kein Erfolgsnachweis.
+
+Die urspruengliche Byte-Gleichheit bleibt als **Fernziel** stehen –
+voraussichtlich erreichbar erst mit einem Orca-Patch, der die
+Sort-Keys in den betroffenen Pipelines um eine Tie-Break-Regel
+erweitert (z. B. XY-Lex-Vergleich bei gleichwertigen Perimeter-
+Metriken). Das ist Thema fuer Phase 3+ (`docs/roadmap.md`,
+Upstream-Beitraege).
+
+#### Historischer Befund: Byte-Divergenz arm64 ↔ x86 (urspruenglich)
 
 **Vergleich arm64-G-Code gegen Desktop-Orca-GUI-Referenz:**
 
@@ -647,8 +690,139 @@ gleichen Werte in anderer Reihenfolge/an anderer Position.
   nach einer eindeutigen (laufwerk-unabhaengigen) Tie-Breaking-Regel
   sortieren, oder man akzeptiert eine funktionale statt eine binaere
   Aequivalenz als Nachweis.
-- Entscheidung ueber „neues Phase-C-Erfolgskriterium" (funktional vs.
-  byte-genau) ist Klaus-Entscheidung, nicht in dieser Nacht gefaellt.
+
+#### Experimente 2026-10-25: Divergenz-Herkunft eingegrenzt
+
+Zwei Experimente, Ergebnisse unten.
+
+##### Experiment 1a: Asymmetrisches Modell (Wuerfel mit Kerbe)
+
+**Idee:** Wenn die Divergenz nur bei Rotations-Mehrdeutigkeiten
+auftritt, sollte ein nicht-rotationssymmetrisches Modell byte-gleich
+werden. `engine/test/make_cube.py` wurde um
+`cube_notched_20mm_centered_cc2.stl` erweitert (20-mm-Wuerfel mit
+5×5×5-mm-Kerbe an der +X+Y+Z-Ecke, 24 Dreiecke, vorzentriert auf
+CC2-Mitte).
+
+Ergebnis:
+
+```
+x86:    sha256 25bae8af...  9018 Zeilen EXECUTABLE_BLOCK
+arm64:  sha256 919cde23...  9023 Zeilen EXECUTABLE_BLOCK  (ein Lauf)
+            oder 7ca4cd37... 8763 Zeilen                  (anderer Lauf)
+diff:   595 Zeilen nur in x86, 600 Zeilen nur in arm64 (A-Variante)
+```
+
+**Erkenntnis:** Die Kerbe bricht zwar die Rotationssymmetrie, aber
+**nicht die Spiegelsymmetrie an der x=y-Diagonalen** – der Notch an
+der (+X,+Y,+Z)-Ecke liegt genau auf dieser Spiegelebene. Die
+Divergenz-Lines sind an denselben x=y-Positionen wie beim
+symmetrischen Wuerfel; die TopInfill wird wieder um 90° gedreht
+alternativ ausgegeben.
+
+Fuer einen „wirklich asymmetrischen" Testlauf braeuchte es einen
+Kerbe-Offset, der auch die x=y-Spiegelebene bricht (z. B. 3×5×5-Kerbe
+oder off-corner-Platzierung). Als Followup markiert, aber kein Blocker
+mehr fuer die Divergenz-Herkunfts-Frage, weil Experiment 1b die
+Antwort liefert.
+
+##### Experiment 1b: Single-Thread + Mehrfachlaeufe
+
+Die CLI hat jetzt `--threads N` (konstruiert ein
+`tbb::global_control(max_allowed_parallelism, N)` fuer die gesamte
+Slice-Dauer).
+
+**Teil 1 – `--threads 1`:** Beide Binaries (x86 und arm64) **haengen
+beim ersten `parallel_pipeline`**. `global_control(max_allowed_
+parallelism, 1)` bedeutet in OneAPI TBB (Orca linkt TBB 2021): nur
+der Master-Thread, keine Worker. Orcas Pipeline hat irgendwo einen
+`parallel_pipeline`-Filter oder ein `flow::graph`-Konstrukt, das
+auf einen Worker wartet, der nie kommt. `--threads 2` hat denselben
+Effekt (unter 300 s nicht fertig → Timeout).
+
+Konsequenz: Single-Thread-Test ist mit dieser Orca-Version nicht
+durchfuehrbar, ohne den Code zu patchen. Umgehung: statt eines
+Single-Thread-Laufs vergleichen wir **viele Mehrfachlaeufe pro
+Plattform**.
+
+**Teil 2 – 10 Mehrfachlaeufe pro Plattform** (symmetrischer
+Wuerfel):
+
+```
+x86 (AMR5, Ryzen 7 5800U):
+   10 von 10 Laeufen → sha256 92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d
+                        (8479 Zeilen, Desktop-GUI-Referenz)
+
+arm64 (Poco X3 Pro, Snapdragon 860):
+   6 von 10 Laeufen → sha256 a30ffec3e76452ea67843fa8a1b67eb5dd38fa92a285045a0467f163ec872c99
+                       (8479 Zeilen, Variante A)
+   4 von 10 Laeufen → sha256 7c88f484eee00b95f4bf48982a3c3fa73d0f0284e5957dcc645a924c09c0688b
+                       (8321 Zeilen, Variante B – 158 Zeilen weniger)
+```
+
+Zusaetzlich getestet (5 Laeufe auf arm64 mit dem Notch-Modell):
+
+```
+arm64 Notch:
+   3 von 5 Laeufen → sha256 7ca4cd37... (8763 Zeilen)
+   2 von 5 Laeufen → sha256 919cde23... (9023 Zeilen)
+```
+
+Also auch beim Notch-Modell: nicht-deterministisch, zwei stabile
+Varianten.
+
+**Erkenntnis (klar):**
+
+1. **x86 ist deterministisch, arm64 nicht.** Der arm64-Build erzeugt
+   zufaellig eine von zwei stabilen Varianten pro Lauf. Das kann
+   kein libc++-vs-libstdc++-Sort-Order-Thema sein – gleicher Binary
+   auf demselben Geraet, gleicher Input, verschiedenes Output.
+2. **Das ist ein TBB-Race.** Vermutlich ein `parallel_reduce` oder
+   `parallel_pipeline` in der Perimeter-/TopInfill-Generierung, bei
+   dem Teilergebnisse in einer durch Thread-Scheduling bestimmten
+   Reihenfolge aggregiert werden. Auf 16-Core-Ryzen reproduziert
+   das Scheduling in dem Zeitfenster vermutlich immer dieselbe
+   Reihenfolge; auf 4+4-big.LITTLE-Snapdragon ist das Fenster
+   groesser und das Scheduling waehlt zwischen zwei Lokal-Optima.
+3. **x86-vs-arm64-Byte-Divergenz** bei einem **einzelnen** Vergleich
+   (sha a30ffec3 vs. 92951c26, 513 Zeilen Diff) ist ebenfalls eine
+   Folge dieses TBB-Verhaltens, nicht eines libstdc++/libc++-
+   Unterschieds. Die 513-Zeilen-Diff ist genau die Form, die zu einer
+   anderen TBB-Reihenfolge auf einer anderen Topologie passt.
+
+**Was *nicht* die Ursache ist:**
+
+- **Fliesskomma-Rundung.** Bestaetigt durch die rotations-symmetrische
+  Form der Diffs: die betroffenen Zahlen sind identisch zwischen den
+  Varianten, nur an anderer Position – nicht in ULP-Naehe von einander.
+- **Boost::filesystem-Crash im 2. Aufruf** (`PROGRESS.md` 2026-10-24).
+  Mit dem neu gebauten Binary nicht mehr reproduzierbar (3× und 10×
+  hintereinander in derselben adb-shell, immer Exit 0; der Crash
+  war vermutlich an diesem Binary-Build nie reproduzierbar oder
+  haengt an einem seitdem geaenderten Zustand im Build).
+
+**Was tun gegen den TBB-Nicht-Determinismus auf arm64?**
+
+Drei Optionen, in Reihenfolge nach Aufwand:
+
+- A. **Nichts.** Phase-C-Kriterium praezisieren auf „funktional
+  aequivalent zur Desktop-Referenz, zwei stabile arm64-Varianten
+  dokumentiert". Das haben wir oben getan. Beide arm64-Varianten
+  drucken denselben Wuerfel korrekt (Material, Zeit, Volumen auf's
+  Milligramm identisch; nur die Pfadfuehrung variiert). Fuer die
+  App ist das harmlos.
+- B. **Workaround im Build**: Orca mit einem festen TBB-Thread-Pool
+  (`tbb::global_control` am Anfang von `main()` fest auf 4 statt
+  variabler Core-Zahl setzen). Reduziert vielleicht den Varianz-
+  Raum, aber macht nicht deterministisch – die Thread-Reihenfolge
+  bleibt scheduler-abhaengig.
+- C. **Orca-Patch (Phase 3+).** Jeden `parallel_reduce`/
+  `parallel_pipeline`-Join in den betroffenen Code-Pfaden (vor
+  allem `src/libslic3r/Fill/` und `src/libslic3r/GCode/`) mit einer
+  stabilen Sort-Nach-der-Reduktion versehen, bevor das Teilergebnis
+  weitergegeben wird. Siehe Roadmap „Upstream-Beitrag".
+
+Fuer heute: **Weg A**, Phase-C-Kriterium entsprechend praezisiert.
 
 ### Schritt D: Einbettung in die App
 

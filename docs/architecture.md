@@ -42,20 +42,72 @@ bleibt Orca-Upstream. Siehe `elegoo-integration.md`.
 4. **Slicing-Engine** – siehe `engine-integration.md`.
 5. **Netzwerk** – siehe `networking-cc2.md`.
 
-## UI-Stack: Flutter vs. Kotlin/Compose (OFFEN)
+## UI-Stack: Flutter (ENTSCHIEDEN, 2026-10-25)
 
-| Kriterium | Flutter (Dart) | Kotlin + Jetpack Compose |
-|---|---|---|
-| Plattform | Android **+ iOS** aus einer Basis | Android nativ |
-| Native-C++-Anbindung | dart:ffi (sauber) | JNI (mehr Boilerplate) |
-| 3D-View | three_dart / filament / Platform-View | OpenGL/Vulkan nativ, SceneView |
-| Iterationsgeschwindigkeit | sehr hoch (Hot Reload) | hoch |
-| „fühlt sich nativ an" | gut | am besten |
-| Claude-Code-Erfahrung | sehr gut | sehr gut |
+**Entschieden:** Das Frontend wird in **Flutter (Dart)** gebaut. Android- und
+iOS-Builds aus einer Codebasis; `dart:ffi` fuer die Engine-Bruecke;
+plattform-spezifische Android-Teile (Foreground-Service fuer das Slicen,
+Scoped-Storage-Zugriffe) als Kotlin-Platform-Channel-Code neben dem
+Flutter-Modul.
 
-**Empfehlung:** Flutter – schnelles UI, spätere iOS-Option, saubere FFI.
-Compose nur, wenn tiefste Android-Integration wichtiger ist als Plattform-
-Reichweite. Entscheidung in `PROGRESS.md` festhalten, bevor `app/` befüllt wird.
+**Begruendung:**
+
+- **iOS-Option kostenlos mitgenommen.** Phase 2 der Roadmap zielt auf
+  Mobil-first; iOS als zweites Target bleibt mit Flutter eine
+  Rebuild-Entscheidung, mit Compose waere es ein Codebasis-Fork
+  (SwiftUI). Fuer ein 1-Entwickler-Projekt der einzige realistische
+  Zweit-Plattform-Pfad.
+- **dart:ffi fuer die Engine-Bruecke.** Phase 0/1 ruft
+  `handslice-cli-arm64` als Subprozess, Phase 1+ ruft optional
+  `libslic3r.so` + eigene C-API ueber FFI. Beide Pfade sind in Dart mit
+  wenigen Dutzend Zeilen umsetzbar; der JNI-Weg (Kotlin) braucht
+  Wrapper-Glue, Datenmarshalling und manuelle Lifetime-Kontrolle.
+- **Hot Reload** – fuer das Settings-UI, das sich dynamisch aus den
+  Orca-Profil-JSONs (hunderte Felder) aufbaut, ist die Iteration pro
+  Layout-Aenderung < 1 s statt Compose-Builds im zweistelligen
+  Sekundenbereich. Fuer die Iterationsgeschwindigkeit bei nicht-
+  trivialer Formularlogik ist das der groesste praktische Hebel.
+- **Fokus-Navigation** – Flutter unterstuetzt vollstaendige
+  Keyboard-/D-Pad-/Controller-Fokus-Chains (`FocusNode`,
+  `FocusTraversalGroup`); kein Nachteil gegenueber Compose.
+
+**Was in Kotlin statt in Dart lebt:**
+
+- **Foreground-Service fuer den Slice-Lauf.** CLAUDE.md: „MIUI killt
+  Hintergrundprozesse aggressiv". Ein Flutter-Isolate ist dagegen nicht
+  resistent; der Slice-Prozess wird aus einem Kotlin-`Service` gestartet
+  (NotificationChannel + `startForeground`), damit Android ihn nicht
+  killt, waehrend der Benutzer die App in den Hintergrund schickt.
+  Kommunikation ueber Platform-Channel (JSON-Status an Dart-Side fuer
+  die Fortschritts-UI).
+- **Scoped-Storage-Zugriffe** (STL/3mf-Import aus User-Verzeichnissen,
+  G-Code-Export via SAF) brauchen die Android-System-Intents – die
+  liefern wir ueber `file_picker` (Dart-Wrapper) + ggf. eigenen
+  `ActivityResultContract`-Code in Kotlin, falls das Paket nicht
+  reicht.
+- **Spaeter:** iOS-spezifische File-Provider-Extensions in Swift.
+
+**Ausgeschlossen (und warum):**
+
+- **Jetpack Compose** – kein iOS-Pfad; teurer FFI/JNI; weniger
+  Iterationsgeschwindigkeit bei UI-Experimenten. Die „fuehlt-sich-nativ-
+  an"-Luecke von Flutter ist in Material-3-Apps vernachlaessigbar
+  klein geworden; keine der projektrelevanten UIs (Scroll-Settings,
+  3D-Viewport, Dialoge) sind Compose-sweet-spots.
+- **React Native / Capacitor** – FFI zu C++ ist jeweils schlechter als
+  dart:ffi; 3D-Viewport-Integration umstaendlicher.
+
+**Konsequenzen fuer die Architektur-Schicht:**
+
+- `app/lib/l10n/` wird mit ARB-Dateien (Flutter-Standard) befuellt; die
+  Lokalisierungs-Regel aus `CLAUDE.md` §5 bleibt unveraendert.
+- Die Engine-Bridge-Schicht in der Grafik oben ist in Phase 0 ein
+  HTTP-Client gegen `server/` (Dart), ab Phase 1 ein `Process.run`-
+  Aufruf auf das gebuendelte `handslice-cli-arm64`-Asset (Dart) bzw.
+  spaeter FFI gegen `libslic3r.so` (dart:ffi).
+
+Phase 1 Code-Setup kommt als eigener Auftrag; dieser Doku-Eintrag ist
+die Entscheidungs-Fixierung ohne Code-Aenderung in `app/`.
 
 ## Datenfluss (MVP)
 

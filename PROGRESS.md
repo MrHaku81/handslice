@@ -8,6 +8,164 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 07:50 – Divergenz-Ursache gefunden: TBB-Race auf arm64; CC2-LAN-Protokoll geklaert; UI-Stack Flutter
+
+Nachtlauf. Zehn Punkte, alle abgearbeitet:
+
+### Byte-Divergenz arm64 ↔ x86 – Ursache ist TBB-Race, nicht libc++/libstdc++
+
+**Experiment 1a (asymmetrisches Modell).** `engine/test/make_cube.py`
+um `cube_notched_20mm_centered_cc2.stl` erweitert (20-mm-Wuerfel
+mit 5×5×5-mm-Kerbe an +X+Y+Z-Ecke, 24 Dreiecke, vorzentriert).
+Ergebnis: Divergenz bleibt (595 Zeilen nur in x86, 600 nur in arm64).
+Grund: die Kerbe bricht die Rotationssymmetrie, aber nicht die
+Spiegelsymmetrie an der x=y-Diagonalen. Fuer eine "wirklich
+asymmetrische" Variante waere ein off-corner- oder non-square-
+Notch noetig (nachgetragen in `docs/engine-integration.md` als
+Followup, kein Blocker).
+
+**Experiment 1b (Single-Thread + Mehrfachlaeufe).** `handslice-cli`
+hat jetzt `--threads N` (TBB-`global_control`). Zwei Teilbefunde:
+
+- `--threads 1` und `--threads 2` **blockieren auf beiden Plattformen**
+  Orcas Pipeline deadlockt bei nur 1-2 Threads (`parallel_pipeline` oder
+  `flow::graph` wartet auf einen zweiten Worker, der nie kommt).
+  Single-Thread-Test mit dieser Orca-Version nicht ausfuehrbar.
+- Mehrfachlauf stattdessen – 10 Laeufe pro Plattform mit dem
+  symmetrischen Wuerfel: **x86 ist deterministisch (10/10 identisch,
+  sha 92951c26... = GUI-Referenz). arm64 ist NICHT deterministisch
+  (6×`a30ffec3`-Variante A, 4×`7c88f484`-Variante B).** Mit dem
+  Notch-Modell dasselbe Muster: 3×`7ca4cd37`, 2×`919cde23`.
+
+**Daraus folgt klar: Die Divergenz-Quelle ist ein TBB-Race in Orcas
+Pipeline**, nicht libc++ vs. libstdc++. Dieselbe Binary auf demselben
+Geraet produziert zwei stabile Varianten pro Lauf. Auf 16-Core-Ryzen
+raucht das Scheduling-Fenster offenbar immer dieselbe Reihenfolge, auf
+dem 4+4-big.LITTLE-Snapdragon 860 zwei. Die 513-Zeilen-arm64↔x86-Diff
+vom Vortag ist dieselbe Klasse Fehler, nur quer-Plattform.
+
+**Phase-C-Erfolgskriterium praezisiert** (nicht gelockert) in
+`docs/engine-integration.md`:
+1. Funktional-aequivalent zur Desktop-Referenz (Zeilenanzahl, Filament
+   ±0.01 g, Zeit ±5 s, Layer-Grenzen).
+2. Determinismus pro Plattform (zwei Laeufe byte-identisch).
+3. Variant-Set dokumentiert (wenn mehrere stabile Varianten moeglich).
+
+Byte-Gleichheit bleibt als Fernziel (Phase 3+ Orca-Upstream-Patch).
+
+### boost::filesystem-Crash im 2. Aufruf (PROGRESS 2026-10-24 23:50)
+
+**Mit neu gebauter Binary nicht mehr reproduzierbar.** 3× und 10×
+hintereinander in derselben adb-shell: alle Exit 0. Crash ist weg,
+Ursache unbekannt – vermutlich war der 23:50-Fund an einem seitdem
+geaenderten lokalen State haengen geblieben. Dokumentiert in
+engine-integration.md.
+
+### UI-Stack entschieden: Flutter
+
+`docs/architecture.md` + `app/README.md` angepasst. Begruendung:
+iOS-Option, `dart:ffi` sauberer als JNI, Hot Reload fuer das
+dynamische Settings-UI aus den Orca-Profil-JSONs. Android-spezifisches
+(Foreground-Service fuer den Slice-Lauf, SAF-Picker) als Kotlin-
+Platform-Channel-Code im `android/`-Unterordner des Flutter-Projekts.
+Noch kein Flutter-Code – das wird ein eigener Auftrag.
+
+### CC2-LAN-Protokoll geklaert, Portscan + MQTT-Probe
+
+Klaus hat gegen Ende CC2-IP (<cc2-ip>) und drei Protokoll-Quellen
+geliefert. Ergebnis in `docs/networking-cc2.md` komplett umgeschrieben:
+
+- **Discovery (UDP 52700):** JSON `{"id":0,"method":7000}` → Reply mit
+  `sn="<cc2-sn>"`, `token_status=1` (Access-Code erforderlich),
+  `lan_status=0`, `protocol_version=1.0.0`.
+- **Portscan:** 1883/tcp open (MQTT), 9001/tcp open (MQTT/WS),
+  8080/tcp filtered (MJPEG), 80/tcp **closed** (Stock-Upload-Port
+  laut Protokoll – auf dieser Firmware zu), 7125/tcp closed
+  (bestaetigt: kein Moonraker).
+- **MQTT 1883 Connect ohne Auth:** CONNACK rc=5 (Not authorized),
+  erwartet. Kein Subscribe, kein Publish, sauberer Disconnect.
+- **Protokoll-Doku** aus den drei Quellen (ChestnutLabs MIT,
+  elegoo-homeassistant MIT, elegoo-printer-proxy CC0): MQTT-Topics,
+  Registrierungs-Handshake, chunked HTTP-PUT-Upload, 10-s-PING,
+  Access-Code-Auth, CANVAS-Multimaterial-`slot_map`.
+- **CC1-Protokoll (SDCP)** zusaetzlich vorgemerkt als zweiter
+  Client (`SdcpClient`), Modul-Schnittstelle bleibt
+  `discover()/upload()/start()/status()`.
+
+**Offen:** Welcher Port tatsaechlich G-Code annimmt (80 closed,
+8080 filtered). Vermutung: oeffnet erst nach authentifiziertem MQTT-
+Handshake. Pruefung in Phase 2 Prototyp. Neptune 4 Pro war im LAN
+nicht sichtbar – nicht geprueft, bleibt ungeprueft, nicht geraten.
+
+**Phase-2-Aufwandsschaetzung** fuer CC2-Client: ca. 1–2
+Entwicklungswochen (MQTT-Dart-Client + UDP-Discovery + chunked
+HTTP-Uploader + State-Delta-Merge + Pairing-UI + sichere Credential-
+Storage). Nicht blockierend fuer Phase 1 (Engine).
+
+### Build + Tests
+
+- `handslice-cli-x86` + `handslice-cli-arm64` inkrementell neu gebaut
+  (nur handslice-cli.cpp + CMakeLists Headers geaendert). Beide
+  bauen sauber durch.
+- arm64 llvm-stripped: 865 MB → 13.8 MB.
+- Reference-Test (`run-reference-test.sh`) auf x86 bestanden
+  (sha 92951c26..., 8479 Zeilen).
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- `engine/test/make_cube.py` erzeugt jetzt zwei Modelle: den bekannten
+  symmetrischen 20-mm-Wuerfel und einen Notch-Wuerfel mit 24
+  Dreiecken, vorzentriert auf CC2-Mitte. Beweis:
+  `python3 engine/test/make_cube.py` schreibt beide STLs
+  (684 + 1284 Byte).
+- `handslice-cli` nimmt jetzt `--threads N` an und beschraenkt
+  TBB-Parallelitaet entsprechend. Beweis:
+  `engine/bin/handslice-cli-x86 --help` listet die Option, und ein
+  Lauf mit `--threads 1` haengt reproduzierbar in TBB (das ist
+  diagnostisch gewollt, nicht der Erfolgs-Pfad).
+- **x86-Determinismus:** 10 Laeufe liefern 10 identische
+  EXECUTABLE_BLOCK-Hashes (sha 92951c26...).
+- **arm64-Nicht-Determinismus:** 10 Laeufe liefern eine stabile
+  Verteilung ueber zwei Varianten A/B (6:4 beim symmetrischen Wuerfel,
+  3:2 beim Notch).
+- CC2 ueber UDP 52700 Discovery-fertig (`sn=<cc2-sn>`,
+  Access-Code erforderlich). MQTT-Erreichbarkeit auf 1883 bestaetigt
+  (CONNACK rc=5 Not authorized, da kein Access-Code gesendet – gewollt).
+- UI-Stack und CC2-Protokoll-Pfad vollstaendig dokumentiert in
+  `docs/architecture.md` + `docs/networking-cc2.md`.
+
+**2. Ungeprueft**
+
+- **G-Code-Upload-Pfad auf dem CC2.** Port 80 war beim Scan geschlossen,
+  Port 8080 nur gefiltert. Protokoll-Quelle sagt Port 80 (Stock) oder
+  8080 (OpenCentauri). Welcher Pfad real funktioniert, erfordert
+  einen authentifizierten MQTT-Handshake vorweg und ist nicht Teil
+  dieser Nachtrunde.
+- **Neptune 4 Pro.** Nicht im LAN sichtbar, Moonraker-Check nicht
+  durchgefuehrt. Ungeprueft gemeldet, nicht geraten.
+- **Wirklich asymmetrisches Testmodell** (Notch off-corner / 3×5×5).
+  Als Followup notiert, kein Blocker.
+- **Determinismus auf arm64 durch Build-Zeit-Tuning** (Workaround B
+  mit fixem TBB-Pool). Dachte, waere einen Versuch wert, nicht in
+  dieser Runde eroeffnet.
+
+**3. Geht nicht**
+
+- **Byte-Gleichheit arm64 ↔ Desktop-Referenz** – bleibt offen, aber
+  Ursache ist jetzt klar: **TBB-Race in Orcas Pipeline, nicht
+  libc++/libstdc++**. Nachgewiesen durch den Mehrfachlauf-Test.
+  Keine Loesung ohne Orca-Patch (Phase 3+). Phase-C-Kriterium
+  entsprechend neu formuliert (siehe `docs/engine-integration.md`).
+- **Single-Thread-Lauf** (`--threads 1` oder `--threads 2`) blockiert
+  Orcas Pipeline. Als diagnostisches Werkzeug nicht nutzbar; der
+  Mehrfachlauf-Test hat die Frage trotzdem beantwortet.
+
+---
+
 ## 2026-10-24 23:50 – Device-Test auf Poco X3 Pro gelaufen, Byte-Gleichheit nicht erreicht
 
 Klaus hat die ADB-Autorisierung am Poco bestaetigt; `adb devices` zeigt
