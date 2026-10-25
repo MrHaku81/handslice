@@ -85,30 +85,63 @@ Repo (siehe `.gitignore: /local-test/`). Das Modell wird ausschließlich
 durch den Slicer verarbeitet — keine Weiterverarbeitung, keine
 Analyse-Pipeline, kein Training.
 
-## Vorschlag: frei lizenziertes Großmodell
+## Frei verfügbares Großmodell per `--download`
 
-Der Stresstest wäre ohne proprietäres Modell reproduzierbar, wenn das
-Script selbst ein CC0-/CC-BY-lizenziertes Modell herunterladen und
-abspeichern könnte. Vorschläge (zuerst nennen, nicht einbauen — Klaus
-entscheidet):
+```
+bash engine/test/stress-test.sh --list-downloads
+bash engine/test/stress-test.sh --download neptune
+```
 
-- **Stanford Thai Statuette** (3Dscanrep / Stanford Graphics Lab) —
-  ~10 Mio. Dreiecke, direkt lizenzfrei als Educational-Use. Download:
-  <http://graphics.stanford.edu/data/3Dscanrep/>. Formell steht dort
-  „Please be sure to acknowledge the source" — kein CC-Siegel, aber
-  explizit zur Nutzung freigegeben. Für Repro-Zwecke wäre eine
-  CC-BY-Variante aus Scan-the-World oder Smithsonian 3D sauberer.
-- **Smithsonian Open Access 3D** (CC0): <https://3d.si.edu/>. Z. B.
-  „Gorgoneion" (CC0, ca. 1,5–3 Mio. Dreiecke je nach Dezimierung),
-  Lizenz explizit CC0 angegeben. Herunterladbar als OBJ/GLB, Konvertierung
-  nach STL ist trivial.
-- **Scan-the-World auf MyMiniFactory**: viele CC-BY-SA- und CC-BY-
-  Statuen (Louvre, British Museum, V&A). Beispiel: „Diana of Versailles"
-  — oft mehrere Mio. Dreiecke, CC-BY-SA. Downloadlink im Modell-
-  Metadata jeweils einzeln angegeben.
+Kuratierte Modelle in `engine/test/stress-models.json`. Pro Eintrag:
+`download_url`, SHA-256-Lock (optional), `license` (freier Text,
+wird 1:1 in den Sidecar geschrieben), `attribution`, `triangles`.
+Script lädt, prüft Hash, entpackt, schreibt `<name>.license.txt`
+neben `<name>.stl` – beide landen in `local-test/stresstest-cache/`,
+also gitignored.
 
-Umsetzungsidee (nicht gemacht): `engine/test/stress-test.sh --download
-<auswahl>` lädt und cached unter `local-test/stresstest-cache/<slug>.stl`,
-schreibt die Lizenz-Metadaten als `<slug>.license.txt` daneben. Der
-Default des Stresstests bleibt der mitgelieferte Kerbenwürfel – damit
-geht das Skript auch offline, auch ohne Fremdlizenz.
+### Default-Eintrag: `neptune`
+
+- **1 556 886 Dreiecke**, 74 MB STL (zip 37 MB).
+- Quelle: Three D Scans (Oliver Laric), <https://threedscans.com/uncategorized/neptune/>.
+- Direkt-URL: `https://threedscans.com/wp-content/uploads/2023/04/neptuneRaw.stl.zip`
+- SHA256 (zip): `b3d6fbb0124fd22d9cfefb60b93ad56d8d035b92ebc372350e0806442f8976fb`
+- Lizenz: Die Website ist als „Free 3D scan archive" markiert, am
+  Download sind weder Copyright-Vermerk noch CC-Siegel angebracht;
+  Trägerschaft (Lafayette Anticipation, Secession Vienna, …) und
+  Herkunftsinstitutionen (Louvre u. a.) sind auf threedscans.com/info
+  genannt. **Nicht CC0/CC-BY zertifiziert** – wer Neptune
+  weiterverteilen will, prüfe die Lizenz-Lage selbst
+  (contact@threedscans.com).
+- **Scaling-Hinweis:** Neptune liegt in Scanner-Rohscale
+  (X span 3970 mm, Y span 15 475 mm, Z span 5 828 mm) – weit über dem
+  CC2-Druckbereich. Der Slice-Lauf triggert libslic3rs
+  `SlicingErrors`-Preflight („Objekt ausserhalb des Druckbetts");
+  das ist für den Stresstest OK (Dauer + RAM werden gemessen,
+  Grenztest schlägt wie erwartet an). Für einen echten Slice-Lauf
+  müsste das Modell skaliert und zentriert werden (z. B. mit einem
+  3MF-Export aus Blender/MeshLab).
+
+### Smithsonian Open Access (CC0) – nicht automatisiert
+
+Smithsonians 3D-Modelle (`https://3d.si.edu/`) sind unter CC0 1.0
+Public Domain Dedication. Direkte curl-Downloads geben leider 403/404
+(Browser-Session + JavaScript-Rendering erforderlich), weshalb der
+`--download`-Pfad sie momentan nicht automatisch holen kann.
+`stress-models.json` enthält einen Hinweis, wie eine Entry mit
+stabiler direct-OBJ/GLB-URL hinzugefügt werden kann, sobald jemand
+die URL manuell aus dem Smithsonian-Browser-Download kopiert hat.
+
+Weitere Kandidaten (nicht als Default, noch nicht als Entries
+hinzugefügt):
+
+- **Scan-the-World auf MyMiniFactory** (meist CC-BY-SA): viele
+  Statuen >1 Mio. Dreiecke. Downloads sind MyMiniFactory-Session-
+  gebunden – gleicher Automatisierungsvorbehalt wie Smithsonian.
+- **Stanford XYZ RGB Statuette** (3D Scanning Repository): ~10 Mio.
+  Dreiecke als `.ply`. Explizit zur Nutzung freigegeben, aber kein
+  CC-Siegel; libslic3r kann `.ply` nicht direkt – Konvertierung zu
+  `.stl` nötig.
+- **Wikimedia Commons** (Kategorie „3D models from the Smithsonian
+  Institution"): einzelne Dateien direkt per CDN verfügbar; war beim
+  letzten Lookup leer (0 Treffer) – Smithsonian lädt bei Commons nur
+  Fotos hoch, keine .stl-Scans.

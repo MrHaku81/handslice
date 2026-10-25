@@ -1,0 +1,30 @@
+{
+  "_comment": "Kuratierte Liste frei verfuegbarer Grossmodelle fuer den Stresstest. Jede Entry hat eine direkte Download-URL, einen SHA-256 zur Validierung, eine Herkunftsangabe und eine Lizenz-Zeile. Der Lizenz-Text wird 1:1 ins Sidecar geschrieben – wer es verwendet, soll die Herkunft lesen koennen. Neue Entry hinzufuegen: Download pruefen, SHA berechnen (sha256sum), Lizenz belegen (URL der Quelle), Entry hier einfuegen.",
+  "models": {
+    "neptune": {
+      "title": "Neptune",
+      "attribution": "3D-Scan: Oliver Laric / Three D Scans (https://threedscans.com/, Projekt seit 2012)",
+      "source_url": "https://threedscans.com/uncategorized/neptune/",
+      "download_url": "https://threedscans.com/wp-content/uploads/2023/04/neptuneRaw.stl.zip",
+      "sha256_zip": "b3d6fbb0124fd22d9cfefb60b93ad56d8d035b92ebc372350e0806442f8976fb",
+      "extract_name": "neptuneRaw.stl",
+      "triangles": 1556886,
+      "format": "stl",
+      "license": "Three D Scans beschreibt sich selbst als 'Free 3D scan archive'. Am Download sind weder Copyright-Vermerk noch CC-Siegel angebracht; die Website nennt die Projekt-Trägerschaft (Lafayette Anticipation, Secession Vienna, u. a.) und die Herkunftsinstitutionen der Vorlagen (Louvre, Musee Guimet, KHM Wien, ...). Fuer private Reproduzierbarkeit des Stresstests verwendet. Keine CC0-/CC-BY-Zertifizierung – wer das Modell weiterverteilen will, pruefe die Lizenz selbst (contact@threedscans.com).",
+      "download_notes": "Zip-Archiv mit Haupt-STL + __MACOSX-Metadaten. Script entpackt nur die eigentliche .stl."
+    },
+    "centaur": {
+      "title": "Centaur",
+      "attribution": "3D-Scan: Oliver Laric / Three D Scans",
+      "source_url": "https://threedscans.com/uncategorized/centaur/",
+      "download_url": "https://threedscans.com/wp-content/uploads/2025/10/Centaur.stl.zip",
+      "sha256_zip": null,
+      "extract_name": "Centaur.stl",
+      "triangles": null,
+      "format": "stl",
+      "license": "siehe neptune.license (gleiche Quelle)",
+      "download_notes": "ca. 20 MB zip, exakte Triangle-Zahl bitte nach Download pruefen"
+    }
+  },
+  "smithsonian_hinweis": "Smithsonian Open Access (CC0) ist die saubere Default-Quelle fuer frei weiterverteilbare Grossmodelle. Die 3D-Modelle auf 3d.si.edu liegen hinter einer Browser-Session (direkte curl-Zugriffe geben 403/404), weshalb der aktuelle --download-Pfad sie nicht automatisch holen kann. Fuer eine konkrete Entry hier bitte eine stabile direct-OBJ/GLB-URL aus dem Smithsonian-3D-API-Download einfuegen (im Browser 'Download' -> URL kopieren, dann Entry mit license: 'CC0 1.0 Public Domain Dedication' belegen)."
+}

@@ -18,7 +18,15 @@ set -euo pipefail
 
 usage() {
     cat <<EOF >&2
-Usage: $0 <modell.stl> [--out <dir>] [--skip-arm64] [--skip-x86] [--bed A|B]
+Usage: $0 <modell.stl>            [--out <dir>] [--skip-arm64] [--skip-x86] [--bed A|B]
+       $0 --download <name>       [--out <dir>] [--skip-arm64] [--skip-x86] [--bed A|B]
+       $0 --list-downloads
+
+--download <name>  laedt ein kuratiertes Grossmodell aus
+                   engine/test/stress-models.json nach
+                   local-test/stresstest-cache/<name>.stl, schreibt
+                   dazu <name>.license.txt mit Herkunft/Lizenz-Beleg.
+--list-downloads   listet verfuegbare Modelle.
 EOF
     exit 2
 }
@@ -28,17 +36,102 @@ OUT_DIR=""
 SKIP_X86=0
 SKIP_ARM=0
 BED=A
+DOWNLOAD=""
+LIST=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --out)        OUT_DIR="$2"; shift 2 ;;
-        --skip-arm64) SKIP_ARM=1;   shift ;;
-        --skip-x86)   SKIP_X86=1;   shift ;;
-        --bed)        BED="$2";     shift 2 ;;
-        -h|--help)    usage ;;
-        -*)           echo "unknown flag: $1" >&2; usage ;;
-        *)            MODEL="${MODEL:-$1}"; shift ;;
+        --out)             OUT_DIR="$2"; shift 2 ;;
+        --skip-arm64)      SKIP_ARM=1;   shift ;;
+        --skip-x86)        SKIP_X86=1;   shift ;;
+        --bed)             BED="$2";     shift 2 ;;
+        --download)        DOWNLOAD="$2"; shift 2 ;;
+        --list-downloads)  LIST=1;       shift ;;
+        -h|--help)         usage ;;
+        -*)                echo "unknown flag: $1" >&2; usage ;;
+        *)                 MODEL="${MODEL:-$1}"; shift ;;
     esac
 done
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+MODELS_JSON="${PROJECT_ROOT}/engine/test/stress-models.json"
+CACHE_DIR="${PROJECT_ROOT}/local-test/stresstest-cache"
+
+if [[ "${LIST}" -eq 1 ]]; then
+    python3 - "${MODELS_JSON}" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for name, m in d['models'].items():
+    tris = m.get('triangles') or '?'
+    print(f"  {name:12s}  {m['title']:30s}  {tris} Dreiecke  <- {m['download_url']}")
+PY
+    exit 0
+fi
+
+if [[ -n "${DOWNLOAD}" ]]; then
+    mkdir -p "${CACHE_DIR}"
+    entry=$(python3 -c "import json,sys;d=json.load(open('${MODELS_JSON}'));m=d['models'].get('${DOWNLOAD}');print(json.dumps(m) if m else '')")
+    if [[ -z "${entry}" ]]; then
+        echo "FEHLT: Modell '${DOWNLOAD}' nicht in ${MODELS_JSON}" >&2
+        exit 2
+    fi
+    url=$(python3 -c "import json;print(json.loads(r'''${entry}''')['download_url'])")
+    expected_sha=$(python3 -c "import json;print(json.loads(r'''${entry}''').get('sha256_zip') or '')")
+    extract=$(python3 -c "import json;print(json.loads(r'''${entry}''').get('extract_name') or '')")
+    license=$(python3 -c "import json;print(json.loads(r'''${entry}''')['license'])")
+    attrib=$(python3 -c "import json;print(json.loads(r'''${entry}''')['attribution'])")
+    src=$(python3 -c "import json;print(json.loads(r'''${entry}''')['source_url'])")
+
+    tmpzip="${CACHE_DIR}/${DOWNLOAD}.download"
+    echo "=== Download '${DOWNLOAD}' ==="
+    echo "   URL:  ${url}"
+    curl -L --fail --max-time 300 --silent --show-error "${url}" -o "${tmpzip}"
+
+    if [[ -n "${expected_sha}" ]]; then
+        actual=$(sha256sum "${tmpzip}" | awk '{print $1}')
+        if [[ "${actual}" != "${expected_sha}" ]]; then
+            echo "ABBRUCH: SHA256-Mismatch" >&2
+            echo "   erwartet: ${expected_sha}" >&2
+            echo "   erhalten: ${actual}" >&2
+            rm -f "${tmpzip}"
+            exit 3
+        fi
+        echo "   SHA256 OK: ${actual}"
+    else
+        echo "   SHA256: $(sha256sum "${tmpzip}" | awk '{print $1}') (nicht gelockt – bitte in stress-models.json pflegen)"
+    fi
+
+    MODEL="${CACHE_DIR}/${DOWNLOAD}.stl"
+    case "${url}" in
+        *.zip) unzip -o "${tmpzip}" "${extract}" -d "${CACHE_DIR}" >/dev/null
+               mv "${CACHE_DIR}/${extract}" "${MODEL}"
+               rm -rf "${CACHE_DIR}/__MACOSX"
+               ;;
+        *.stl) mv "${tmpzip}" "${MODEL}" ;;
+        *)     echo "UNBEKANNTES Format: ${url##*.}; nur .stl / .zip-mit-stl unterstuetzt" >&2
+               exit 2 ;;
+    esac
+    rm -f "${tmpzip}"
+    license_file="${MODEL%.stl}.license.txt"
+    cat >"${license_file}" <<EOF
+${DOWNLOAD}  —  heruntergeladen am $(date -u +'%Y-%m-%dT%H:%MZ')
+
+Titel:       $(python3 -c "import json;print(json.loads(r'''${entry}''')['title'])")
+Attribution: ${attrib}
+Quelle:      ${src}
+Download:    ${url}
+SHA256:      $(sha256sum "${MODEL}" | awk '{print $1}')
+
+Lizenz / Nutzungshinweis:
+${license}
+
+Dieser Sidecar wird vom stress-test.sh beim Download angelegt. Nicht
+loeschen – wer das Modell lokal haelt, soll die Lizenz-Lage mit lesen
+koennen. Pfad des Modells liegt im .gitignore'd local-test/-Verzeichnis.
+EOF
+    echo "   STL:  ${MODEL}"
+    echo "   Lic:  ${license_file}"
+fi
+
 [[ -z "${MODEL}" ]] && usage
 [[ ! -f "${MODEL}" ]] && { echo "FEHLT: ${MODEL}" >&2; exit 2; }
 
