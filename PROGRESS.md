@@ -8,7 +8,158 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
-## 2026-10-25 10:10 – Zweiter Druck mit `delay_video=true`: Druck sauber, Zeitraffer nicht aufgenommen
+## 2026-10-25 11:00 – Zeitraffer-Download: kein belegter LAN-Pfad; USB-Export ist der Weg
+
+Nach der Korrektur um 10:30 systematisch im Quellcode gesucht.
+
+### Code-Recherche
+
+Durchsucht:
+- `elegoo-link` (Apache-2.0), speziell
+  `src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp`
+  und `elegoo_fdm_cc2_http_transfer.cpp`.
+- `ElegooSlicer` (AGPL-3.0), Haupt-Baum
+  (`src/libslic3r/GCode/TimelapsePosPicker.cpp`,
+  `src/slic3r/GUI/Camera.cpp`, `src/slic3r/GUI/CameraPopup.cpp`,
+  `src/slic3r/GUI/DeviceCore/*`).
+- HA-Integration `danielcherubini/elegoo-homeassistant` (MIT),
+  `cc2/client.py`, `cc2/const.py`, Haupt-`const.py`.
+
+**Belegte Zeitraffer-/Kamera-APIs:**
+
+| Fundstelle | Zweck |
+|---|---|
+| `elegoo_fdm_cc2_message_adapter.cpp:81` | `config.delay_video = enableTimeLapse` – Aufnahme einschalten |
+| HA `const.py:58-59` | `CC2_VIDEO_PORT=8080, CC2_VIDEO_PATH="/?action=stream"` – **Live-MJPEG-Stream** |
+| HA `cc2/const.py:74` | `CC2_CMD_VIDEO_STREAM = 1042` – aktiviert den Stream |
+| `elegoo_fdm_cc2_message_adapter.cpp:1417` | `// EXPORT_TIMELAPSE_VIDEO = 1045, interface not designed yet` – **auskommentiert** |
+| HA `cc2/const.py:78` | `CC2_CMD_GET_FILE_THUMBNAIL = 1045` – echter Zweck von 1045 (Thumbnail, nicht Timelapse!) |
+
+**Belegte LAN-Download-Pfade** (nur G-Code), aus
+`elegoo_fdm_cc2_http_transfer.cpp:431-473`:
+
+```
+GET /download?X-Token=<access>&file_name=<name>       (local)
+GET /download/sdcard?X-Token=<access>&file_name=<name>
+GET /download/udisk?X-Token=<access>&file_name=<name>
+```
+
+**Kein `/download/camera`, `/download/video`, `/download/timelapse`.**
+
+### Lesende Nachprobe am CC2
+
+Zusaetzlich getestet:
+- `method 1048 GET_DISK_INFO`: zeigt **nur eine `internal`-Partition**
+  (488 MB total, 90 MB genutzt). Kein separater Video-Speicher.
+- `method 1001 GET_PRINTER_ATTRIBUTES`: Basis-Infos, **keine
+  `cameraCapabilities`-Struktur**. Die Capability-Flags baut
+  ElegooSlicer selbst aus `external_device.chassis_camera.configured`
+  im Status-Delta zusammen.
+- `method 1045 GET_FILE_THUMBNAIL` mit korrektem `filename`-Parameter:
+  `error_code=1003`. Methode existiert, aber unser Timelapse-G-Code
+  hat kein embedded Thumbnail.
+
+### Fazit
+
+**Es gibt keine dokumentierte LAN-API fuer den Abruf einer
+Zeitraffer-Video-Datei auf dem CC2 mit Original-Firmware.** Weder
+ElegooSlicer/elegoo-link (dort explizit „interface not designed
+yet") noch HA-Integration (nur MJPEG-Live-Stream, keine Datei-
+Download-Funktion) noch der Hauptbaum von ElegooSlicer bieten
+diese Funktion an.
+
+**Legitime Wege zum Video auf diesem Drucker:**
+
+1. **Direkt am Drucker-Display** (Einstellungen → Kamera) – wie
+   Klaus heute schon gemacht hat.
+2. **USB-Export** – Datei vom Drucker auf USB-Stick kopieren und
+   dort ablesen. Pfad / Button-Beschriftung muss Klaus am Display
+   finden; der Code gibt dafuer keinen Hinweis.
+
+**Nicht geraten, nicht weiter gebohrt.** Spekulative Pfade wie
+`/download/camera` oder `storage_media="timelapse"` nicht
+getestet – das waere Hypothesen jagen, ohne Code-Beleg.
+
+### Dokumentation + Roadmap
+
+- `docs/networking-cc2.md` Abschnitt „Code-Recherche 2026-10-25
+  10:35: Zeitraffer-Download-Pfad nicht belegt" mit vollstaendiger
+  Fundstellen-Tabelle.
+- `docs/networking-cc2.md` Abschnitt „Zusammenfassung Zeitraffer-
+  Fluss (Soll-Zustand)" fuer die App.
+- `docs/roadmap.md` Phase 4: Zeitraffer-Abruf per WLAN als
+  Spaet-Thema aufgenommen, mit Hinweis auf USB-Export als
+  MVP-Pfad.
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Zeitraffer-Aufnahme per `config.delay_video=true` wirkt – Klaus
+  hat das Video am Display gesehen. Beweis: Sichtkontrolle; dazu
+  die Fundstelle `elegoo_fdm_cc2_message_adapter.cpp:81`.
+- Live-MJPEG-Stream auf `http://<ip>:8080/?action=stream` ist in
+  der HA-Integration belegt (`const.py:58-59`); schaltbar via
+  `method 1042`. Nicht als Zeitraffer-Playback, nur als Live-Bild.
+- `method 1048 GET_DISK_INFO`, `method 1001 GET_PRINTER_ATTRIBUTES`
+  und `method 1045 GET_FILE_THUMBNAIL` sauber lesend ausgefuehrt,
+  Antworten dokumentiert.
+- Credentials-Hygiene: Access-Code weiterhin aus `.env`, nirgends
+  in Logs, Doku oder Commits ausgegeben. Temp-Scripts geloescht.
+
+**2. Ungeprueft**
+
+- Weitere `storage_media`-Werte (`camera`, `video`, `timelapse`)
+  oder HTTP-Pfade (`/download/camera`, `/videos`) – **nicht
+  getestet, weil nicht im Code belegt**. Nach Klaus-Vorgabe nicht
+  geraten.
+- `method 1042 VIDEO_STREAM` enable/disable – nur Live-Stream-URL
+  bekannt, Request-Response-Zyklus nicht ausprobiert (nicht Teil
+  des Zeitraffer-Themas).
+
+**3. Geht nicht**
+
+- **Zeitraffer-Video per WLAN mit Original-Firmware herunterladen.**
+  Elegoo hat die API dafuer nicht veroeffentlicht;
+  `elegoo-link` markiert sie als „interface not designed yet".
+  Nicht als Blocker eingetragen – das ist Firmware-Scope, nicht
+  Code-Fehler bei uns. Fuer MVP: USB-Export / Display. Thema fuer
+  Phase 4 in `docs/roadmap.md` eingetragen.
+
+---
+
+## 2026-10-25 10:30 – Korrektur: Zeitraffer wird AUFGENOMMEN; Abruf per WLAN noch offen
+
+**Korrektur zum Bericht 10:10:** Die Zeitraffer-Aufnahme funktioniert
+nachweislich. Klaus hat das Video am Drucker-Display gesehen,
+unter **Einstellungen → Reiter „Kamera"**. Damit:
+
+- `config.delay_video=true` **wirkt**. Die Firmware filmt den Druck
+  tatsaechlich.
+- Die Hypothese „`supportsTimeLapse=false`" aus dem 10:10-Bericht
+  ist **widerlegt**.
+- Status 12 (VIDEO_COMPOSING) war offenbar nur zu kurz, um in das
+  60-s-Progress-Polling zu fallen. Status 12 ist damit ein
+  Delta-Push-Event, das man nicht pollen muss, sondern beim
+  Delta-Merge zuverlaessig erfassen muesste (unser Monitor hatte
+  die Logik dafuer, aber `print_status.enable=true` fehlte als
+  Trigger-Vorbedingung in diesem Lauf – noch kein Beweis fuer
+  Status-12-Nicht-Pushing, nur fuer unseren Monitor-Logik-Bug).
+
+Was offen bleibt: der **WLAN-Abruf** des aufgezeichneten Videos.
+Die Suche nach einer Netzwerk-Methode (siehe Eintrag 10:35 unten)
+ist der naechste Schritt.
+
+**Es ist ausdruecklich moeglich, dass die Original-Firmware keinen
+Netzwerk-Abruf anbietet und das Video nur per Display bzw. USB-
+Export zugaenglich ist.** Das waere ein legitimes Ergebnis, kein
+Fehler.
+
+---
+
+## 2026-10-25 10:10 – Zweiter Druck mit `delay_video=true`: Druck sauber, Zeitraffer AUFGENOMMEN
 
 Zweiter Durchlauf desselben Kerbenwuerfels mit dem aus
 `elegoo-link` (Apache-2.0) identifizierten Timelapse-Flag.
@@ -93,31 +244,34 @@ Keine Fehlermeldung (`exception_status` leer).
   `{"error_code": 1003}`. Erwartet, weil in elegoo-link als
   „interface not designed yet" markiert.
 
-### Deutung: Firmware ignoriert `delay_video=true`
+### Deutung (korrigiert nach Klaus-Sichtkontrolle am Display)
 
-Zusammenfassung:
+**Zeitraffer wird aufgenommen.** Klaus hat das Video am Drucker-
+Display unter Einstellungen → Kamera gesehen – `delay_video=true`
+wirkt. Was ueber das MQTT-Delta-Monitoring nicht aufgefallen ist:
 
-- Der Druck selbst lief einwandfrei (gleich 15 min wie beim ersten
-  Mal).
-- `delay_video=true` wurde vom CC2 akzeptiert
-  (`error_code=0`), aber keine Zeitraffer-Aufnahme hat stattgefunden.
-- Mutmasslich meldet dieser CC2 bei `GET_PRINTER_ATTRIBUTES`
-  `cameraCapabilities.supportsTimeLapse=false`
-  (siehe elegoo-link Z. 521/529/540: ElegooSlicer prueft diese Capability
-  selbst, bevor er `delay_video=true` ueberhaupt setzt).
-- Alternativ-Hypothesen: Timelapse braucht G-Code-Dekoration
-  (Macros wie `TIMELAPSE_TAKE_FRAME`), oder laendert nur ueber eine
-  parallele Cloud-Session mit Agora-RTM.
+- **Status 12** (VIDEO_COMPOSING) ist offenbar sehr kurz. In meinem
+  60-s-Polling-Monitor blieb er unsichtbar. Fuer die App muss der
+  Delta-Push-Handler Status 12 beim ersten Durchlauf erfassen,
+  ohne Vorbedingungen wie `print_status.enable=true` (die bei
+  unserem zweiten Lauf gar nicht als Delta kamen).
+- **Die Video-Datei existiert**, nur die Netzwerk-Abfrage-Methode
+  haben wir noch nicht gefunden. `method 1044` auf
+  `local`/`sd-card`/`u-disk` zeigt keine Video-Datei an – die
+  Firmware legt sie offenbar in einen eigenen (nicht per
+  `method 1044` sichtbaren) Pfad. `method 1045`
+  (EXPORT_TIMELAPSE_VIDEO) laendert nicht – error_code=1003 und in
+  elegoo-link als „interface not designed yet" markiert.
 
-**Konsequenz fuer MVP:** Zeitraffer bleibt nicht im MVP-Scope. Die
-App kann `config.delay_video=true` optional mitsenden (schadet
-nichts), aber ohne Garantie und mit UI-Hinweis. Vor dem Freigeben
-der Zeitraffer-Checkbox: `method 2000` (Printer-Attributes) auslesen
-und `supportsTimeLapse` als Vor-Pruefung einsetzen – wie
-ElegooSlicer das macht.
+**Was wir in dieser Nachtrunde NICHT geprueft hatten:**
 
-Nachweis vollstaendig in `docs/networking-cc2.md`, Abschnitt
-„Nachweislauf 2026-10-25 09:47–10:05: Druck mit delay_video=true".
+- `method 2000` (GET_PRINTER_ATTRIBUTES) mit dem Feld
+  `cameraCapabilities.supportsTimeLapse`. Haette direkt gezeigt,
+  dass die Capability vorhanden ist. Fuer die naechste Runde.
+- Eigene storage_media-Werte fuer die Video-Datei (z. B.
+  `"camera"`, `"video"`, `"timelapse"`). Nur raten darf ich
+  nicht – muss aus dem Quellcode kommen (siehe naechste Nachtrunde,
+  Eintrag 10:35).
 
 ---
 
@@ -152,12 +306,10 @@ Nachweis vollstaendig in `docs/networking-cc2.md`, Abschnitt
 
 **3. Geht nicht**
 
-- **Zeitraffer-Aufzeichnung auf diesem CC2 ueber den LAN-Pfad.**
-  Firmware akzeptiert `delay_video=true`, laesst die Kamera aber
-  nicht laufen; Status 12 trat nie auf; kein Video auf `local`/
-  `sd-card`/`u-disk`; `method 1045` liefert error_code 1003. Nicht
-  als Blocker im Drei-Versuche-Sinn eingetragen – das ist
-  Firmware-/Capability-Verhalten, kein Code-Fehler bei uns.
+- **Zeitraffer-Abruf ueber WLAN** – noch nicht belegt. Weitere
+  Suche noetig (siehe Korrektur-Eintrag 10:30 oben + Suchlauf
+  10:35). Zeitraffer-AUFNAHME ist nachweislich erfolgreich
+  (Display-Sichtung Klaus) – nur der Download-Weg fehlt.
 
 ---
 

@@ -767,57 +767,119 @@ Error 1003 = kein Erfolg; in `elegoo-link` ist diese Methode als
 Export auf LAN-Pfad existiert in der Firmware nicht als Request/
 Response-Interface.
 
-### Deutung: Zeitraffer wurde nicht aufgezeichnet
+### Korrektur 2026-10-25 10:30: Zeitraffer wird AUFGENOMMEN
 
-Zusammenfassung der Signale:
+**Klaus hat das Video am Drucker-Display gesehen**, unter
+Einstellungen → Reiter „Kamera". Damit:
 
-- Druckstart akzeptiert `delay_video=true` ohne Fehler.
-- Druck lief sauber durch (15 min, 100 Layer, `state="complete"`).
-- Status 12 (VIDEO_COMPOSING) trat **nicht** auf.
-- Keine Video-Datei auf `local`, `sd-card`, `u-disk` zu finden.
-- `method 1045` liefert error_code 1003.
+- `delay_video=true` **wirkt** – die Aufnahme laendert
+  nachweislich.
+- Hypothese „Firmware entscheidet gegen Timelapse" aus dem Bericht
+  10:10 ist **widerlegt**.
+- Status 12 (VIDEO_COMPOSING) wurde vermutlich nur zu kurz
+  gepusht, um im 60-s-Progress-Snapshot aufzutauchen. Fuer die App
+  muss der Delta-Push-Handler Status 12 ohne Vorbedingung erfassen.
 
-**Mutmassliche Ursachen (in Reihenfolge der Wahrscheinlichkeit):**
+**Was damit offen bleibt:** der **WLAN-Abruf** des aufgezeichneten
+Videos. Code-Recherche-Ergebnis siehe naechster Abschnitt.
 
-1. **Firmware entscheidet gegen Timelapse.** ElegooSlicer prueft vor
-   dem Setzen von `delay_video=true` die Capability
-   `printerAttributes.capabilities.printCapabilities.supportsTimeLapse`
-   und setzt das Feld sonst auf `false`
-   (`elegoo_fdm_cc2_message_adapter.cpp:81`). Diese Capability wird
-   via `GET_PRINTER_ATTRIBUTES`/`cameraCapabilities.supportsTimeLapse`
-   vom Drucker gemeldet
-   (`elegoo_fdm_cc2_message_adapter.cpp:521`,
-   `:529`). Auf diesem CC2 ist der Wert vermutlich `false` –
-   entweder weil keine kompatible Kamera-Firmware installiert ist,
-   die ElegooSlicer-Cloud-App nicht gelaufen ist, oder weil die
-   Timelapse-Funktion am Drucker-Display nicht freigeschaltet ist.
-   Unser `delay_video=true` wird vom CC2 angenommen, aber ignoriert.
-2. **Timelapse braucht eine zusaetzliche G-Code-Dekoration.** Die
-   Zeile `; TIMELAPSE_TAKE_FRAME` oder `M400` oder ein spezifisches
-   Macro muss im G-Code vorhanden sein, damit die Firmware pro
-   Layer ein Frame aufnimmt. Unser Slicer macht das nicht.
-3. **Timelapse laendert nur ueber die Cloud-Session.** Die
-   LAN-Variante von `delay_video` ist eine Platzhalter-Option, die
-   effektiv nur zusammen mit einer aktiven Elegoo-Cloud-Verbindung
-   wirkt (dort gibt es die Agora-RTM-Infrastruktur, siehe
-   `src/cloud/protocols/rtm_client.cpp` in elegoo-link).
+### Code-Recherche 2026-10-25 10:35: Zeitraffer-Download-Pfad nicht belegt
 
-**Nicht geraten** – alle drei Hypothesen sind durch die
-elegoo-link-Code-Lesung gestuetzt, nicht erfunden.
+Durchsucht: **elegoo-link** (Apache-2.0, Submodul von ElegooSlicer),
+**ElegooSlicer**-Hauptbaum (AGPL-3.0), **HA-Integration**
+`danielcherubini/elegoo-homeassistant` (MIT).
 
-**Entscheidung fuer den MVP:**
+**Belegte Zeitraffer-/Kamera-APIs:**
 
-- **Zeitraffer bleibt vorerst nicht Teil des MVPs.** Der LAN-Weg
-  erzeugt bei dieser Firmware keinen Zeitraffer, auch wenn der
-  Request-Payload identisch zu ElegooSlicer ist.
-- Fuer die App-UI: die Zeitraffer-Checkbox kann im Nachbau-Flow
-  mitlaufen und `config.delay_video=true` setzen (schadet nicht),
-  aber ohne Garantie und mit einem Hinweis „Zeitraffer nur
-  verfuegbar, wenn der Drucker ihn unterstuetzt – pruefen am
-  Display".
-- `method 2000` (Printer-Attributes mit `supportsTimeLapse`) als
-  Vor-Pruefung in Phase 2 nachruesten, bevor die Checkbox
-  freigeschaltet wird. Analog zu ElegooSlicers Logik.
+| Fundstelle | Zweck | Belegt? |
+|---|---|---|
+| `elegoo-link/src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:81` – `config.delay_video = enableTimeLapse` | Aufnahme einschalten | ✓ wirkt |
+| `elegoo-link/.../elegoo_fdm_cc2_message_adapter.cpp:1413` – `// {MethodType::VIDEO_STREAM, 1042}, // Get camera video stream` | Live-MJPEG-Stream | auskommentiert, aber Firmware antwortet (siehe HA-Integration `const.py:74`) |
+| HA-Integration `elegoo_printer/const.py:58-59` – `CC2_VIDEO_PORT=8080, CC2_VIDEO_PATH="/?action=stream"` | **Live-MJPEG-URL** `http://<ip>:8080/?action=stream` | ✓ (fuer Streaming, **nicht** gespeicherter Zeitraffer) |
+| `elegoo-link/.../elegoo_fdm_cc2_message_adapter.cpp:1417` – `// {MethodType::EXPORT_TIMELAPSE_VIDEO, 1045}, // interface not designed yet` | Zeitraffer-Export (geplant) | **noch nicht entworfen**, Nummer 1045 ist in Realitaet GET_FILE_THUMBNAIL (siehe HA `const.py:78`) |
+
+**Belegte LAN-Download-Pfade** (nur fuer G-Code):
+
+```
+GET /download?X-Token=<access>&file_name=<name>       (storage_media="local")
+GET /download/sdcard?X-Token=<access>&file_name=...   (storage_media="sdcard")
+GET /download/udisk?X-Token=<access>&file_name=...    (storage_media="udisk")
+```
+
+(`elegoo-link/.../elegoo_fdm_cc2_http_transfer.cpp:431-473`,
+`generateDownloadUrl`.) **Kein eigener Pfad `/download/camera`,
+`/download/video`, `/download/timelapse`** o. aehn. im Code.
+
+**MQTT-Methoden mit Datei-Bezug** (aus HA `cc2/const.py` und
+`elegoo-link/.../elegoo_fdm_cc2_message_adapter.cpp`):
+
+```
+1044 GET_FILE_LIST       (local/sdcard/udisk – kein camera/timelapse)
+1045 GET_FILE_THUMBNAIL  (fuer G-Code-Thumbnails)
+1046 GET_FILE_DETAIL
+1047 DELETE_FILE
+1048 GET_DISK_INFO       (zeigt nur eine 'internal'-Partition, s. u.)
+1042 VIDEO_STREAM        (Live-MJPEG, nicht Timelapse)
+```
+
+**Nachprobe gegen den CC2 (lesend):**
+
+- `method 1048 GET_DISK_INFO`:
+  ```
+  internal: total 488 MB, used 90 MB
+  ```
+  **Nur eine Partition.** Kein separater Video-/Timelapse-Speicher
+  im Interface. SD-Card / U-Disk werden hier nicht als eigene
+  Objekte gelistet, obwohl `method 1044` sie als storage_media
+  akzeptiert – die Firmware exposes sie nur ueber die File-Liste.
+- `method 1001 GET_PRINTER_ATTRIBUTES`: liefert Basis-Infos
+  (Firmware OTA 02.01.01.07, SOC leer, MCU-Version leer),
+  **keine `cameraCapabilities`-Struktur**. Die Capability-Flags
+  baut ElegooSlicer selbst aus dem Status-Delta
+  (`external_device.chassis_camera.configured`, siehe
+  `elegoo_fdm_cc2_message_adapter.cpp:1148-1163`), nicht aus
+  Attributes.
+- `method 1045 GET_FILE_THUMBNAIL` mit `filename` fuer die
+  Timelapse-G-Code-Datei: `error_code=1003` (vermutlich kein
+  Thumbnail embedded).
+
+**Fazit der Suche:**
+
+Es gibt **keine dokumentierte LAN-API fuer den Abruf einer
+Zeitraffer-Video-Datei** auf dem CC2 mit Original-Firmware. Weder
+in ElegooSlicer/elegoo-link (dort explizit „interface not designed
+yet"), noch in der HA-Integration (dort gibt es nur das
+MJPEG-Live-Stream-Toggle, kein Datei-Download), noch im
+Hauptbaum von ElegooSlicer.
+
+**Fuer Klaus auf diesem Drucker gibt es damit zwei legitime Wege
+zum Zeitraffer-Video:**
+
+1. **Direkt am Drucker-Display anschauen** (Einstellungen →
+   Kamera-Reiter) – wie heute geschehen.
+2. **USB-Export**: Datei vom Drucker auf USB-Stick kopieren und
+   dort ablesen. (Pfad / Button-Beschriftung am Display: nicht aus
+   dem Code ermittelbar – muss Klaus am Drucker finden.)
+
+**Keine Spekulation ueber hypothetische Pfade** wie
+`/download/camera` oder `storage_media="timelapse"` – das waere
+Raten. Falls Elegoo in einer kuenftigen Firmware-Version einen
+LAN-Export freigibt (`EXPORT_TIMELAPSE_VIDEO = 1045` im
+elegoo-link-Code steht ja als Platzhalter bereit), ziehen wir nach;
+bis dahin bleibt der WLAN-Abruf **nicht Teil des MVP**.
+
+### Zusammenfassung Zeitraffer-Fluss (Soll-Zustand nach dieser Nacht)
+
+1. UI-Checkbox „Zeitraffer aufnehmen" aktiviert.
+2. App setzt `method 1020 config.delay_video=true`.
+3. Drucker filmt den Druck mit (Status 12 kurz, dann wieder Idle).
+4. Video liegt an einem Pfad, der ueber MQTT/HTTP nicht abfragbar
+   ist. Benutzer sieht/exportiert ueber Display oder USB.
+
+Vor-Pruefung in der App moeglich (optional, siehe Phase 2+): aus
+`api_status.external_device.chassis_camera.configured == 1`
+ableiten, ob der CC2 den Zeitraffer-Pfad grundsaetzlich unterstuetzt
+(`elegoo-link` zieht dort seine `supportsTimeLapse`-Capability).
 
 ### Druckstart-Befehl vorbereitet (NICHT ausgefuehrt)
 

@@ -82,6 +82,16 @@ Funktionskontrolle gemacht hat.
 
 - [ ] Color-Painting
 - [ ] Mehrere Drucker, Profil-Editor
+- [ ] **Zeitraffer-Abruf per WLAN**. Aufnahme laendert (`method 1020
+      config.delay_video=true`, siehe
+      `docs/networking-cc2.md` „Nachweislauf 2026-10-25 09:47…" und
+      „Korrektur 2026-10-25 10:30"), aber Elegoo hat **in der
+      Original-Firmware keinen LAN-Download fuer die Video-Datei**
+      implementiert – `elegoo-link` markiert `EXPORT_TIMELAPSE_VIDEO`
+      als „interface not designed yet". Fuer MVP: Zugang per
+      Drucker-Display + USB-Export. Nach MVP neu pruefen; wenn
+      Elegoo die API freigibt, hier nachziehen; ansonsten bleibt
+      USB-Export der Weg. Kein eigener Code dafuer im MVP.
 
 ## Risiken
 
