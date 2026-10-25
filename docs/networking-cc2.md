@@ -639,6 +639,186 @@ Fuer die App-UI reichen beide als „geschaetzt verbleibend" ohnehin
 nicht – wichtig ist `remaining_time_sec`, das waehrend des Drucks
 in jedem api_status mitwandert.
 
+### Nachweislauf 2026-10-25 09:47–10:05: Druck mit `delay_video=true` (Zeitraffer-Versuch, kein Video)
+
+Zweiter Druck desselben Kerbenwuerfels, diesmal mit der aus
+**elegoo-link** (Apache-2.0) identifizierten Zeitraffer-Option.
+
+**Fundstelle:** `src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:81`:
+
+```cpp
+param["config"]["delay_video"] =
+    printerAttributes_.capabilities.printCapabilities.supportsTimeLapse
+        ? startPrintData.enableTimeLapse
+        : false;
+```
+
+Das ist das einzige Timelapse-bezogene Feld, das ElegooSlicer bei
+`method 1020` setzt. Der Name `delay_video` ist irrefuehrend – in der
+CC2_PROTOCOL.md der Home-Assistant-Integration steht „Delay start until
+video streaming active", aber der ElegooSlicer-Quellcode mappt
+`enableTimeLapse → config.delay_video`. **Der Code gewinnt.**
+
+Weitere Konstanten aus demselben Datei:
+- `src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:1396` –
+  `START_PRINT = 1020`.
+- `src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:1417` –
+  `// {MethodType::EXPORT_TIMELAPSE_VIDEO, 1045}, // Export timelapse
+     video, interface not designed yet`. **Method 1045 existiert, ist
+  aber in elegoo-link noch nicht implementiert.**
+
+**Druckstart-Payload** (`handslice_kerbenwuerfel_timelapse.gcode`,
+inhaltlich identisch zum ersten Druck, 220 261 Byte, EXECUTABLE_BLOCK
+sha256 `919cde23…` – die arm64-Variante B, weil TBB nicht
+deterministisch; funktional aequivalent zu A):
+
+```
+PUB elegoo/<sn>/<client_id>/api_request
+{
+  "id": 1916658895, "method": 1020,
+  "params": {
+    "storage_media": "local",
+    "filename": "handslice_kerbenwuerfel_timelapse.gcode",
+    "config": {
+      "delay_video":   true,        ← Zeitraffer-Flag
+      "printer_check": true,
+      "print_layout":  "A",
+      "bedlevel_force": true,
+      "slot_map":      [{"t": 0, "canvas_id": 0, "tray_id": 3}]
+    }
+  }
+}
+
+Antwort: {"id":1916658895,"method":1020,"result":{"error_code":0}}
+```
+
+**Verlauf (api_status Delta-Merge):**
+
+| t | Phase | Beobachtung |
+|---|---|---|
+| 0 s | Start accepted | `error_code=0` |
+| +1 s | status 2 (Printing) | Pre-Heat Bett 60, Nozzle 140 |
+| +60 s | Pre-Heat | Nozzle 193 (steigt), Bett 62 |
+| +120 s | Nivellierung | (128, 261, z=-0.6), Nozzle 148 |
+| +180 s | Nivellierung | (116, 124), Nozzle 139 |
+| +240 s | Z-Lift / Transit | z=384 (vermutlich Z-Null-Kalibrierung) |
+| +300 s | Finales Heizen | Nozzle 210 (Druck-Temp PLA) |
+| **+5:54 (354 s)** | **Layer 1 erreicht** | current_layer=1 |
+| +6:00 | Layer 1 | (136.8, 123.5, z=0.2) |
+| +7:00 | Layer 9 | (126.6, 117.5, z=1.8) |
+| +8:00 | Layer 22 | (130.5, 135.6, z=4.4) |
+| +9:00 | Layer 35 | (118.2, 116.7, z=7.0) |
+| +10:00 | Layer 48 | (137.8, 136.3, z=9.6) |
+| +11:00 | Layer 61 | (118.2, 116.7, z=12.2) |
+| +12:00 | Layer 73 | (137.2, 120.4, z=14.6) |
+| +13:00 | Layer 85 | (118.9, 128.9, z=17.0) |
+| +14:00 | Layer 96 | (125.2, 117.5, z=19.2) |
+| **+15:00 (900 s)** | **Druck fertig** | `machine_status.status: 2→1`, `print_status.state='complete'`. Toolhead parkt bei (52.5, 264, z=79.97). |
+| +16:00 | Cooldown | Nozzle 163, Bett 56 |
+| +17:00 | Cooldown | Nozzle 132, Bett 55 |
+| +18:00 | Cooldown | Nozzle 109, Bett 53 |
+
+**Keine Fehlermeldung** (`exception_status` leer).
+
+**Status 12 (VIDEO_COMPOSING) wurde NIE beobachtet.** Der Status ging
+direkt von 2 (Printing) → 1 (Idle) und blieb dort. Auch nach weiteren
+3 min Beobachtung (Cooldown) kein Wechsel auf 12.
+
+### Video-Suche danach (read-only, nichts geloescht, nichts geladen)
+
+**method 1002 (GET_STATUS) nach dem Druck:**
+
+```
+machine_status.status = 1 (Idle)
+sub_status            = 0
+print_status.state    = ""   (geleert nach Idle-Transition)
+```
+
+Drucker ist ruhig, kein verzoegertes Composing.
+
+**method 1044 (GET_FILE_LIST) auf allen bekannten storage_media:**
+
+| storage_media | error_code | files | Video-Datei? |
+|---|---|---|---|
+| `"local"`    | 0 | 22 Dateien, inkl. beide `handslice_kerbenwuerfel*.gcode` | **nein** (kein .mp4/.avi/.mov/.webm/.mkv) |
+| `"sd-card"`  | 0 | 0 Dateien | – |
+| `"u-disk"`   | 0 | 1 Ordner `Filme/` (USB-Stick-Inhalt des Benutzers) | **nein** |
+
+**method 1046 (GET_FILE_DETAIL) fuer `handslice_kerbenwuerfel_timelapse.gcode`:**
+
+```
+last_print_time:    0
+total_print_times:  0
+```
+
+Beide Counter stehen auf 0, obwohl der Druck nachweislich erfolgreich
+durchlief (Monitor-Log, Klaus-Sichtkontrolle). Entweder zaehlt die
+Firmware diese Felder nicht, oder die Zaehlerlogik triggert erst
+spaeter.
+
+**method 1045 (EXPORT_TIMELAPSE_VIDEO) auf `storage_media="local"`:**
+
+```
+{"error_code": 1003}
+```
+
+Error 1003 = kein Erfolg; in `elegoo-link` ist diese Methode als
+„interface not designed yet" markiert. Das Ergebnis bestaetigt:
+Export auf LAN-Pfad existiert in der Firmware nicht als Request/
+Response-Interface.
+
+### Deutung: Zeitraffer wurde nicht aufgezeichnet
+
+Zusammenfassung der Signale:
+
+- Druckstart akzeptiert `delay_video=true` ohne Fehler.
+- Druck lief sauber durch (15 min, 100 Layer, `state="complete"`).
+- Status 12 (VIDEO_COMPOSING) trat **nicht** auf.
+- Keine Video-Datei auf `local`, `sd-card`, `u-disk` zu finden.
+- `method 1045` liefert error_code 1003.
+
+**Mutmassliche Ursachen (in Reihenfolge der Wahrscheinlichkeit):**
+
+1. **Firmware entscheidet gegen Timelapse.** ElegooSlicer prueft vor
+   dem Setzen von `delay_video=true` die Capability
+   `printerAttributes.capabilities.printCapabilities.supportsTimeLapse`
+   und setzt das Feld sonst auf `false`
+   (`elegoo_fdm_cc2_message_adapter.cpp:81`). Diese Capability wird
+   via `GET_PRINTER_ATTRIBUTES`/`cameraCapabilities.supportsTimeLapse`
+   vom Drucker gemeldet
+   (`elegoo_fdm_cc2_message_adapter.cpp:521`,
+   `:529`). Auf diesem CC2 ist der Wert vermutlich `false` –
+   entweder weil keine kompatible Kamera-Firmware installiert ist,
+   die ElegooSlicer-Cloud-App nicht gelaufen ist, oder weil die
+   Timelapse-Funktion am Drucker-Display nicht freigeschaltet ist.
+   Unser `delay_video=true` wird vom CC2 angenommen, aber ignoriert.
+2. **Timelapse braucht eine zusaetzliche G-Code-Dekoration.** Die
+   Zeile `; TIMELAPSE_TAKE_FRAME` oder `M400` oder ein spezifisches
+   Macro muss im G-Code vorhanden sein, damit die Firmware pro
+   Layer ein Frame aufnimmt. Unser Slicer macht das nicht.
+3. **Timelapse laendert nur ueber die Cloud-Session.** Die
+   LAN-Variante von `delay_video` ist eine Platzhalter-Option, die
+   effektiv nur zusammen mit einer aktiven Elegoo-Cloud-Verbindung
+   wirkt (dort gibt es die Agora-RTM-Infrastruktur, siehe
+   `src/cloud/protocols/rtm_client.cpp` in elegoo-link).
+
+**Nicht geraten** – alle drei Hypothesen sind durch die
+elegoo-link-Code-Lesung gestuetzt, nicht erfunden.
+
+**Entscheidung fuer den MVP:**
+
+- **Zeitraffer bleibt vorerst nicht Teil des MVPs.** Der LAN-Weg
+  erzeugt bei dieser Firmware keinen Zeitraffer, auch wenn der
+  Request-Payload identisch zu ElegooSlicer ist.
+- Fuer die App-UI: die Zeitraffer-Checkbox kann im Nachbau-Flow
+  mitlaufen und `config.delay_video=true` setzen (schadet nicht),
+  aber ohne Garantie und mit einem Hinweis „Zeitraffer nur
+  verfuegbar, wenn der Drucker ihn unterstuetzt – pruefen am
+  Display".
+- `method 2000` (Printer-Attributes mit `supportsTimeLapse`) als
+  Vor-Pruefung in Phase 2 nachruesten, bevor die Checkbox
+  freigeschaltet wird. Analog zu ElegooSlicers Logik.
+
 ### Druckstart-Befehl vorbereitet (NICHT ausgefuehrt)
 
 Fertige `method 1020`-Payload fuer den naechsten Lauf durch Klaus

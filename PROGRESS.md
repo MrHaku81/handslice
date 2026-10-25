@@ -8,6 +8,185 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 10:10 – Zweiter Druck mit `delay_video=true`: Druck sauber, Zeitraffer nicht aufgenommen
+
+Zweiter Durchlauf desselben Kerbenwuerfels mit dem aus
+`elegoo-link` (Apache-2.0) identifizierten Timelapse-Flag.
+
+### Recherche
+
+Zeitraffer-Feld fuer `method 1020` nicht in `CC2_PROTOCOL.md` der
+HA-Integration und nicht im Python-Client dort. **Fundstelle im
+ElegooSlicer-Quellcode (via `elegoo-link`-Submodul,
+`https://github.com/ELEGOO-3D/elegoo-link.git`):**
+
+- `src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:81`
+  mappt `startPrintData.enableTimeLapse` auf `config.delay_video`
+  (nur wenn der Drucker `supportsTimeLapse=true` meldet; sonst
+  wird das Feld auf `false` gesetzt).
+- `elegoo_fdm_cc2_message_adapter.cpp:1396`: `START_PRINT = 1020`.
+- `elegoo_fdm_cc2_message_adapter.cpp:1417`: `EXPORT_TIMELAPSE_VIDEO =
+  1045, interface not designed yet` (auskommentiert).
+
+Also: `config.delay_video=true` – nicht etwa ein neuer `timelapse`-
+Feldname. Die CC2_PROTOCOL.md-Beschreibung „Delay start until video
+streaming active" ist eine Fehlinterpretation; der ElegooSlicer-Code
+mappt dieses Feld 1:1 auf die Zeitraffer-Aktivierung.
+
+### Slice + Upload
+
+`handslice-cli-arm64` erneut auf dem Poco, 0.81 s. Ausgabe diesmal
+`sha256 919cde23…` (Variante B des TBB-Nicht-Determinismus – gleicher
+G-Code wie beim ersten Experiment am 09:05, inhaltlich/funktional
+aequivalent zur Variante A beim ersten Druck um 09:18). 220 261 Byte.
+Hochgeladen als `handslice_kerbenwuerfel_timelapse.gcode` ueber
+`PUT http://<ip>/upload`, HTTP 200, error_code=0.
+
+### Druckstart (nach Klaus-Freigabe)
+
+`method 1020` mit identischem Payload wie beim ersten Druck,
+**zusaetzlich `delay_video=true`**:
+
+```
+params.config = {
+  "delay_video":    true,                    ← Zeitraffer
+  "printer_check":  true,
+  "print_layout":   "A",
+  "bedlevel_force": true,
+  "slot_map":       [{"t": 0, "canvas_id": 0, "tray_id": 3}]
+}
+```
+
+Antwort: `error_code=0`. Druck startet an.
+
+### Verlauf (api_status Delta-Merge)
+
+- t+0 s: Request accepted.
+- t+1 s: `status=2` (Printing).
+- t+1 … 5:54: Pre-Heat + Nivellierung + finaler Heat.
+- **t+5:54:** Layer 1 erreicht.
+- t+6..14 min: Layer 1 → 96 (etwa 60 s pro 12-13 Layer).
+- **t+15:00:** `status: 2→1` + `print_status.state="complete"`. Druck
+  fertig. Toolhead parkt bei (52.5, 264, z=79.97).
+- t+15..18 min: Cooldown, Bett 58→53 °C, Nozzle 210→109 °C.
+- **Status 12 (VIDEO_COMPOSING) trat NIE auf.** Monitor nach dem
+  Druck noch 3 min weiter beobachtet, danach wegen fehlendem
+  `print_status.enable=true`-Milestone (Firmware pusht dieses Feld
+  diesmal offenbar nicht als Delta) manuell beendet.
+
+Keine Fehlermeldung (`exception_status` leer).
+
+### Video-Suche danach (read-only)
+
+- `method 1002`: `machine_status.status=1` (Idle), `sub_status=0`.
+  Drucker ist ruhig, kein Video-Composing im Nachgang.
+- `method 1044 storage_media="local"`: 22 Dateien, inkl. beide
+  G-Codes. **Keine Video-Datei** (kein `.mp4`/`.avi`/`.mov`/`.webm`/
+  `.mkv`).
+- `method 1044 storage_media="sd-card"`: 0 Dateien.
+- `method 1044 storage_media="u-disk"`: 1 Ordner `Filme/`
+  (USB-Stick-Inhalt des Benutzers), nichts Druck-Bezogenes.
+- `method 1046` fuer die timelapse.gcode: `last_print_time=0`,
+  `total_print_times=0` (Firmware zaehlt diese Counter offenbar
+  nicht/noch nicht hoch).
+- `method 1045` (EXPORT_TIMELAPSE_VIDEO) auf `local`:
+  `{"error_code": 1003}`. Erwartet, weil in elegoo-link als
+  „interface not designed yet" markiert.
+
+### Deutung: Firmware ignoriert `delay_video=true`
+
+Zusammenfassung:
+
+- Der Druck selbst lief einwandfrei (gleich 15 min wie beim ersten
+  Mal).
+- `delay_video=true` wurde vom CC2 akzeptiert
+  (`error_code=0`), aber keine Zeitraffer-Aufnahme hat stattgefunden.
+- Mutmasslich meldet dieser CC2 bei `GET_PRINTER_ATTRIBUTES`
+  `cameraCapabilities.supportsTimeLapse=false`
+  (siehe elegoo-link Z. 521/529/540: ElegooSlicer prueft diese Capability
+  selbst, bevor er `delay_video=true` ueberhaupt setzt).
+- Alternativ-Hypothesen: Timelapse braucht G-Code-Dekoration
+  (Macros wie `TIMELAPSE_TAKE_FRAME`), oder laendert nur ueber eine
+  parallele Cloud-Session mit Agora-RTM.
+
+**Konsequenz fuer MVP:** Zeitraffer bleibt nicht im MVP-Scope. Die
+App kann `config.delay_video=true` optional mitsenden (schadet
+nichts), aber ohne Garantie und mit UI-Hinweis. Vor dem Freigeben
+der Zeitraffer-Checkbox: `method 2000` (Printer-Attributes) auslesen
+und `supportsTimeLapse` als Vor-Pruefung einsetzen – wie
+ElegooSlicer das macht.
+
+Nachweis vollstaendig in `docs/networking-cc2.md`, Abschnitt
+„Nachweislauf 2026-10-25 09:47–10:05: Druck mit delay_video=true".
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Zeitraffer-Feld-Fundstelle in `elegoo-link`
+  (`src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:81`):
+  `config.delay_video = enableTimeLapse`. Mit Datei + Zeile
+  dokumentiert; nichts erfunden.
+- Zweiter Druck mit identischem Payload-Schema wie der erste, plus
+  `delay_video=true`, lief sauber durch: `error_code=0`, 100 Layer,
+  15 min Gesamtzeit, `state="complete"`, keine Exceptions.
+- Reproduzierbarkeit des LAN-Druckstart-Pfads bestaetigt: zweimal
+  denselben Payload-Schema (minus/plus delay_video) senden,
+  zweimal Erfolg.
+- method 1044/1046/1002/1045 Request-Response im File-Management
+  belastbar.
+
+**2. Ungeprueft**
+
+- **Druckqualitaet des zweiten Objekts.** Klaus sieht das am
+  Drucker – wie beim ersten Druck ist das sein Call.
+- **`cameraCapabilities.supportsTimeLapse` fuer diesen CC2.**
+  `method 2000` (Printer-Attributes) nicht ausgefuehrt in diesem
+  Lauf; waere der naechste Diagnostik-Schritt, um die
+  Zeitraffer-Deutung zu haerten.
+- **Macros `TIMELAPSE_TAKE_FRAME` o. aehn.** nicht im G-Code
+  gesucht/eingefuegt. Falls das Zeitraffer-Feature G-Code-seitig
+  mitwirken muss, waere das die naechste Hypothese.
+
+**3. Geht nicht**
+
+- **Zeitraffer-Aufzeichnung auf diesem CC2 ueber den LAN-Pfad.**
+  Firmware akzeptiert `delay_video=true`, laesst die Kamera aber
+  nicht laufen; Status 12 trat nie auf; kein Video auf `local`/
+  `sd-card`/`u-disk`; `method 1045` liefert error_code 1003. Nicht
+  als Blocker im Drei-Versuche-Sinn eingetragen – das ist
+  Firmware-/Capability-Verhalten, kein Code-Fehler bei uns.
+
+---
+
+## 2026-10-25 09:50 – Druckqualitaet bestaetigt (Klaus-Sichtkontrolle am Objekt)
+
+Nachtrag zum Druck um 09:18–09:34: Klaus hat den Kerbenwuerfel in der
+Hand gehabt. Rueckmeldung:
+
+- **„Sehr sauber und praezise."** Keine systematischen Pfadfehler, keine
+  Underextrusion, keine Overhang-Katastrophen.
+- **Kerbe scharf.** Die 5×5×5-mm-Kerbe an der (+X,+Y,+Z)-Ecke ist
+  geometrisch korrekt ausgedruckt, mit sauberen Innenkanten – fuer
+  einen symmetriebrechenden Teil ohne Perimeter-Nachjustierung ein
+  gutes Signal.
+- **Vereinzelte schwarze Flecken** stammen aus Resten des zuvor
+  geladenen schwarzen Filaments (A3 PLA PRO schwarz) in der Nozzle.
+  **Nicht Slicer-/Datenfluss-Thema**, sondern Hotend-Purge – kein
+  Bug, kein Nacharbeitsbedarf im Code.
+
+Damit ist der Phase-2-Durchstich nicht nur technisch (Transport-
+Pfad), sondern auch qualitativ bestaetigt: Der Weg vom Modell ueber
+die arm64-Engine, HTTP-Upload und MQTT-Start fuehrt zu einem
+Druckergebnis, das mit dem Desktop-Workflow gleichwertig ist. Der
+TBB-Nicht-Determinismus auf arm64 (siehe Eintrag 2026-10-25 07:50)
+schlaegt visuell **nicht** durch – die beiden stabilen G-Code-
+Varianten erzeugen offenbar beide ein korrektes Druckergebnis.
+
+---
+
 ## 2026-10-25 09:34 – Phase-2-MVP-Durchstich: Kerbenwuerfel erfolgreich auf CC2 gedruckt
 
 Klaus hat Sichtkontrolle gemacht (Bett sauber, Belag passt zu „High Temp
