@@ -69,6 +69,11 @@ struct Args {
     bool quiet = false;
     bool no_center = false;
     int threads = 0;  // 0 = TBB-Default (alle Cores); >0 = Obergrenze
+    // --bed-type ueberschreibt die aus default_bed_type abgeleitete
+    // curr_bed_type-Wahl. Werte: "" (kein Override), "A"/"textured"
+    // → btPTE (4), "B"/"smooth"/"hot" → btPEI (3). Siehe
+    // docs/engine-integration.md "Bauplatten-Zuordnung".
+    std::string bed_type;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -91,7 +96,12 @@ void usage(std::ostream& os) {
         "\n"
         "--threads N  begrenzt die TBB-Parallelitaet auf N (N=1 serialisiert\n"
         "             alle parallel_for/parallel_reduce). Diagnostisch, um\n"
-        "             TBB-reihenfolgebedingte Byte-Divergenzen auszuschliessen.\n";
+        "             TBB-reihenfolgebedingte Byte-Divergenzen auszuschliessen.\n"
+        "\n"
+        "--bed-type <A|B>  Druckbettseite. A/textured => btPTE (Textured PEI);\n"
+        "             B/smooth/hot => btPEI (High Temp Plate). Ohne --bed-type\n"
+        "             greift der default_bed_type aus dem Druckerprofil bzw.\n"
+        "             Fallback btPEI.\n";
 }
 
 Args parse_args(int argc, char** argv) {
@@ -118,6 +128,7 @@ Args parse_args(int argc, char** argv) {
             }
             if (a.threads < 1) die("--threads must be >= 1");
         }
+        else if (arg == "--bed-type") a.bed_type = need_val("--bed-type");
         else if (arg == "--help" || arg == "-h") { usage(std::cout); std::exit(0); }
         else if (!arg.empty() && arg[0] == '-') die("unknown flag: " + arg);
         else {
@@ -355,6 +366,19 @@ int main(int argc, char** argv) {
             const int v = std::atoi(dbt->value.c_str());
             if (v > 0 && v < int(BedType::btCount))
                 bt = BedType(v);
+        }
+        // --bed-type ueberschreibt. Werte stammen aus docs/engine-integration.md
+        // "Bauplatten-Zuordnung". A=Strukturiert=btPTE, B=Glatt=btPEI.
+        if (!args.bed_type.empty()) {
+            if (args.bed_type == "A" || args.bed_type == "textured" || args.bed_type == "Textured") {
+                bt = BedType::btPTE;
+            } else if (args.bed_type == "B" || args.bed_type == "smooth"
+                       || args.bed_type == "Smooth" || args.bed_type == "hot"
+                       || args.bed_type == "high_temp") {
+                bt = BedType::btPEI;
+            } else {
+                die("--bed-type must be A/textured or B/smooth, got: " + args.bed_type);
+            }
         }
         cfg.set_key_value("curr_bed_type", new ConfigOptionEnum<BedType>(bt));
     }

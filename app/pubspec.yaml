@@ -12,6 +12,9 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   intl: any
+  file_picker: ^13.2.0
+  path_provider: ^2.1.4
+  shared_preferences: ^2.5.0
 
 dev_dependencies:
   flutter_test:
@@ -23,6 +26,21 @@ flutter:
   generate: true
   assets:
     - assets/fonts/LICENSE
+    # Orca-Profile fuer CC2 0.4 + 0.20mm + Elegoo PLA. Minimum-Set
+    # (11 JSONs) aus den Vererbungs-Ketten; vom Slicer beim ersten
+    # App-Start aus dem Bundle in getApplicationSupportDirectory()/profiles
+    # extrahiert.
+    - assets/profiles/Elegoo/machine/fdm_machine_common.json
+    - assets/profiles/Elegoo/machine/fdm_elegoo_3dp_001_common.json
+    - assets/profiles/Elegoo/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json
+    - assets/profiles/Elegoo/process/fdm_process_common.json
+    - assets/profiles/Elegoo/process/fdm_process_elegoo_common.json
+    - assets/profiles/Elegoo/process/fdm_process_elegoo_04020.json
+    - assets/profiles/Elegoo/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json
+    - assets/profiles/Elegoo/filament/fdm_filament_common.json
+    - assets/profiles/Elegoo/filament/fdm_filament_pla.json
+    - assets/profiles/Elegoo/filament/BASE/Elegoo PLA @base.json
+    - assets/profiles/Elegoo/filament/ECC2/Elegoo PLA @ECC2.json
   fonts:
     - family: IBMPlexSans
       fonts:

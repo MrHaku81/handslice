@@ -824,6 +824,100 @@ Drei Optionen, in Reihenfolge nach Aufwand:
 
 Fuer heute: **Weg A**, Phase-C-Kriterium entsprechend praezisiert.
 
+### Bauplatten-Zuordnung (CC2 A/B ↔ Orca bed_type)
+
+Festgelegt beim M2-Research (2026-10-25).
+
+**Orcas bed_type-Enum** (`src/libslic3r/PrintConfig.hpp:314-323`):
+
+```
+btDefault = 0, btPC (Cool Plate), btEP (Engineering Plate),
+btPEI (High Temp Plate = 3), btPTE (Textured PEI Plate = 4),
+btPCT (Textured Cool Plate), btSuperTack
+```
+
+**String-Mapping** (`src/libslic3r/PrintConfig.cpp:469-477`):
+
+```
+"Default Plate"      → btDefault
+"Cool Plate"         → btPC
+"Engineering Plate"  → btEP
+"High Temp Plate"    → btPEI    (= 3)
+"Textured PEI Plate" → btPTE    (= 4)
+"Textured Cool Plate"→ btPCT
+"Supertack Plate"    → btSuperTack
+```
+
+**CC2-Spezifisch:** `machine/ECC2/*.json` setzt **kein** `default_bed_type`.
+Andere Centauri-Modelle (`machine/EC/*.json`, `machine/ECC/*.json`)
+setzen `"default_bed_type": "4"` → btPTE. Fuer den CC2 greift
+ohne CLI-Override der handslice-cli-Fallback `btPEI` (siehe
+`engine/cli/handslice-cli.cpp` Nachsetzschritt a).
+
+**Zuordnung A/B ↔ Orca bed_type (verbindlich fuer die App):**
+
+| Seite am CC2 | Beschreibung                | Orca bed_type        | Filamentfeld      |
+|---|---|---|---|
+| **A** | **Strukturiert** (PEI mit Noppen)   | **btPTE** = Textured PEI Plate | `textured_plate_temp`, `textured_plate_temp_initial_layer` |
+| **B** | **Glatt** (PEI glatt)               | **btPEI** = High Temp Plate    | `hot_plate_temp`, `hot_plate_temp_initial_layer` |
+
+**Filament-Temperatur pro Plattenart** (`filament/fdm_filament_pla.json`):
+
+```
+cool_plate_temp = 35,  cool_plate_temp_initial_layer = 35
+eng_plate_temp = 0,   eng_plate_temp_initial_layer = 0
+hot_plate_temp = 60,  hot_plate_temp_initial_layer = 60     (= btPEI)
+textured_plate_temp = 60, textured_plate_temp_initial_layer = 60  (= btPTE)
+supertack_plate_temp (via common) = 60
+```
+
+Orca waehlt per `bed_temperature_formula = by_highest_temp` den
+Wert aus dem Satz, der zum aktiven `curr_bed_type` gehoert. Fuer
+PLA sind btPEI und btPTE beide 60 °C – kein Temperatur-Unterschied,
+aber der `curr_bed_type`-Header-Eintrag im G-Code sagt dem Drucker
+noch die Seite, falls er das in seinen Start-Macros nutzt.
+
+**CLI-Flag:** `handslice-cli --bed-type A|B`
+(`engine/cli/handslice-cli.cpp`), geht direkt in den
+`curr_bed_type`-Nachsetzschritt. A/`textured`=btPTE,
+B/`smooth`/`hot`=btPEI. In der App wird die Wahl von
+`BedType.texturedA | smoothB` (lib/engine/slicer.dart) 1:1
+weitergereicht.
+
+### Z-Offset: moegliche Anwendungswege (dokumentiert, nicht umgesetzt)
+
+M2 speichert einen Z-Offset pro Plattenseite nur im Projekt-State
+(`SharedPreferences`), zeigt ihn im Projekt-Screen an – aber wendet
+ihn beim Slicen **nicht** an. Drei Wege, die zur Umsetzung in
+Frage kommen (Entscheidung Phase 3+):
+
+1. **Orca-Config `z_offset` (float, mm)**
+   (`src/libslic3r/PrintConfig.cpp:6044`).
+   Addiert einen Offset auf alle Z-Koordinaten im G-Code.
+   Vorteil: funktioniert mit jedem Drucker und jeder Firmware,
+   weil das direkt im G-Code steckt. Nachteil: wird vom
+   Nozzle-Priming und Start-Macros ignoriert, falls diese
+   absolute Z-Werte schreiben (CC2-start-G-Code tut das in Teilen,
+   `G1 Z10 F300`).
+
+2. **Expliziter G-Code-Patch** (`G92 Z<x>` am Anfang bzw.
+   `SET_GCODE_OFFSET Z=<x>` bei Klipper). Setzt den aktuellen
+   Z-Zustand des Druckers. Vorteil: ueberschreibt auch
+   Start-Macro-Z-Setups. Nachteil: Klipper-spezifisch; CC2 nutzt
+   Klipper intern, aber ob das Macro verfuegbar ist, muesste in
+   der CC2-Firmware getestet werden.
+
+3. **Am Drucker einstellen** (Display → Einstellungen →
+   Z-Offset-Kalibrierung). Vorteil: unabhaengig vom G-Code und
+   gilt fuer alle Druckauftraege. Nachteil: nicht per Plattenseite
+   speicherbar – Nutzer muss das manuell umsetzen beim
+   Plattenwechsel.
+
+**Vorzug fuer Phase 3+:** vermutlich (1) + (3), weil wir dann die
+Orca-config nutzen koennen (gleicher Weg wie ElegooSlicer) und
+die Hardware-Kalibrierung dem Nutzer ueberlassen. Entscheidung
+steht aus; M2 speichert den Wert nur, damit die UI schon da ist.
+
 ### Schritt D: Einbettung in die App
 
 - Erst CLI-Binary als Asset mitliefern und per `Process` aufrufen (schnell,

@@ -1,35 +1,77 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
+import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
+import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
-import '../widgets/workshop_banner.dart';
 import '../widgets/workshop_card.dart';
 import '../widgets/workshop_row.dart';
 
-// Sample-Daten: Platzhalter-UI fuer Meilenstein 1. Keine echten
-// Interaktionen – nichts ist mit der CLI/dem Drucker verdrahtet.
 class ProjectScreen extends StatefulWidget {
-  const ProjectScreen({super.key});
+  const ProjectScreen({
+    super.key,
+    required this.slicer,
+    required this.projectState,
+  });
+
+  final SlicerService slicer;
+  final ProjectState projectState;
 
   @override
   State<ProjectScreen> createState() => _ProjectScreenState();
 }
 
 class _ProjectScreenState extends State<ProjectScreen> {
-  // Lokaler UI-State (noch kein echter Business-State).
-  String _plate = 'A'; // A = Strukturiert, B = Glatt
+  @override
+  void initState() {
+    super.initState();
+    widget.projectState.addListener(_onStateChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.projectState.removeListener(_onStateChanged);
+    super.dispose();
+  }
+
+  void _onStateChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickModel() async {
+    // file_picker 13.x: statische pickFile(), liefert PlatformFile? direkt.
+    final f = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: const ['stl', '3mf', 'STL', '3MF'],
+    );
+    if (!mounted || f == null || f.path == null) return;
+    widget.projectState.setModel(f.path!);
+  }
+
+  Future<void> _slice() async {
+    final state = widget.projectState;
+    if (state.modelPath == null) return;
+    final dir = await getApplicationSupportDirectory();
+    final outPath = '${dir.path}/handslice_project.gcode';
+    await state.slice(widget.slicer, outPath);
+  }
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
+    final state = widget.projectState;
+
+    final modelName = state.modelPath == null
+        ? l.projectEmptyModel
+        : state.modelPath!.split('/').last;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: ListView(
         children: [
-          const WorkshopBanner(),
-          const SizedBox(height: 12),
           Text(l.projectHeading, style: theme.textTheme.headlineMedium),
           const SizedBox(height: 12),
 
@@ -37,11 +79,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                WorkshopRow(
-                  label: l.projectModelFile,
-                  value: 'cube_notched_20mm_centered_cc2.stl',
-                  mono: true,
-                ),
+                WorkshopRow(label: l.projectModelFile, value: modelName, mono: true),
                 const Divider(),
                 WorkshopRow(
                   label: l.projectPrinter,
@@ -61,8 +99,8 @@ class _ProjectScreenState extends State<ProjectScreen> {
                       Text(l.projectPlate, style: theme.textTheme.bodySmall),
                       const SizedBox(height: 6),
                       _PlateChooser(
-                        value: _plate,
-                        onChanged: (p) => setState(() => _plate = p),
+                        value: state.bedType,
+                        onChanged: state.setBedType,
                         textured: l.projectPlateTextured,
                         smooth: l.projectPlateSmooth,
                       ),
@@ -72,7 +110,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
                 const Divider(),
                 WorkshopRow(
                   label: l.projectZOffset,
-                  value: _plate == 'A' ? '−0.030 mm' : '+0.015 mm',
+                  value: _formatZ(state.zOffsetFor(state.bedType)),
                   mono: true,
                 ),
                 const Divider(),
@@ -83,7 +121,11 @@ class _ProjectScreenState extends State<ProjectScreen> {
                     children: [
                       Text(l.projectFilaments, style: theme.textTheme.bodySmall),
                       const SizedBox(height: 8),
-                      _FilamentSlotRow(index: 0, slot: 'A4', material: 'Elegoo RAPID PLA+ (weiß)'),
+                      const _FilamentSlotRow(
+                        index: 0,
+                        slot: 'A4',
+                        material: 'Elegoo RAPID PLA+ (weiß)',
+                      ),
                     ],
                   ),
                 ),
@@ -91,12 +133,25 @@ class _ProjectScreenState extends State<ProjectScreen> {
             ),
           ),
 
+          if (state.isSlicing) ...[
+            const SizedBox(height: 12),
+            const LinearProgressIndicator(),
+          ],
+          if (state.lastError != null) ...[
+            const SizedBox(height: 12),
+            _ErrorBox(message: state.lastError!),
+          ],
+          if (state.lastSlice != null) ...[
+            const SizedBox(height: 12),
+            _SliceSummary(result: state.lastSlice!),
+          ],
+
           const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: () {}, // M2 verdrahtet
+                  onPressed: state.isSlicing ? null : _pickModel,
                   icon: const Icon(Icons.file_open_outlined),
                   label: Text(l.projectOpenModel),
                 ),
@@ -104,7 +159,9 @@ class _ProjectScreenState extends State<ProjectScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: () {}, // M2 verdrahtet
+                  onPressed: (state.modelPath == null || state.isSlicing)
+                      ? null
+                      : _slice,
                   icon: const Icon(Icons.auto_awesome_outlined),
                   label: Text(l.projectSliceButton),
                 ),
@@ -117,6 +174,11 @@ class _ProjectScreenState extends State<ProjectScreen> {
   }
 }
 
+String _formatZ(double mm) {
+  final sign = mm >= 0 ? '+' : '−';
+  return '$sign${mm.abs().toStringAsFixed(3)} mm';
+}
+
 class _PlateChooser extends StatelessWidget {
   const _PlateChooser({
     required this.value,
@@ -125,8 +187,8 @@ class _PlateChooser extends StatelessWidget {
     required this.smooth,
   });
 
-  final String value;
-  final ValueChanged<String> onChanged;
+  final BedType value;
+  final ValueChanged<BedType> onChanged;
   final String textured;
   final String smooth;
 
@@ -137,16 +199,16 @@ class _PlateChooser extends StatelessWidget {
         Expanded(
           child: _PlateButton(
             label: textured,
-            selected: value == 'A',
-            onTap: () => onChanged('A'),
+            selected: value == BedType.texturedA,
+            onTap: () => onChanged(BedType.texturedA),
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: _PlateButton(
             label: smooth,
-            selected: value == 'B',
-            onTap: () => onChanged('B'),
+            selected: value == BedType.smoothB,
+            onTap: () => onChanged(BedType.smoothB),
           ),
         ),
       ],
@@ -164,30 +226,39 @@ class _PlateButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Focus(
-      child: FocusVisible(
-        child: GestureDetector(
-          onTap: onTap,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: WorkshopTokens.minTapTarget),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: selected ? WorkshopTokens.accent.withValues(alpha: 0.18) : null,
-              border: Border.all(
-                color: selected ? WorkshopTokens.accent : WorkshopTokens.border,
+      child: Builder(
+        builder: (ctx) {
+          final focused = Focus.of(ctx).hasFocus;
+          return GestureDetector(
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 90),
+              constraints: const BoxConstraints(minHeight: WorkshopTokens.minTapTarget),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: selected ? WorkshopTokens.accent.withValues(alpha: 0.18) : null,
+                border: Border.all(
+                  color: focused
+                      ? WorkshopTokens.accent
+                      : selected
+                          ? WorkshopTokens.accent
+                          : WorkshopTokens.border,
+                  width: focused ? 2 : 1,
+                ),
+                borderRadius: BorderRadius.circular(WorkshopTokens.radiusMedium),
               ),
-              borderRadius: BorderRadius.circular(WorkshopTokens.radiusMedium),
-            ),
-            child: Center(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: selected ? WorkshopTokens.accent : WorkshopTokens.text,
-                  fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
+              child: Center(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: selected ? WorkshopTokens.accent : WorkshopTokens.text,
+                    fontWeight: selected ? FontWeight.w500 : FontWeight.w400,
+                  ),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -212,7 +283,8 @@ class _FilamentSlotRow extends StatelessWidget {
             borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
           ),
           alignment: Alignment.center,
-          child: Text('T$index', style: monoStyle(context, fontSize: 12, color: WorkshopTokens.textMuted)),
+          child: Text('T$index',
+              style: monoStyle(context, fontSize: 12, color: WorkshopTokens.textMuted)),
         ),
         const SizedBox(width: 10),
         const Icon(Icons.arrow_right_alt, color: WorkshopTokens.textMuted, size: 20),
@@ -223,11 +295,68 @@ class _FilamentSlotRow extends StatelessWidget {
             color: WorkshopTokens.accent.withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
           ),
-          child: Text(slot, style: monoStyle(context, fontSize: 13, color: WorkshopTokens.accent, fontWeight: FontWeight.w500)),
+          child: Text(slot,
+              style: monoStyle(context,
+                  fontSize: 13,
+                  color: WorkshopTokens.accent,
+                  fontWeight: FontWeight.w500)),
         ),
         const SizedBox(width: 10),
         Expanded(child: Text(material, style: Theme.of(context).textTheme.bodyMedium)),
       ],
+    );
+  }
+}
+
+class _SliceSummary extends StatelessWidget {
+  const _SliceSummary({required this.result});
+
+  final SliceResult result;
+
+  @override
+  Widget build(BuildContext context) {
+    return WorkshopCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          WorkshopRow(
+              label: 'G-Code', value: result.gcodePath.split('/').last, mono: true),
+          const Divider(),
+          WorkshopRow(label: 'Groesse', value: '${result.sizeBytes} B', mono: true),
+          const Divider(),
+          WorkshopRow(
+            label: 'Geschaetzte Zeit',
+            value: result.estimatedTimeFmt,
+            mono: true,
+          ),
+          const Divider(),
+          WorkshopRow(
+            label: 'Filament',
+            value:
+                '${result.filamentUsedMm.toStringAsFixed(0)} mm — ${result.filamentWeightG.toStringAsFixed(2)} g',
+            mono: true,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorBox extends StatelessWidget {
+  const _ErrorBox({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.withValues(alpha: 0.12),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
+      ),
+      child: Text(message, style: const TextStyle(color: Color(0xFFFF6B6B))),
     );
   }
 }

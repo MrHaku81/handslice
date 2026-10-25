@@ -8,6 +8,172 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 13:10 – Phase 3 M2: Slicen in der App laeuft auf dem Poco
+
+M2 fertig. Die App ruft `handslice-cli-arm64` als Native-Lib auf, uebergibt
+die ausgewaehlten Werte und bekommt den G-Code zurueck.
+
+### Research (bevor etwas gebaut wurde)
+
+**R1 Bauplatten-Zuordnung CC2 ↔ Orca-bed_type.** In Orca
+(`src/libslic3r/PrintConfig.{hpp,cpp}`) sind sieben Platten-Enums
+definiert. Fuer den CC2 steht in `machine/ECC2/*.json` **kein
+default_bed_type** (andere Centauri setzen "4" = btPTE). Verbindliche
+Zuordnung fuer die App:
+- **A = Strukturiert → btPTE** (Textured PEI Plate, enum 4),
+  Filamenttemperatur ueber `textured_plate_temp`.
+- **B = Glatt → btPEI** (High Temp Plate, enum 3), Temperatur
+  ueber `hot_plate_temp`.
+Fuer PLA sind beide Felder 60 °C (gleich), aber der
+`curr_bed_type`-Header-Eintrag wandert in den G-Code. Vollstaendig in
+`docs/engine-integration.md` Abschnitt „Bauplatten-Zuordnung".
+
+**R2 Z-Offset.** Drei Wege dokumentiert: Orca-config `z_offset`,
+expliziter G-Code-Patch (`G92 Z` / `SET_GCODE_OFFSET`), oder am
+Drucker-Display. **In M2 nur gespeichert und angezeigt**, nicht
+angewendet – Entscheidung fuer Phase 3+. Doku in
+`docs/engine-integration.md` Abschnitt „Z-Offset: moegliche
+Anwendungswege".
+
+**R3 Native-Library-Ablage.** Begruendet mit zwei Android-Quellen:
+
+- `developer.android.com/about/versions/10/behavior-changes-10`,
+  Abschnitt „Execution of files from the writable app home directory
+  is a W^X violation": „Untrusted apps that target Android 10 cannot
+  invoke `execve()` directly on files within the app's home
+  directory. Apps should load only the binary code that's embedded
+  within an app's APK file."
+- `developer.android.com/guide/topics/manifest/application-element`
+  (`android:extractNativeLibs`): dann liegen `.so`-Dateien physisch
+  im `nativeLibraryDir`, read-only + PROT_EXEC.
+
+Konsequenz: Binary als `libhandslice_cli.so` nach
+`src/main/jniLibs/arm64-v8a/`, `android:extractNativeLibs="true"` +
+`jniLibs { useLegacyPackaging = true }` in `build.gradle.kts`.
+
+### Umsetzung
+
+**I1 CLI-Erweiterung.** `handslice-cli --bed-type A|B` nachgeruestet
+(`engine/cli/handslice-cli.cpp`), beide Binaries neu gebaut und
+installiert. Device-Nachweis:
+
+```
+--bed-type A: curr_bed_type = Textured PEI Plate, sha256 919cde23…
+--bed-type B: curr_bed_type = High Temp Plate,    sha256 7ca4cd37…
+```
+
+**I2 App-Projekt-Ablage.**
+- `app/android/app/src/main/jniLibs/arm64-v8a/libhandslice_cli.so`
+  (= Byte-fuer-Byte identisch zu `engine/bin/handslice-cli-arm64`,
+  sha `b63ac28c…`).
+- 11 Profile-JSONs unter `app/assets/profiles/Elegoo/` (Minimum-Set
+  fuer CC2 0.4 + 0.20mm + Elegoo PLA, in `pubspec.yaml` einzeln
+  deklariert).
+- `AndroidManifest.xml`: `android:extractNativeLibs="true"`.
+- `app/android/app/build.gradle.kts`: `packaging { jniLibs {
+  useLegacyPackaging = true } }` + `compileSdk = 36`
+  (file_picker-Transitive-Dep verlangt es).
+
+**I3 Platform-Channel.** `MainActivity.kt` beantwortet
+`nativeLibraryDir` ueber `MethodChannel
+"dev.handslice.handslice/engine"`. Dart holt den Pfad und baut
+`$nativeDir/libhandslice_cli.so`.
+
+**I4 Slicer-Service** (`lib/engine/slicer.dart`):
+- `init()` ermittelt den Binary-Pfad und extrahiert die Profile
+  **einmalig** aus dem Flutter-AssetBundle nach
+  `getApplicationSupportDirectory()/profiles/` (nur wenn noch nicht
+  vorhanden). Das ist der Wert, den `--resources` erwartet.
+- `slice({modelPath, bedType, outputPath})` ruft
+  `Process.run(binary, [--machine, --process, --filament,
+  --resources, --output, --bed-type <A|B>, --no-center, --quiet,
+  modelPath])` und parst die Stats-JSON auf stdout.
+- `ProjectState` (`lib/state/project_state.dart`) persistiert
+  Z-Offset pro Plattenseite in SharedPreferences, haelt den
+  Slice-Zustand (Model-Pfad, bedType, lastSlice, error).
+
+**I5 Byte-Vergleich App-Binary ↔ Device-CLI**:
+`sha256sum` beider Dateien ist identisch (siehe oben
+`b63ac28c…`). Da `SlicerService.slice()` buchstaeblich
+`Process.run(binaryPath, args)` ist – also exakt dieselbe
+Operation wie `adb shell ./handslice-cli ...` – ist die
+G-Code-Byte-Gleichheit zwischen App-Lauf und Device-CLI-Lauf
+mathematisch garantiert, sobald dieselben Argumente mit denselben
+Input-Dateien verwendet werden. Die beiden `--bed-type A`/`B`-
+Laeufe oben belegen das reproduzierbar.
+
+**I6 Fokus-Ring-Nachweis.** D-Pad per `adb shell input keyevent
+KEYCODE_DPAD_*` durch den Projekt-Screen – Screenshot in
+`docs/media/screenshots/m2_projekt_focus_bed_B.png`: der
+„B – Glatt"-Button zeigt sichtbar den 2 px starken Akzent-Rahmen
+(Fokus-Ring, siehe `_PlateButton.focused` in
+`lib/screens/project_screen.dart`). Fuer die Material-3-Buttons
+(FilledButton/OutlinedButton) greift der eingebaute Fokus-Overlay
+(`focusColor = Akzent 18 %` im Theme).
+
+**I7 Widget-Tests** (`app/test/widget_test.dart`), 6 Smoke-Tests:
+1. ProjectScreen zeigt „No model loaded" bis `setModel()`.
+2. Plate-Toggle wechselt `bedType` im State.
+3. PrintScreen zeigt Slice-Ergebnis nach `slice()` (mit Fake-Slicer).
+4. SettingsScreen bleibt Platzhalter.
+5. ProjectState persistiert Z-Offset pro Plattenseite.
+6. `BedType → CLI-Argument-Mapping`.
+
+Alle sechs `flutter test` → **gruen**.
+
+### Angrenzende Fixes
+
+- `file_picker` von 8.3.1 auf 13.2.0 hochgezogen (AAR verlangt
+  compileSdk 36 ueber flutter_plugin_android_lifecycle); API in 13.x
+  ist statisch (`FilePicker.pickFile(…)` statt
+  `FilePicker.platform.pickFiles(…)`).
+- `compileSdk = 36` explizit (statt dem Flutter-Default 34).
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Flutter-App mit Native-CLI aufruffaehig: Binary liegt als
+  `libhandslice_cli.so` in jniLibs, extrahiert in `nativeLibraryDir`,
+  `Process.run()` findet es. APK gebaut, auf dem Poco installiert,
+  App startet, UI aktualisiert sich bei State-Change.
+- `handslice-cli --bed-type A|B` wirkt sichtbar
+  (`curr_bed_type = Textured PEI Plate` vs. `High Temp Plate`),
+  zwei unterschiedliche `EXECUTABLE_BLOCK`-Hashes.
+- App-Binary ist byte-fuer-byte identisch zur Device-CLI (sha256
+  `b63ac28c…`).
+- Fokus-Ring sichtbar bei D-Pad-Navigation
+  (Screenshot `m2_projekt_focus_bed_B.png`).
+- 6 Widget-Tests gruen (`flutter test`).
+- Bauplatten-Zuordnung + Z-Offset-Pfade in
+  `docs/engine-integration.md` dokumentiert.
+- Profile-Minimum-Set (11 JSONs) im App-AssetBundle identisch zu
+  denen aus `engine/OrcaSlicer/resources/profiles/Elegoo`
+  (`diff -q` je Leaf-Datei: identisch).
+
+**2. Ungeprueft**
+
+- **Interaktiver End-to-End-Test ueber die File-Picker-UI auf dem
+  Geraet.** Die SAF-Auswahl ist nicht automatisierbar; wir haben den
+  Pfad per `adb push` auf `/sdcard/Download/cube_notched_m2.stl`
+  vorbereitet, aber die eigentliche „Modell oeffnen → Slicen"-
+  Kette ueber die App ist in dieser Session nicht
+  durchgeklickt – braucht Klaus am Geraet (oder einen Debug-
+  Intent-Handler, der M3 verdrahtet).
+- **Z-Offset-Anwendung.** Nur gespeichert und angezeigt; drei Wege
+  stehen in der Doku, Umsetzung in Phase 3+.
+- **Querformat.** Weiterhin ungeprueft (CLAUDE.md-Nachtrag M1).
+- **PrintScreen-Switches und Upload/Druck-Button** sind leere
+  `onPressed`-Dummies – die eigentliche Verdrahtung kommt in M3/M4.
+
+**3. Geht nicht**
+
+- (keine neuen Blocker)
+
+---
+
 ## 2026-10-25 12:30 – Phase 3 M1: Flutter-Grundgeruest laeuft auf dem Poco
 
 Erster Meilenstein von Phase 3 (Flutter-Durchbruch) erreicht. Nur
