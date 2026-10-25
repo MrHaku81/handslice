@@ -73,6 +73,12 @@ Reply, ~10 ms:
 
 List 24/24 identical before and after.
 
+### Control test
+
+The same file could be deleted without problems via the printer's
+touchscreen, so the file wasn't locked or protected — only the LAN
+delete via 1047 does nothing.
+
 ### Reading
 
 Same `error_code=1003` for an existing file and a non-existing one,
