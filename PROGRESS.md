@@ -43,6 +43,25 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-25 18:20 – Zweiter Realdruck aus der App (Commit ac57b14, Seite B, Z-Offset −0,04)
+
+- Klaus hat am Poco den zweiten echten Druck mit der M6-APK ausgeloest:
+  Seite B (Glatt, Carbon-Optik), Z-Offset **−0,04 mm**, Fach A4, PLA.
+- Druckstart, lokalisierter Live-Status (Zustand/Bett/Düse),
+  Prozentanzeige (aus `current_layer`/`total_layer` abgeleitet, M5-Befund 2)
+  und Zeitraffer-Aufnahme am Drucker (M5-Befund 3) laufen wie erwartet.
+- Erste Schicht sauber heraus: **Carbon-Muster der Glattseite ist vollflaechig
+  abgebildet** – der auf Dart→CLI→Engine-Pfad angewendete Z-Offset von
+  −0,04 mm wirkt am echten Druck. Damit ist auch Befund 5 am Geraet
+  belegt (M4c + M5 waren G-Code-seitig; dieser Druck ist der physische
+  Nachweis).
+- Alle fuenf M5-Befunde (Pair-Validierung, Prozent, Zeitraffer-Capability,
+  Status-Lokalisierung, Z-Offset scharf) sind damit am echten CC2
+  bestaetigt. Phase-3-Erfolgskriterium bleibt erfuellt, mit zusaetzlichem
+  Nachweis fuer die Z-Offset-Anwendung.
+
+---
+
 ## 2026-10-25 17:50 – Phase 3 M6: CLI-Vertrag + Build-Guard nach „unknown flag: --z-offset"
 
 **Vorfall:** Klaus hat am Poco Commit `9c976f1` getestet („Auf dem Gerät
