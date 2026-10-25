@@ -15,10 +15,11 @@ Hi — ran this on a real CC2 today, happy to drop the measurements in.
 - Centauri Carbon 2 Combo, Access-Code pairing (`token_status = 1`,
   `lan_status = 1`), MQTT 1883 + chunked HTTP PUT 80. Printer idle
   throughout.
-- Note on the clock: <TODO: fill in Klaus' specific hint about the
-  printer clock – the end of the briefing message was truncated for
-  me. Printer `create_time` field in `method 1046` reports a Unix
-  epoch value; cross-check against UTC on your box.>
+- Note on the clock: my printer's clock is set (UTC+1), so I
+  couldn't test the never-set / 1970 case. As a pure observation
+  (no cause claimed): the `create_time` field returned by `method
+  1046` for the test file I had just uploaded was about 1 h 33 min
+  behind real UTC at the time. Printer was in LAN-only mode.
 
 ### What I sent
 
@@ -117,8 +118,8 @@ same CC2 is still paired and idle.
 
 ---
 
-### After posting
+### Anonymisation note (for the handslice repo, not for the issue)
 
-Fill in the clock-hint TODO before submitting. All measurements
-anonymised: SN, IP, Access-Code and client-ID replaced by `<cc2-sn>`,
-`<cc2-ip>`, `<rid>`, `<ts>`.
+All measurements anonymised: SN, IP, Access-Code and client-ID
+replaced by `<cc2-sn>`, `<cc2-ip>`, `<rid>`, `<ts>` in the text
+above.
