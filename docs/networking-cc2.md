@@ -881,6 +881,27 @@ Vor-Pruefung in der App moeglich (optional, siehe Phase 2+): aus
 ableiten, ob der CC2 den Zeitraffer-Pfad grundsaetzlich unterstuetzt
 (`elegoo-link` zieht dort seine `supportsTimeLapse`-Capability).
 
+### Beobachtung 2026-10-25: Zeitstempel im Video-Dateinamen weicht ab
+
+Beim zweiten Realdruck aus der App (Druckbeginn 2026-10-25 ~18:05 MEZ,
+`handslice_1792947629010.gcode`) hat der CC2 das aufgenommene
+Zeitraffer-Video intern mit dem Zeitstempel **2026-10-26 01:00:53**
+benannt. Die reale Druckzeit lag knapp sieben Stunden davor.
+
+In der Nacht davor stand in Deutschland die Umstellung von Sommer- auf
+Winterzeit an (MESZ → MEZ, 2026-10-25 03:00 → 02:00). Nur festgehalten,
+keine Ursache behauptet: ob der Drucker die Umstellung nicht mitbekommt,
+ob er in einer anderen Zone lebt, ob der Zeitstempel aus einer anderen
+Quelle als der Status-Uhr kommt – offen. Konsistent mit dem M4-Befund,
+dass die Druckeruhr im LAN-Modus laut `print_status` ohnehin nachlief
+(dort ca. 1 h 33 min hinter UTC).
+
+Fuer die App bleibt die Konsequenz: **keine Zeitstempel aus dem
+Drucker als absolute Wall-Clock behandeln** – weder in der Restzeit
+(bereits durch M4b abgefedert) noch bei der Zuordnung von
+Zeitraffer-Dateinamen zum Druck. Fuer die Zuordnung reicht der
+G-Code-Dateiname als Stabil-Schluessel.
+
 ### Druckstart-Befehl vorbereitet (NICHT ausgefuehrt)
 
 Fertige `method 1020`-Payload fuer den naechsten Lauf durch Klaus

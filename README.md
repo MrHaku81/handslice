@@ -17,6 +17,14 @@ beides im LAN-Modus am Drucker. 15 Minuten später lag das Teil sauber
 auf dem Bett; den Zeitraffer liefert der Drucker selbst, Clip in
 [`docs/media/erster-druck-zeitraffer.mp4`](docs/media/erster-druck-zeitraffer.mp4).
 
+Ein paar Stunden später: **erster Druck komplett aus der App**. Modell
+am Handy geöffnet, auf dem Poco gesliced (0.9 s), per „Verbinden & Fächer
+laden" an den CC2 gekoppelt, hochgeladen und mit „Drucken" gestartet –
+alles aus der laufenden App ohne Desktop. Glatte Druckbettseite,
+Z-Offset −0,04 mm aus der App an die Engine durchgereicht, erste Schicht
+bildet das Carbon-Muster vollflächig ab. Zeitraffer:
+[`docs/media/erster-app-druck-zeitraffer.mp4`](docs/media/erster-app-druck-zeitraffer.mp4).
+
 > Motto: *freeing the orca from the desktop.*
 
 Handslice ist ein **eigenständiges Projekt**. Es bettet die Slicing-Engine von

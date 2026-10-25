@@ -47,6 +47,7 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 - Klaus hat am Poco den zweiten echten Druck mit der M6-APK ausgeloest:
   Seite B (Glatt, Carbon-Optik), Z-Offset **−0,04 mm**, Fach A4, PLA.
+  G-Code-Name auf dem Drucker: `handslice_1792947629010.gcode`.
 - Druckstart, lokalisierter Live-Status (Zustand/Bett/Düse),
   Prozentanzeige (aus `current_layer`/`total_layer` abgeleitet, M5-Befund 2)
   und Zeitraffer-Aufnahme am Drucker (M5-Befund 3) laufen wie erwartet.
@@ -59,6 +60,16 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
   Status-Lokalisierung, Z-Offset scharf) sind damit am echten CC2
   bestaetigt. Phase-3-Erfolgskriterium bleibt erfuellt, mit zusaetzlichem
   Nachweis fuer die Z-Offset-Anwendung.
+- Zeitraffer-Video vom Drucker ueber USB gezogen und als
+  `docs/media/erster-app-druck-zeitraffer.mp4` eingecheckt; im README
+  unter „Erster Druck" verlinkt (zweiter Eintrag).
+- **Beobachtung Druckeruhr:** Der CC2 hat das Video intern mit Zeitstempel
+  **2026-10-26 01:00:53** benannt – real gedruckt wurde um ~18:05 MEZ am
+  2026-10-25. In der Nacht davor war die Umstellung MESZ→MEZ. Nur
+  festgehalten, keine Ursache behauptet (vgl. M4b-Befund:
+  `print_status`-Uhr lief im LAN-Modus bereits 1 h 33 min hinter UTC).
+  Dokumentiert in `docs/networking-cc2.md` Abschnitt „Beobachtung
+  2026-10-25: Zeitstempel im Video-Dateinamen weicht ab".
 
 ---
 
