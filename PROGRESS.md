@@ -8,6 +8,129 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 12:30 – Phase 3 M1: Flutter-Grundgeruest laeuft auf dem Poco
+
+Erster Meilenstein von Phase 3 (Flutter-Durchbruch) erreicht. Nur
+Grundgeruest – nichts ist mit der CLI oder dem Drucker verdrahtet.
+
+### Werkzeuge installiert
+
+- **Flutter stable 3.47.8** (framework rev `737ba8f885`, 2 Tage alter
+  stable), Dart 3.13.7 – via `git clone --depth 1 --branch stable` nach
+  `~/flutter`. Nicht in `~/.bashrc` eingetragen (Projektregel: keine
+  Dotfile-Aenderungen). Env-Snippet in `docs/test-setup.md`.
+- **Android SDK Platform `android-36`** + Build-Tools `36.0.0` +
+  Platform-Tools 37.0.1 ueber `sdkmanager` installiert.
+- **JDK 21** (`jdk21-openjdk` via Pacman) – OpenJDK 27 ist nur JRE und
+  wird vom aktuellen Flutter-Gradle-Plugin ohnehin noch nicht validiert.
+- `flutter doctor`: Android toolchain gruen, Linux toolchain gruen,
+  Chrome-Warnung ignoriert (wir bauen fuer Android, nicht Web).
+
+### App-Grundgeruest unter `app/`
+
+- `flutter create` mit `--org dev.handslice --project-name handslice
+  --platforms android --empty`. `app/README.md` aus der vorigen
+  Vorlauf-Nachricht wurde erhalten und frisch beschrieben.
+- `pubspec.yaml`: `flutter_localizations`, `intl`, lokale IBM Plex
+  Sans/Mono-Fonts als Assets. **Kein `google_fonts`** – Fonts offline
+  im Bundle (OFL-1.1-Lizenz unter `assets/fonts/LICENSE`).
+- `minSdk = 29` (CC2-Protokoll-Grenze; Poco X3 Pro ist Android 12/API 31).
+
+### l10n (ARB en + de)
+
+- `l10n.yaml` + `lib/l10n/app_en.arb` (Quelle) + `lib/l10n/app_de.arb`
+  (erste Uebersetzung). 29 Strings fuer alle drei Screens. **Keine
+  Hardcode-Strings** in Widgets.
+
+### Design Werkstatt (Variante A, zentral)
+
+- `lib/theme/workshop_theme.dart` enthaelt alle Tokens einmal:
+  - Hintergrund `#111317`, Flaeche `#1B1F25`, Rahmen `#2E343D`,
+    Text `#E8EAED`, Nebentext `#9AA3AE`, Akzent `#FF8A1F`
+    (Text auf Akzent `#111317`).
+  - IBM Plex Sans fuers Textthema via `TextTheme.apply(fontFamily:
+    'IBMPlexSans')`; `monoStyle(context, …)`-Helper fuer Werte in
+    Plex Mono.
+  - Radien 6/8, `minTapTarget = 44`, Button-/Card-/Switch-Themes.
+  - **`FocusVisible`-Widget** zeichnet einen 2 px-Akzent-Rahmen,
+    sobald das umgebende Focus-Node Fokus hat – damit nicht jeder
+    Button selbst Fokus-Logik mitbringen muss.
+
+### Drei Bildschirme + Bottom-Nav
+
+- `screens/project_screen.dart`: Modell, Drucker, Profil, Druckbett
+  (A/B toggle), Z-Offset, Filamentslot. Zwei Buttons (Modell oeffnen,
+  Slicen) – noch Dummy-`onPressed: () {}`.
+- `screens/print_screen.dart`: G-Code-Metadaten, drei Switches
+  (Bettnivellierung, Auto-Nivellierungscheck, Zeitraffer), Upload-/
+  Druck-Buttons, Statusabschnitt.
+- `screens/settings_screen.dart`: nur Platzhalter („Der generierte
+  Einstellungsbaum kommt in einer spaeteren Phase.") – wie
+  Klaus-Vorgabe.
+- Root-Shell mit `FocusTraversalGroup` + `NavigationBar` +
+  `FocusTraversalPolicy = ReadingOrderTraversalPolicy`.
+
+### Build + Device-Test
+
+- APK gebaut: `flutter build apk --debug` →
+  `app/build/app/outputs/flutter-apk/app-debug.apk` (ca. 60 MB).
+- MIUI-Install anfangs mit „Install canceled by user" abgelehnt;
+  nach Klaus-Freigabe der „Install ueber USB"-Option funktionierte
+  `adb install -r …` sauber.
+- D-Pad-Test: `adb shell input keyevent KEYCODE_DPAD_RIGHT` +
+  `KEYCODE_DPAD_CENTER` – Navigation springt sichtbar zwischen
+  Projekt → Drucken → Einstellungen.
+- Drei Screenshots unter `docs/media/screenshots/`:
+  - `m1_projekt_initial.png` – Projekt mit Werkstatt-Design, A-Plate
+    aktiv, Z-Offset `−0.030 mm` in Mono.
+  - `m1_drucken_mit_dpad_fokus.png` – Drucken-Tab aktiv (durch D-Pad
+    erreicht), Switches, orangener Druck-Button.
+  - `m1_einstellungen_platzhalter.png` – Platzhalter-Icon + Text.
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Flutter 3.47.8 + Android SDK 36 + JDK 21 eingerichtet, `flutter
+  doctor` meldet Android-Toolchain gruen. Nachweis-Pfade in
+  `docs/test-setup.md`.
+- `flutter analyze` → `No issues found`.
+- APK gebaut und auf dem Poco X3 Pro installiert, Launcher-Eintrag
+  erscheint, App startet.
+- Alle drei Bildschirme rendern wie geplant, Bottom-Nav funktioniert,
+  Werkstatt-Theme (Farben, Fonts, Radien) sitzt – siehe
+  `docs/media/screenshots/`.
+- D-Pad-Navigation per `adb shell input keyevent` sichtbar
+  reproduzierbar: Fokus wandert durch die Tab-Bar und aktiviert
+  Screens.
+- l10n (en/de) greift (die DE-Lokale ist am Poco gesetzt – Screens
+  erscheinen auf Deutsch).
+
+**2. Ungeprueft**
+
+- **Fokus-Ring innerhalb der Screens.** Die D-Pad-Navigation springt
+  zwischen den Tabs, aber ob die inneren Button-Reihen und Switches
+  mit einem sichtbaren Fokus-Ring korrekt umlaufen werden, haengt
+  vom konkreten `Focus`-Kind-Baum ab. Fuer die Dummy-Buttons mit
+  `onPressed: () {}` hat Material 3 den Default-Fokus-Overlay,
+  nicht den `FocusVisible`-Ring. In M2 beim Verdrahten der echten
+  Interaktionen explizit nachpruefen.
+- **Rotation / Querformat.** Erstes Screenshot kam zufaellig in
+  Landscape, das Layout funktionierte (ListView skaliert), aber
+  nicht gezielt getestet.
+- **Testlauf gegen `flutter test`.** Nur `flutter analyze` gelaufen;
+  die default `widget_test.dart` wurde nicht uebernommen (im
+  Scaffold-Template `--empty` nicht enthalten), eigene Tests
+  stehen noch aus.
+
+**3. Geht nicht**
+
+- (keine neuen Blocker)
+
+---
+
 ## 2026-10-25 11:00 – Zeitraffer-Download: kein belegter LAN-Pfad; USB-Export ist der Weg
 
 Nach der Korrektur um 10:30 systematisch im Quellcode gesucht.

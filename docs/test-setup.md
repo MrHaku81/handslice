@@ -29,10 +29,14 @@ Stand: 2026-10-24 (Erstaufnahme durch Umgebungscheck).
 | NDK-Clang (aarch64 Target) | 18.0.4 (`aarch64-linux-android29-clang`) | `.../toolchains/llvm/prebuilt/linux-x86_64/bin/` |
 | Toolchain-Wrapper fuer Orca-Cross-Build | `engine/cmake/android-arm64.toolchain.cmake` | – |
 | CMake-Shims fuer unconditional find_package(OpenGL) | `engine/cmake/android-shims/` | – |
-| JDK (fuer sdkmanager/`android`-CLI) | OpenJDK 27 (jre-openjdk-headless) | `/usr/bin/java` |
+| JRE (fuer sdkmanager/`android`-CLI) | OpenJDK 27 (jre-openjdk-headless) | `/usr/bin/java` |
+| JDK 21 (Gradle-Build, javac) | OpenJDK 21 (jdk21-openjdk, seit 2026-10-25) | `/usr/lib/jvm/java-21-openjdk/bin/javac` |
 | aarch64-linux-gnu-gcc (System-Cross-Toolchain) | **nicht installiert** | – |
-| Flutter | **nicht installiert** | – |
-| Kotlin (kotlinc) | **nicht installiert** | – |
+| Flutter (stable) | 3.47.8 (framework rev `737ba8f885`, 2026-10-22) – Dart 3.13.7 | `~/flutter/bin/flutter` |
+| Android SDK Platform | `platforms/android-36` (3.0.0) | `~/android-sdk/platforms/android-36/` |
+| Android SDK Build-Tools | `build-tools/36.0.0` | `~/android-sdk/build-tools/36.0.0/` |
+| Android Platform-Tools (SDK-Variante) | 37.0.1 | `~/android-sdk/platform-tools/` |
+| Kotlin (kotlinc) | **nicht installiert** – Flutter-Gradle-Plugin bringt den noetigen Kotlin-Compiler als Dependency mit | – |
 | OrcaSlicer-Tag (Submodul) | v2.4.2 (commit `8500fcdcca`) | `engine/OrcaSlicer` |
 | Desktop-Orca (Referenz, AppImage) | v2.4.2 (muss zum Submodul-Tag passen) | `engine/reference/` (gitignored) |
 
@@ -59,9 +63,31 @@ export ANDROID_HOME="$HOME/android-sdk"
 export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
 ```
 
-Platform-SDK (API-Level, Build-Tools) **noch nicht installiert** – wird
-erst mit dem UI-Stack-Entscheid (Flutter vs. Compose) relevant. Platform-
-Tools (adb) sind weiterhin die Pacman-Variante.
+Platform-SDK (API-Level, Build-Tools) **installiert 2026-10-25**
+(`platforms;android-36`, `build-tools;36.0.0`, `platform-tools`) – fuer
+den Flutter-Build der App unter `app/`.
+
+### Flutter einrichten (Stand 2026-10-25)
+
+- `~/flutter` via `git clone --depth 1 --branch stable
+  https://github.com/flutter/flutter.git` (3.47.8, 2 Tage alter stable).
+- `flutter config --android-sdk ~/android-sdk`.
+- `jdk21-openjdk` via Pacman installiert (OpenJDK 27 ist nur JRE –
+  Gradle braucht `javac`; OpenJDK 27 ist zudem fuer das aktuelle
+  Flutter-Gradle-Plugin noch nicht validiert).
+- Projekt-lokale Env-Variablen fuer kuenftige Shells (nicht in
+  `~/.bashrc`):
+
+```
+export JAVA_HOME="/usr/lib/jvm/java-21-openjdk"
+export ANDROID_HOME="$HOME/android-sdk"
+export ANDROID_SDK_ROOT="$HOME/android-sdk"
+export PATH="$JAVA_HOME/bin:$HOME/flutter/bin:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/ndk/27.3.13750724/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+```
+
+`flutter doctor` meldet nach dieser Einrichtung Android toolchain,
+Linux toolchain und Network resources alle gruen; Chrome-Warnung
+irrelevant (wir bauen fuer Android, nicht fuer Web).
 
 ## Testgerät: Poco X3 Pro
 

@@ -1,0 +1,47 @@
+{
+  "@@locale": "de",
+  "appTitle": "Handslice",
+
+  "tabProject": "Projekt",
+  "tabPrint": "Drucken",
+  "tabSettings": "Einstellungen",
+
+  "projectHeading": "Projekt",
+  "projectEmptyModel": "Kein Modell geladen",
+  "projectOpenModel": "Modell öffnen (STL / 3MF)",
+  "projectModelFile": "Modell",
+  "projectPrinter": "Drucker",
+  "projectPlate": "Druckbett",
+  "projectPlateTextured": "A – Strukturiert",
+  "projectPlateSmooth": "B – Glatt",
+  "projectProfile": "Profil",
+  "projectFilaments": "Filamente / Slot-Zuordnung",
+  "projectZOffset": "Z-Offset pro Seite (nur gespeichert)",
+  "projectSliceButton": "Auf dem Gerät slicen",
+
+  "printHeading": "Drucken",
+  "printNoGcode": "Kein G-Code – vorher ein Projekt slicen",
+  "printFileLabel": "Datei",
+  "printSizeLabel": "Größe",
+  "printLayersLabel": "Layer",
+  "printTimeLabel": "Geschätzte Zeit",
+  "printFilamentLabel": "Filament",
+  "printBedLeveling": "Bettnivellierung vor dem Druck erzwingen",
+  "printAutoLevelCheck": "Auto-Nivellierungscheck",
+  "printTimelapse": "Zeitraffer aufnehmen",
+  "printUploadButton": "An den Drucker hochladen",
+  "printStartButton": "Drucken (nach Sichtkontrolle am Gerät)",
+  "printStatusHeading": "Druckerstatus",
+  "printStatusIdle": "Bereit",
+  "printStatusPrinting": "Druckt",
+  "printStatusLeveling": "Nivelliert",
+  "printStatusHeating": "Heizt",
+  "printStatusComposing": "Erstellt Zeitraffer",
+  "printStatusUnknown": "Unbekannt",
+
+  "settingsHeading": "Einstellungen",
+  "settingsPlaceholder": "Der generierte Einstellungsbaum kommt in einer späteren Phase.",
+
+  "focusHintDpad": "D-Pad / Tab bewegen den Fokus, Enter / Leertaste aktivieren.",
+  "sampleBannerPlaceholder": "Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet."
+}
