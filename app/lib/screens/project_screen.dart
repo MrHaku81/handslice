@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
+import '../settings/settings_overrides.dart';
 import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
@@ -20,11 +21,13 @@ class ProjectScreen extends StatefulWidget {
     required this.slicer,
     required this.projectState,
     required this.printerState,
+    required this.overrides,
   });
 
   final SlicerService slicer;
   final ProjectState projectState;
   final PrinterState printerState;
+  final SettingsOverrides overrides;
 
   @override
   State<ProjectScreen> createState() => _ProjectScreenState();
@@ -63,7 +66,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
     final dir = await getApplicationSupportDirectory();
     final outPath = '${dir.path}/handslice_project.gcode';
     _lastOutPath = outPath;
-    await state.slice(widget.slicer, outPath);
+    await state.slice(widget.slicer, outPath, overrides: widget.overrides);
   }
 
   String? _lastOutPath;

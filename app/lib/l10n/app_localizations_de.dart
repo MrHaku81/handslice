@@ -293,6 +293,41 @@ class AppLocalizationsDe extends AppLocalizations {
       'Keine Einstellungen passen zum aktuellen Filter.';
 
   @override
+  String settingsOverridesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count Überschreibungen',
+      one: '1 Überschreibung',
+      zero: 'Keine Überschreibungen',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get settingsSaveAsProfile => 'Als Profil speichern';
+
+  @override
+  String get settingsSaveDialogTitle => 'Prozess-Profil speichern';
+
+  @override
+  String get settingsSaveDialogHint =>
+      'Speichert die aktuellen Überschreibungen als Orca-Preset mit inherits auf das aktive Basisprofil. Lokal auf dem Gerät.';
+
+  @override
+  String get settingsProfileName => 'Profilname';
+
+  @override
+  String settingsProfileSaved(String file) {
+    return 'Gespeichert: $file';
+  }
+
+  @override
+  String settingsProfileSaveFailed(String msg) {
+    return 'Speichern fehlgeschlagen: $msg';
+  }
+
+  @override
   String get focusHintDpad =>
       'D-Pad / Tab bewegen den Fokus, Enter / Leertaste aktivieren.';
 

@@ -122,4 +122,71 @@ print("PASS")
 PY
 
 echo
+echo "=== 5  --overrides-Vertrag (Phase 4.3) ==="
+# Drei Aenderungen, die im G-Code nachweisbar sind:
+#   layer_height=0.28           -> weniger Z-Moves (dickere Schicht)
+#   wall_loops=4                -> mehr Perimeter
+#   sparse_infill_density=40%   -> mehr Extrusionsvolumen
+OUT_OVR="${REMOTE}/out_overrides.gcode"
+adb shell "${REMOTE_CLI} \
+    --machine '${REMOTE_RES}/profiles/Elegoo/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json' \
+    --process '${REMOTE_RES}/profiles/Elegoo/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json' \
+    --filament '${REMOTE_RES}/profiles/Elegoo/filament/ECC2/Elegoo PLA @ECC2.json' \
+    --resources '${REMOTE_RES}' \
+    --output '${OUT_OVR}' \
+    --bed-type B \
+    --overrides '{\"layer_height\":\"0.28\",\"wall_loops\":\"4\",\"sparse_infill_density\":\"40%\"}' \
+    --quiet --no-center \
+    '${REMOTE_STL}'"
+adb pull "${OUT_OVR}" "${LOCAL_TMP}/ovr.gcode" >/dev/null
+python3 <<PY
+import re
+def z_count(path):
+    n=0
+    with open(path) as f:
+        for line in f:
+            if line.startswith('G1 Z'): n+=1
+    return n
+def extrusion_mm(path):
+    s=0.0
+    with open(path) as f:
+        for line in f:
+            m=re.search(r'(?<![A-Z])E([-\\d.]+)', line)
+            if m and line.startswith('G1 '):
+                try:
+                    v=float(m.group(1))
+                    if v>0: s+=v
+                except: pass
+    return s
+zb=z_count('${LOCAL_TMP}/base.gcode');   eb=extrusion_mm('${LOCAL_TMP}/base.gcode')
+zo=z_count('${LOCAL_TMP}/ovr.gcode');    eo=extrusion_mm('${LOCAL_TMP}/ovr.gcode')
+print(f'baseline:   Z-moves={zb}  extrusion~{eb:.0f}mm')
+print(f'overrides:  Z-moves={zo}  extrusion~{eo:.0f}mm')
+import sys
+if not (zo < zb):
+    print(f'FAIL: layer_height=0.28 muesste WENIGER Z-moves erzeugen', file=sys.stderr); sys.exit(1)
+if not (eo > eb * 1.3):
+    print(f'FAIL: 4 walls + 40% infill muessten >30% mehr Extrusion ergeben', file=sys.stderr); sys.exit(1)
+print('PASS')
+PY
+
+echo
+echo "=== 6  Ungueltiger Override wird abgewiesen ==="
+set +e
+err=$(adb shell "${REMOTE_CLI} \
+    --machine '${REMOTE_RES}/profiles/Elegoo/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json' \
+    --process '${REMOTE_RES}/profiles/Elegoo/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json' \
+    --filament '${REMOTE_RES}/profiles/Elegoo/filament/ECC2/Elegoo PLA @ECC2.json' \
+    --resources '${REMOTE_RES}' --output '${REMOTE}/x.gcode' --bed-type B \
+    --overrides '{\"nonexistent_key_xy\":\"5\"}' \
+    --quiet --no-center '${REMOTE_STL}'" 2>&1)
+rc=$?
+set -e
+echo "$err" | tail -2
+if ! echo "$err" | grep -q "unknown option 'nonexistent_key_xy'"; then
+    echo "FAIL: unerwartete Fehlermeldung" >&2; exit 1
+fi
+echo "PASS"
+
+echo
 echo "Vertragstest bestanden. CLI-Commit auf dem Geraet: ${CLI_COMMIT}"

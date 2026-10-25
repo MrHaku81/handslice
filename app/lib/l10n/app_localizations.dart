@@ -596,6 +596,48 @@ abstract class AppLocalizations {
   /// **'No settings match the current filter.'**
   String get settingsNoMatches;
 
+  /// No description provided for @settingsOverridesCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No overrides} =1{1 override} other{{count} overrides}}'**
+  String settingsOverridesCount(int count);
+
+  /// No description provided for @settingsSaveAsProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as profile'**
+  String get settingsSaveAsProfile;
+
+  /// No description provided for @settingsSaveDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Save process profile'**
+  String get settingsSaveDialogTitle;
+
+  /// No description provided for @settingsSaveDialogHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Saves your current overrides as an Orca-style preset with inherits onto the active base profile. Stored locally.'**
+  String get settingsSaveDialogHint;
+
+  /// No description provided for @settingsProfileName.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile name'**
+  String get settingsProfileName;
+
+  /// No description provided for @settingsProfileSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved: {file}'**
+  String settingsProfileSaved(String file);
+
+  /// No description provided for @settingsProfileSaveFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Save failed: {msg}'**
+  String settingsProfileSaveFailed(String msg);
+
   /// No description provided for @focusHintDpad.
   ///
   /// In en, this message translates to:

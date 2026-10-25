@@ -43,6 +43,88 @@ Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
 
 ---
 
+## 2026-10-25 21:40 – Phase 4.3: Overrides ins Slicen + Profil speichern (STOPP)
+
+### CLI `--overrides` (`engine/cli/handslice-cli.cpp`)
+
+- Neue Flag `--overrides '<json>'` oder `--overrides @datei.json`.
+- Pro Key: Pruefung gegen `print_config_def.get(key)` → **unbekannter
+  Key wirft klaren Fehler** (`unknown option 'nonexistent_key'`).
+- Pro Wert: `cfg.set_deserialize_nothrow(key, value, ctx)`; bei false
+  oder `ConfigurationError` wird opt_key + Wert + Grund gemeldet.
+- Angewendet NACH Profil-Chain + `--bed-type` + `--z-offset`, so dass
+  Overrides wie in Orcas Preset-Edit-Pfad die oberste Prioritaet haben.
+
+### App-Pfad
+
+- `SlicerService.slice({overrides: Map<String,String>})` reicht den
+  JSON-serialisierten Overrides-Map an die CLI durch (`jsonEncode`).
+- `ProjectState.slice(overrides: SettingsOverrides?)` holt
+  `overrides.all` aus dem Setting-Screen und uebergibt es.
+- `ProjectScreen` bindet den `SettingsOverrides` ans Slice-Button.
+- CLI-Fehler aus `--overrides` werden ueber die bestehende
+  `SliceProcessException` → `lastError='slice.error:<code>:<msg>'`
+  lesbar in der UI gezeigt (zusammen mit dem OOM-Pfad aus dem
+  Stresstest).
+
+### "Als Profil speichern" (`app/lib/settings/profile_writer.dart`)
+
+- Speichert die aktuellen Overrides als eigenes Orca-Preset:
+  `ApplicationSupportDirectory/profiles/user/<slug>.json`.
+- Format spiegelt die resources-Preset-Dateien:
+  `{name, type:"process", from:"User", inherits:"<base>", <overrides>}`.
+- Button im SettingsScreen oben rechts, mit Dialog fuer Profilnamen.
+  Snackbar meldet Erfolg (Dateiname) oder Fehler.
+- 7 ARB-Keys neu (en + de) inkl. Plural fuer "Überschreibungen".
+
+### Nachweise – G-Code mit 3 Überschreibungen (x86, Kerbenwuerfel)
+
+| Lauf | Z-Moves | Extrusion-Moves | G-Code | Zeit | Filament |
+|---|---:|---:|---:|---|---:|
+| baseline (ohne --overrides) | 238 | 3 897 | 220 kB | 9m 25s | 1 172 mm |
+| `layer_height=0.28`, `wall_loops=4`, `sparse_infill_density=40%` | **196** | **5 843** | 265 kB | 8m 11s | **2 017 mm** |
+
+- Weniger Schichten (238 → 196) durch dickere Schicht (`+40%`).
+- Mehr Perimeter + mehr Füllung → +50 % Extrusionslinien.
+- Materialverbrauch +72 % (1172 → 2017 mm).
+- **Byte-gleiche Baseline:** `diff <(grep -v generated base.gcode) <(grep -v generated base2.gcode) == exit 0`. Zwei identische Laeufe ohne --overrides liefern am x86 denselben G-Code (ausser Zeitstempel-Header).
+
+### Nachweis – Brim-Overrides auf auryn.stl (Stresstest-Modell)
+
+```
+--overrides '{"brim_type":"outer_only","brim_width":"6"}'
+```
+G-Code `local-test/auryn-brim-x86.gcode` (65 MB, 23 s Slice am x86):
+
+- Feature-Marker `;TYPE:Brim` im G-Code vorhanden.
+- Erste Schicht (initial_layer_print_height=0.2) hat 525 `G1`-
+  Extrusionszeilen vom Typ `Brim`, X-Bereich `[131.21, 144.27]`,
+  Y-Bereich `[96.29, 107.60]`.
+- Modell ist für Druck ohne Stuetzen auf die Spitze gekippt – der
+  Fussabdruck ist deshalb klein. Brim-Ring (span 13×11 mm) liegt um
+  den Fuß des gekippten Models und etwas außerhalb des reinen
+  Modell-Footprints (im G-Code `Outer wall` nur 5 Zeilen bei
+  (137.11, 101.87)); der Brim bildet ringsum eine ca. 6 mm breite
+  Haftzone, wie erwartet.
+- Grenztest bleibt gruen: alle Brim-X in `[0, 256]`, alle Brim-Y in
+  `[-10, 256]` (printable_area + bed_texture_area). Kein OOB.
+
+### Vertragstest `engine/test/cli-contract-arm64.sh` erweitert
+
+- Schritt 5: dieselben drei Overrides am Poco; prueft
+  Z-Moves-Ruckgang + ≥30 % mehr Extrusion.
+- Schritt 6: ungueltiger Key muss mit `unknown option 'nonexistent_key_xy'`
+  abgewiesen werden.
+- Weiterhin Byte-Diff Z-Offset −0.04 mm aus 4.1b.
+
+### Tests + Build
+
+- 28/28 Widget-Tests gruen; `flutter analyze` 0 Fehler.
+- x86-CLI + arm64-CLI mit M9-Hash neu gebaut (Guard: beide `.commit`-
+  Side-Cars identisch).
+
+---
+
 ## 2026-10-25 21:00 – Stresstest grosses Modell (vor 4.3, STOPP)
 
 Modell: `auryn.stl` von Klaus, 2 809 436 Dreiecke, 134 MB. Modell lokal

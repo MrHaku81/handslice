@@ -288,6 +288,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsNoMatches => 'No settings match the current filter.';
 
   @override
+  String settingsOverridesCount(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count overrides',
+      one: '1 override',
+      zero: 'No overrides',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get settingsSaveAsProfile => 'Save as profile';
+
+  @override
+  String get settingsSaveDialogTitle => 'Save process profile';
+
+  @override
+  String get settingsSaveDialogHint =>
+      'Saves your current overrides as an Orca-style preset with inherits onto the active base profile. Stored locally.';
+
+  @override
+  String get settingsProfileName => 'Profile name';
+
+  @override
+  String settingsProfileSaved(String file) {
+    return 'Saved: $file';
+  }
+
+  @override
+  String settingsProfileSaveFailed(String msg) {
+    return 'Save failed: $msg';
+  }
+
+  @override
   String get focusHintDpad =>
       'Use D-pad / Tab to move focus, Enter / Space to activate.';
 

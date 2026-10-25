@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../settings/profile_writer.dart';
 import '../settings/settings_overrides.dart';
 import '../settings/settings_schema.dart';
 import '../theme/workshop_theme.dart';
@@ -54,6 +55,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   List<SettingPage> get _pages => widget.schema.pagesFor('print');
 
+  Future<void> _saveAsProfile() async {
+    final l = AppLocalizations.of(context);
+    final nameCtrl = TextEditingController(text: 'My Process');
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.settingsSaveDialogTitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(l.settingsSaveDialogHint,
+                style: Theme.of(ctx).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            TextField(
+              controller: nameCtrl,
+              autofocus: true,
+              decoration: InputDecoration(labelText: l.settingsProfileName),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(l.pairDialogCancel)),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(l.pairDialogSave)),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final file = await const ProfileWriter().save(
+        name: nameCtrl.text.trim(),
+        baseInherits: '0.20mm Standard @Elegoo CC2 0.4 nozzle',
+        type: 'process',
+        overrides: widget.overrides.all,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(l.settingsProfileSaved(file.path.split('/').last))));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(l.settingsProfileSaveFailed(e.toString()))));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
@@ -75,6 +124,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ?.copyWith(color: WorkshopTokens.textMuted),
           ),
           const SizedBox(height: 12),
+
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l.settingsOverridesCount(widget.overrides.count),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: widget.overrides.isEmpty
+                        ? WorkshopTokens.textMuted
+                        : WorkshopTokens.accent,
+                  ),
+                ),
+              ),
+              TextButton.icon(
+                onPressed:
+                    widget.overrides.isEmpty ? null : _saveAsProfile,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(l.settingsSaveAsProfile),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
 
           _TierToggle(
             value: _tier,

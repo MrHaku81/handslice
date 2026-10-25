@@ -104,6 +104,16 @@
   "settingsSearchHint": "Search (option, label, help)…",
   "settingsResetTooltip": "Reset to profile default",
   "settingsNoMatches": "No settings match the current filter.",
+  "settingsOverridesCount": "{count, plural, =0{No overrides} =1{1 override} other{{count} overrides}}",
+  "@settingsOverridesCount": {"placeholders": {"count": {"type": "int"}}},
+  "settingsSaveAsProfile": "Save as profile",
+  "settingsSaveDialogTitle": "Save process profile",
+  "settingsSaveDialogHint": "Saves your current overrides as an Orca-style preset with inherits onto the active base profile. Stored locally.",
+  "settingsProfileName": "Profile name",
+  "settingsProfileSaved": "Saved: {file}",
+  "@settingsProfileSaved": {"placeholders": {"file": {"type": "String"}}},
+  "settingsProfileSaveFailed": "Save failed: {msg}",
+  "@settingsProfileSaveFailed": {"placeholders": {"msg": {"type": "String"}}},
 
   "focusHintDpad": "Use D-pad / Tab to move focus, Enter / Space to activate.",
   "sampleBannerPlaceholder": "Milestone 1 scaffold with sample data — nothing is wired yet."

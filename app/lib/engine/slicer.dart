@@ -163,6 +163,11 @@ class SlicerService {
     // vorzentriert auf (128,128,0) sitzt.
     bool noCenter = false,
     void Function(Process proc)? onProcessStarted,
+    // Phase 4.3: Nutzer-Overrides als key→value-Serialisierungen,
+    // werden nach der Profil-Chain + --bed-type / --z-offset
+    // angewendet. Leer → Flag wird weggelassen, G-Code bleibt
+    // byte-gleich zum Baseline.
+    Map<String, String> overrides = const {},
   }) async {
     if (!isReady) {
       throw StateError('SlicerService.init() wurde nicht aufgerufen');
@@ -180,6 +185,8 @@ class SlicerService {
       '--output', outputPath,
       '--bed-type', bedType.cliArg,
       if (applyZ) ...['--z-offset', zOffsetMm.toStringAsFixed(3)],
+      if (overrides.isNotEmpty)
+        ...['--overrides', jsonEncode(overrides)],
       '--quiet',
       if (noCenter) '--no-center',
       modelPath,

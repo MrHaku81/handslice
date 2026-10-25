@@ -84,6 +84,7 @@ class _CancellableSlicer extends SlicerService {
     double zOffsetMm = 0.0,
     bool noCenter = false,
     void Function(Process proc)? onProcessStarted,
+    Map<String, String> overrides = const {},
   }) async {
     // "Prozess laeuft" – wir warten bis zu 2 s, der Test cancelled
     // vorher.
@@ -112,6 +113,7 @@ class _OomSlicer extends SlicerService {
     double zOffsetMm = 0.0,
     bool noCenter = false,
     void Function(Process proc)? onProcessStarted,
+    Map<String, String> overrides = const {},
   }) async {
     throw SliceProcessException(
       exitCode: -9,
@@ -144,6 +146,7 @@ class _FakeSlicer extends SlicerService {
     double zOffsetMm = 0.0,
     bool noCenter = false,
     void Function(Process proc)? onProcessStarted,
+    Map<String, String> overrides = const {},
   }) async {
     lastZOffset = zOffsetMm;
     lastBedType = bedType;
@@ -175,6 +178,7 @@ void main() {
         slicer: _FakeSlicer(),
         projectState: state,
         printerState: await _makePrinter(),
+        overrides: SettingsOverrides(),
       ),
     ));
     await tester.pumpAndSettle();
@@ -198,6 +202,7 @@ void main() {
         slicer: _FakeSlicer(),
         projectState: state,
         printerState: await _makePrinter(),
+        overrides: SettingsOverrides(),
       ),
     ));
     await tester.pumpAndSettle();

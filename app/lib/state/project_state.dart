@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../engine/bounds_check.dart';
 import '../engine/slicer.dart';
+import '../settings/settings_overrides.dart';
 
 // Zentraler Zustand des aktiven Projekts. Nicht persistent (ausser
 // den z_offsets pro Plattenseite), weil die eigentliche Session beim
@@ -77,7 +78,8 @@ class ProjectState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> slice(SlicerService slicer, String outputPath) async {
+  Future<void> slice(SlicerService slicer, String outputPath,
+      {SettingsOverrides? overrides}) async {
     if (_modelPath == null) return;
     _slicing = true;
     _cancelRequested = false;
@@ -92,6 +94,7 @@ class ProjectState extends ChangeNotifier {
         bedType: _bedType,
         outputPath: outputPath,
         zOffsetMm: zOffsetFor(_bedType),
+        overrides: overrides?.all ?? const {},
         onProcessStarted: (p) {
           _activeProc = p;
           // Falls Cancel vor dem Hochfahren kam: direkt beenden.

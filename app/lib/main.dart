@@ -128,6 +128,7 @@ class _RootShellState extends State<RootShell> {
         slicer: widget.slicer,
         projectState: widget.projectState,
         printerState: widget.printerState,
+        overrides: widget.overrides,
       ),
       PrintScreen(
         projectState: widget.projectState,

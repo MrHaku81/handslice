@@ -88,6 +88,13 @@
   "settingsSearchHint": "Suchen (Option, Beschriftung, Hilfe)…",
   "settingsResetTooltip": "Auf Profil-Standard zurücksetzen",
   "settingsNoMatches": "Keine Einstellungen passen zum aktuellen Filter.",
+  "settingsOverridesCount": "{count, plural, =0{Keine Überschreibungen} =1{1 Überschreibung} other{{count} Überschreibungen}}",
+  "settingsSaveAsProfile": "Als Profil speichern",
+  "settingsSaveDialogTitle": "Prozess-Profil speichern",
+  "settingsSaveDialogHint": "Speichert die aktuellen Überschreibungen als Orca-Preset mit inherits auf das aktive Basisprofil. Lokal auf dem Gerät.",
+  "settingsProfileName": "Profilname",
+  "settingsProfileSaved": "Gespeichert: {file}",
+  "settingsProfileSaveFailed": "Speichern fehlgeschlagen: {msg}",
 
   "focusHintDpad": "D-Pad / Tab bewegen den Fokus, Enter / Leertaste aktivieren.",
   "sampleBannerPlaceholder": "Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet."

@@ -81,6 +81,12 @@ struct Args {
     // gesetzt (fuer den Diff-Test M4c).
     double z_offset = 0.0;
     bool z_offset_set = false;
+    // --overrides '<json>' oder --overrides @path/to/overrides.json
+    // Map opt_key -> serialisierter Wert, wird nach der Profil-Chain
+    // und nach --bed-type / --z-offset angewendet (letzte Instanz hat
+    // Prioritaet). Ungueltige Keys/Werte → saubere Fehlermeldung mit
+    // opt_key + Grund (keine Stille).
+    std::string overrides_json;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -137,6 +143,7 @@ Args parse_args(int argc, char** argv) {
         }
         else if (arg == "--bed-type") a.bed_type = need_val("--bed-type");
         else if (arg == "--dump-schema") a.dump_schema = true;
+        else if (arg == "--overrides") a.overrides_json = need_val("--overrides");
         else if (arg == "--z-offset") {
             const std::string v = need_val("--z-offset");
             try {
@@ -549,6 +556,59 @@ int main(int argc, char** argv) {
     // verdrahtet (M4c-Nachweis).
     if (args.z_offset_set) {
         cfg.set_key_value("z_offset", new ConfigOptionFloat(args.z_offset));
+    }
+
+    // --overrides: JSON {opt_key: value, ...} oder @datei.json.
+    // Nach der Profil-Chain + --bed-type/--z-offset, damit der Nutzer
+    // alles ueberschreiben kann. Fehler explizit mit opt_key.
+    if (!args.overrides_json.empty()) {
+        std::string body;
+        if (args.overrides_json.size() > 1 && args.overrides_json[0] == '@') {
+            const std::string path = args.overrides_json.substr(1);
+            std::ifstream ifs(path);
+            if (!ifs) die("--overrides: cannot read file " + path);
+            std::stringstream ss; ss << ifs.rdbuf();
+            body = ss.str();
+        } else {
+            body = args.overrides_json;
+        }
+        json ov;
+        try {
+            ov = json::parse(body);
+        } catch (const std::exception& e) {
+            die(std::string("--overrides: invalid JSON: ") + e.what());
+        }
+        if (!ov.is_object())
+            die("--overrides: JSON must be an object { opt_key: value, ... }");
+        ConfigSubstitutionContext ctx{ForwardCompatibilitySubstitutionRule::Disable};
+        for (auto it = ov.begin(); it != ov.end(); ++it) {
+            const std::string key = it.key();
+            std::string value;
+            if (it.value().is_string())      value = it.value().get<std::string>();
+            else if (it.value().is_boolean()) value = it.value().get<bool>() ? "1" : "0";
+            else if (it.value().is_number_integer()) value = std::to_string(it.value().get<long long>());
+            else if (it.value().is_number())  value = std::to_string(it.value().get<double>());
+            else if (it.value().is_array())   value = it.value().dump(); // Vektor-Serialisierung roh
+            else die("--overrides: unsupported value type for key '" + key + "'");
+
+            // Nur Keys zulassen, die print_config_def kennt – alles andere ist
+            // ein Benutzerfehler und muss klar gemeldet werden.
+            const auto* opt_def = print_config_def.get(key);
+            if (!opt_def) {
+                die("--overrides: unknown option '" + key +
+                    "' (nicht in print_config_def enthalten)");
+            }
+            try {
+                if (!cfg.set_deserialize_nothrow(key, value, ctx)) {
+                    die("--overrides: '" + key + "' = '" + value +
+                        "' konnte nicht deserialisiert werden");
+                }
+            } catch (const Slic3r::ConfigurationError& e) {
+                die("--overrides: '" + key + "' = '" + value + "': " + e.what());
+            }
+        }
+        if (!args.quiet)
+            std::cerr << "applied " << ov.size() << " override(s)\n";
     }
 
     // 4. Modell laden (STL oder 3mf).
