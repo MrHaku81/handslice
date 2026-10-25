@@ -179,6 +179,43 @@ class AppLocalizationsEn extends AppLocalizations {
   String get printStatusUnknown => 'Unknown';
 
   @override
+  String get printPreflightNoUpload => 'Upload a G-code first.';
+
+  @override
+  String get printPreflightNotConnected => 'Printer not connected.';
+
+  @override
+  String get printPreflightBoundsFailed =>
+      'Bounds-check failed — see Project screen.';
+
+  @override
+  String printPreflightNotIdle(int status) {
+    return 'Printer is not idle (status=$status).';
+  }
+
+  @override
+  String printPreflightTrayEmpty(int slot) {
+    return 'Selected tray (A$slot) is empty.';
+  }
+
+  @override
+  String get printTimelapseUnknown =>
+      'Timelapse support unknown — flag omitted.';
+
+  @override
+  String get printReconnecting => 'Connection lost — reconnecting…';
+
+  @override
+  String printLayerProgress(int cur, int tot, int pct) {
+    return 'Layer $cur/$tot  ($pct%)';
+  }
+
+  @override
+  String printRemainingTime(String text) {
+    return 'Remaining ≈ $text';
+  }
+
+  @override
   String get settingsHeading => 'Settings';
 
   @override

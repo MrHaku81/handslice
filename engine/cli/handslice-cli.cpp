@@ -74,6 +74,11 @@ struct Args {
     // → btPTE (4), "B"/"smooth"/"hot" → btPEI (3). Siehe
     // docs/engine-integration.md "Bauplatten-Zuordnung".
     std::string bed_type;
+    // --z-offset <mm>, additiv zu allen Z-Koordinaten im G-Code.
+    // Orca-config-Variable `z_offset` (coFloat). Default 0. NaN = nicht
+    // gesetzt (fuer den Diff-Test M4c).
+    double z_offset = 0.0;
+    bool z_offset_set = false;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -129,6 +134,15 @@ Args parse_args(int argc, char** argv) {
             if (a.threads < 1) die("--threads must be >= 1");
         }
         else if (arg == "--bed-type") a.bed_type = need_val("--bed-type");
+        else if (arg == "--z-offset") {
+            const std::string v = need_val("--z-offset");
+            try {
+                a.z_offset = std::stod(v);
+                a.z_offset_set = true;
+            } catch (const std::exception&) {
+                die("--z-offset needs a float, got: " + v);
+            }
+        }
         else if (arg == "--help" || arg == "-h") { usage(std::cout); std::exit(0); }
         else if (!arg.empty() && arg[0] == '-') die("unknown flag: " + arg);
         else {
@@ -381,6 +395,13 @@ int main(int argc, char** argv) {
             }
         }
         cfg.set_key_value("curr_bed_type", new ConfigOptionEnum<BedType>(bt));
+    }
+
+    // --z-offset nach dem Chain-Load, damit der CLI-Wert die
+    // Profil-Default-0 ueberschreibt. Noch NICHT in der App
+    // verdrahtet (M4c-Nachweis).
+    if (args.z_offset_set) {
+        cfg.set_key_value("z_offset", new ConfigOptionFloat(args.z_offset));
     }
 
     // 4. Modell laden (STL oder 3mf).

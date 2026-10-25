@@ -182,6 +182,43 @@ class AppLocalizationsDe extends AppLocalizations {
   String get printStatusUnknown => 'Unbekannt';
 
   @override
+  String get printPreflightNoUpload => 'Zuerst einen G-Code hochladen.';
+
+  @override
+  String get printPreflightNotConnected => 'Drucker nicht verbunden.';
+
+  @override
+  String get printPreflightBoundsFailed =>
+      'Grenztest fehlgeschlagen – siehe Projekt-Bildschirm.';
+
+  @override
+  String printPreflightNotIdle(int status) {
+    return 'Drucker ist nicht im Leerlauf (status=$status).';
+  }
+
+  @override
+  String printPreflightTrayEmpty(int slot) {
+    return 'Gewähltes Fach (A$slot) ist leer.';
+  }
+
+  @override
+  String get printTimelapseUnknown =>
+      'Zeitraffer-Unterstützung unbekannt – Feld weggelassen.';
+
+  @override
+  String get printReconnecting => 'Verbindung verloren – wird neu aufgebaut…';
+
+  @override
+  String printLayerProgress(int cur, int tot, int pct) {
+    return 'Schicht $cur/$tot  ($pct %)';
+  }
+
+  @override
+  String printRemainingTime(String text) {
+    return 'Restzeit ≈ $text';
+  }
+
+  @override
   String get settingsHeading => 'Einstellungen';
 
   @override

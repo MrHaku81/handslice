@@ -69,6 +69,33 @@ class RemoteFile {
   final int sizeBytes;
 }
 
+// Ein Eintrag im slot_map-Array von method 1020. Form eins-zu-eins
+// aus elegoo-link cpp:85-96:
+//   { "t": <tool-index>, "canvas_id": <int>, "tray_id": <int> }
+class SlotMapEntry {
+  const SlotMapEntry({
+    required this.toolIndex,
+    required this.canvasId,
+    required this.trayId,
+  });
+  final int toolIndex;
+  final int canvasId;
+  final int trayId;
+
+  Map<String, dynamic> toJson() =>
+      {'t': toolIndex, 'canvas_id': canvasId, 'tray_id': trayId};
+}
+
+// Antwort auf method 1020 (Druckstart). `errorCode == 0` ist das in
+// unserem M3-Lauf beobachtete Erfolgs-Signal; weitere Felder haengen
+// an der Firmware und werden hier roh durchgereicht.
+class StartPrintResult {
+  const StartPrintResult({required this.errorCode, required this.raw});
+  final int errorCode;
+  final Map<String, dynamic> raw;
+  bool get ok => errorCode == 0;
+}
+
 typedef UploadProgress = void Function(int sent, int total);
 
 class ElegooCc2Client {
@@ -267,6 +294,61 @@ class ElegooCc2Client {
               sizeBytes: ((e['size'] ?? 0) as num).toInt(),
             ))
         .toList();
+  }
+
+  // Baut die method-1020-Payload. `delayVideo` nur mitsenden, wenn
+  // bekannt ist, ob der Drucker Zeitraffer unterstuetzt (`null` =
+  // Feld weglassen, wie "leaving the key out lets the printer decide"
+  // in CC2_PROTOCOL.md).
+  Map<String, dynamic> buildStartPrintPayload({
+    required String filename,
+    required bool bedlevelForce,
+    required bool printerCheck,
+    required bool? delayVideo,
+    required List<SlotMapEntry> slotMap,
+    String storageMedia = 'local',
+    String printLayout = 'A',
+  }) {
+    final cfg = <String, dynamic>{
+      'printer_check': printerCheck,
+      'print_layout': printLayout,
+      'bedlevel_force': bedlevelForce,
+      'slot_map': slotMap.map((e) => e.toJson()).toList(),
+    };
+    if (delayVideo != null) {
+      cfg['delay_video'] = delayVideo;
+    }
+    return {
+      'storage_media': storageMedia,
+      'filename': filename,
+      'config': cfg,
+    };
+  }
+
+  Future<StartPrintResult> startPrint({
+    required String filename,
+    required bool bedlevelForce,
+    required bool printerCheck,
+    required bool? delayVideo,
+    required List<SlotMapEntry> slotMap,
+    String storageMedia = 'local',
+    String printLayout = 'A',
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    final params = buildStartPrintPayload(
+      filename: filename,
+      bedlevelForce: bedlevelForce,
+      printerCheck: printerCheck,
+      delayVideo: delayVideo,
+      slotMap: slotMap,
+      storageMedia: storageMedia,
+      printLayout: printLayout,
+    );
+    final r = await _request(1020, params, timeout: timeout);
+    final result = (r['result'] ?? const <String, dynamic>{}) as Map;
+    final code = (result['error_code'] ?? -1) as int;
+    return StartPrintResult(errorCode: code,
+                            raw: Map<String, dynamic>.from(r as Map));
   }
 
   Future<void> ping() async {

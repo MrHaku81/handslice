@@ -8,6 +8,127 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 16:00 – Phase 3 M4: Druckstart + Live-Status in der App
+
+Code-Umfang + Nachweise – Claude Code sendet 1020 NICHT an den
+echten Drucker; den echten Druck startet Klaus selbst am Poco.
+
+### M4-R0 Beleg
+
+- `elegoo-link/.../elegoo_fdm_cc2_message_adapter.cpp:85-96` –
+  `slot_map`-Form `{t, canvas_id, tray_id}`, ein Eintrag pro Tool.
+- A1..A4 ↔ tray_id 0..3 aus unserem M3-CANVAS-Read bestaetigt
+  (A4 = tray_id 3).
+- `supportsTimeLapse` kommt im LAN-Pfad aus
+  `api_status.external_device.chassis_camera.configured == 1`
+  (`.../elegoo_fdm_cc2_message_adapter.cpp:1148-1163`), nicht aus
+  `GET_PRINTER_ATTRIBUTES` (dort beim CC2 bewusst nicht
+  ueberschrieben, Zeile 532-535). Konsequenz fuer die Dart-Logik:
+  `delay_video`-Feld wird nur gesendet, wenn die Capability
+  belegbar beobachtet wurde; sonst weggelassen (per
+  CC2_PROTOCOL.md: „leaving the key out lets the printer decide").
+
+### M4a Druckstart
+
+- `ElegooCc2Client.startPrint(filename, bedlevelForce, printerCheck,
+  delayVideo?, slotMap)` baut method 1020 feld-fuer-feld.
+- `PrinterState.printPreflight(boundsOk)` prueft **vor** dem Start:
+  no_upload → not_connected → bounds_failed → not_idle (aus 1002)
+  → tray_empty (CANVAS-Slot leer). Jede Sperre liefert einen
+  l10n-Key fuer die UI.
+- PING-Loop (10 s) wird in `connectAndLoad()` gestartet,
+  automatisch bei Reconnect neu abonniert.
+
+### M4b Status + Reconnect
+
+- `_mergeStatus()` nimmt sowohl 1002 (initial) als auch api_status-
+  Deltas (via `client.statusDeltas`) und mergt rekursiv in den
+  Live-State.
+- UI-Getter fuer `machine_status`, `print_status`, `heater_bed`,
+  `extruder`, `exception_status`, `chassis_camera.configured`
+  (fuer supportsTimelapse-Capability).
+- `remainingSeconds` wird aus `print_status.remaining_time_sec`
+  gelesen + lokal weitergezaehlt zwischen Updates. **Keine
+  Druckerzeitstempel** – die Druckeruhr lief in unserem Lauf
+  nachweislich ca. 1h 33min nach UTC.
+- Verbindungsabbruch → `_scheduleReconnect()` nach 5 s. **Der
+  laufende Druck am Drucker ist davon nicht betroffen**, der laeuft
+  komplett lokal; wir re-verbinden nur die Beobachter-Session und
+  re-abonnieren Status.
+- UI zeigt „Verbindung verloren – wird neu aufgebaut…"-Hinweis.
+
+### M4c Z-Offset-Nachweis (nicht scharf geschaltet)
+
+CLI minimal um `--z-offset <mm>` erweitert (nur Diagnostik, nicht
+in der App verdrahtet). Zweimal den Kerbenwuerfel gesliced:
+`z_offset=0.00` vs. `z_offset=0.05`.
+
+- **1196 Z-Zeilen verschoben um +0.05 mm**, bis auf 2 Werte mit
+  FP-Noise (0.050001, 0.04997).
+- **Erste Schicht** ebenfalls verschoben (`Z.2` → `Z.25`).
+- **Keine XY-/E-Divergenz** ausser dem bekannten TBB-Progress-
+  Reordering (3 M73-Zeilen).
+- **Start-G-Code (`CC2_START_GCODE`) hebt den Offset NICHT auf.**
+  `G1 Z0.5 F900` in Zeile 40 (Prime-Fahrt im `machine_start_gcode`)
+  ist in beiden Varianten identisch, weil das `Z0.5` absolut im
+  Macro-Text steht. Danach beginnt ab Zeile 81 der eigentliche
+  Druck mit korrektem Offset.
+
+Hinweis „nur gespeichert" bleibt in der UI, bis Klaus freigibt.
+
+### Tests + Build
+
+- 13 Widget-Tests gruen (`flutter test test/widget_test.dart`):
+  - method 1020 Payload-Feld-fuer-Feld-Vergleich mit dem
+    tatsaechlichen 1020 vom ersten echten Druck (storage_media,
+    filename, config.*, slot_map): identisch.
+  - delayVideo=null → `delay_video`-Feld fehlt (Capability unknown).
+  - printPreflight-Sperren (no_upload, bounds_failed).
+  - Plus die 10 Alt-Tests (Z-Offset, Bounds-Check, Plate-Toggle,
+    Slice-Darstellung, Pair-Dialog, …).
+- 5 Mock-Integration-Tests gruen inkl. neuem
+  „Mock: method 1020 startPrint liefert error_code=0".
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Druckstart-Payload wird byte-identisch zum tatsaechlichen 1020
+  vom ersten echten Druck gebaut – belegt durch Widget-Test.
+- Alle fuenf Pre-Flight-Sperren (no_upload, not_connected,
+  bounds_failed, not_idle, tray_empty) sind verdrahtet und
+  blockieren den Druck-Button in der UI.
+- Live-Status-Delta-Merge; Restzeit aus Dauer + lokale Fortschreibung
+  (nicht aus Druckeruhr). PING-Loop 10 s. Auto-Reconnect ohne
+  Impact auf den laufenden Druck.
+- `delay_video` wird nur gesendet, wenn die Capability aus
+  `external_device.chassis_camera.configured` belegbar ist.
+- Z-Offset-Nachweis: eindeutig, nur Z um 0.05 mm, auch Layer 1;
+  Start-G-Code hebt den Offset nicht auf.
+- `flutter test`: 18/18 gruen (13 Widget + 5 Mock).
+
+**2. Ungeprueft**
+
+- **Live-Lauf gegen den echten CC2.** Claude Code sendet 1020 nach
+  Vorgabe nicht; Klaus startet den eigentlichen Druck am Poco mit
+  Z-Offset 0 nach Sichtkontrolle.
+- **Status-Darstellung waehrend eines echten Drucks** – im Mock
+  antwortet 1020 mit error_code=0, aber danach pusht der Mock
+  keine „Printing"-Deltas. Reale Status-Transitionen (status=2 →
+  bed_mesh_detect=true → Layer 1 → …) werden erst im Live-Lauf
+  sichtbar.
+- **Keep-Alive-Timeout bei Netz-Abbruch mitten im Druck.**
+  Reconnect-Logik ist drin; Verhalten unter realem WLAN-Flap
+  nicht geprueft.
+
+**3. Geht nicht**
+
+- (keine neuen Blocker)
+
+---
+
 ## 2026-10-25 15:20 – Nebenaufgabe: method 1047 (DELETE_FILE) am CC2 gemessen
 
 Fuer upstream Issue

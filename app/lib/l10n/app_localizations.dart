@@ -422,6 +422,60 @@ abstract class AppLocalizations {
   /// **'Unknown'**
   String get printStatusUnknown;
 
+  /// No description provided for @printPreflightNoUpload.
+  ///
+  /// In en, this message translates to:
+  /// **'Upload a G-code first.'**
+  String get printPreflightNoUpload;
+
+  /// No description provided for @printPreflightNotConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer not connected.'**
+  String get printPreflightNotConnected;
+
+  /// No description provided for @printPreflightBoundsFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Bounds-check failed — see Project screen.'**
+  String get printPreflightBoundsFailed;
+
+  /// No description provided for @printPreflightNotIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer is not idle (status={status}).'**
+  String printPreflightNotIdle(int status);
+
+  /// No description provided for @printPreflightTrayEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected tray (A{slot}) is empty.'**
+  String printPreflightTrayEmpty(int slot);
+
+  /// No description provided for @printTimelapseUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Timelapse support unknown — flag omitted.'**
+  String get printTimelapseUnknown;
+
+  /// No description provided for @printReconnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection lost — reconnecting…'**
+  String get printReconnecting;
+
+  /// No description provided for @printLayerProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Layer {cur}/{tot}  ({pct}%)'**
+  String printLayerProgress(int cur, int tot, int pct);
+
+  /// No description provided for @printRemainingTime.
+  ///
+  /// In en, this message translates to:
+  /// **'Remaining ≈ {text}'**
+  String printRemainingTime(String text);
+
   /// No description provided for @settingsHeading.
   ///
   /// In en, this message translates to:

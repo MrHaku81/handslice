@@ -106,6 +106,31 @@ void main() {
     }
   }, timeout: const Timeout(Duration(seconds: 30)));
 
+  test('Mock: method 1020 startPrint liefert error_code=0 vom Mock',
+      () async {
+    await _startMock();
+    final c = _makeClient();
+    try {
+      final info = await c.discover('127.0.0.1');
+      await c.connect(ip: '127.0.0.1', sn: info.sn, accessCode: _accessCode);
+      // Mock antwortet auf 1020 generisch mit {"error_code": 0} (siehe
+      // mock_cc2.py – „nichts weiter als Druck simulieren").
+      final r = await c.startPrint(
+        filename: 'anything.gcode',
+        bedlevelForce: true,
+        printerCheck: true,
+        delayVideo: false,
+        slotMap: const [
+          SlotMapEntry(toolIndex: 0, canvasId: 0, trayId: 3),
+        ],
+      );
+      expect(r.ok, isTrue);
+      expect(r.errorCode, 0);
+    } finally {
+      await _stopMock();
+    }
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
   test('Mock: Upload-Abbruch nach N byte → ElegooUploadException', () async {
     // Mock schliesst die TCP-Verbindung nach 2 KiB → unser Client sieht
     // einen Socket-Fehler bzw. HTTP-End-Of-Stream.

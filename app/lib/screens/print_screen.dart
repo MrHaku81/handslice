@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../engine/slicer.dart';
@@ -9,8 +11,8 @@ import '../theme/workshop_theme.dart';
 import '../widgets/workshop_card.dart';
 import '../widgets/workshop_row.dart';
 
-// Drucken-Screen fuer M2: zeigt den Slice-Status aus dem ProjectState.
-// Upload / Druckstart kommen in M3/M4.
+// Drucken-Screen fuer M4: Slice-Metadaten, Switches, Upload-Button
+// (M3), Druck-Button (M4a) + Live-Status (M4b).
 class PrintScreen extends StatefulWidget {
   const PrintScreen({
     super.key,
@@ -30,19 +32,27 @@ class _PrintScreenState extends State<PrintScreen> {
   bool _printerCheck = true;
   bool _timelapse = false;
 
-  double? _uploadProgress; // 0..1 oder null
+  double? _uploadProgress;
   String? _uploadError;
   String? _uploadOk;
+
+  Timer? _tick;
 
   @override
   void initState() {
     super.initState();
     widget.projectState.addListener(_onStateChanged);
     widget.printerState.addListener(_onStateChanged);
+    // 1-Sekunden-Tick fuer Live-Restzeit-Rechnung (nicht aus
+    // Drucker-Absolutzeit).
+    _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && widget.printerState.isPrinting) setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _tick?.cancel();
     widget.projectState.removeListener(_onStateChanged);
     widget.printerState.removeListener(_onStateChanged);
     super.dispose();
@@ -60,7 +70,8 @@ class _PrintScreenState extends State<PrintScreen> {
       _uploadOk = null;
       _uploadProgress = 0;
     });
-    final remoteName = 'handslice_${DateTime.now().millisecondsSinceEpoch}.gcode';
+    final remoteName =
+        'handslice_${DateTime.now().millisecondsSinceEpoch}.gcode';
     final result = await widget.printerState.uploadGcode(
       gcodePath: slice.gcodePath,
       remoteName: remoteName,
@@ -80,11 +91,32 @@ class _PrintScreenState extends State<PrintScreen> {
     });
   }
 
+  Future<void> _startPrint() async {
+    final r = await widget.printerState.startPrint(
+      bedlevelForce: _bedlevelForce,
+      printerCheck: _printerCheck,
+      enableTimelapse: _timelapse,
+      boundsOk: widget.projectState.boundsOk,
+    );
+    if (!mounted || r == null) return;
+    // Reaktion auf das Ergebnis nur ueber den PrinterState (lastError)
+    // und den Live-Status; dieser Pfad zieht sich die Delta-Events
+    // automatisch nach.
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final slice = widget.projectState.lastSlice;
+    final printer = widget.printerState;
+
+    final preflightKey = printer.printPreflight(
+      boundsOk: widget.projectState.boundsOk,
+    );
+    final startEnabled = preflightKey == null &&
+        !printer.isPrinting &&
+        !printer.reconnecting;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
@@ -130,6 +162,15 @@ class _PrintScreenState extends State<PrintScreen> {
                   value: _timelapse,
                   onChanged: (v) => setState(() => _timelapse = v),
                 ),
+                if (printer.supportsTimelapse == null && _timelapse)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 6),
+                    child: Text(
+                      l.printTimelapseUnknown,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                          color: WorkshopTokens.textMuted),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -139,12 +180,21 @@ class _PrintScreenState extends State<PrintScreen> {
             _BoundsStatus(projectState: widget.projectState),
           ],
 
+          if (printer.reconnecting) ...[
+            const SizedBox(height: 12),
+            _InfoBox(
+              icon: Icons.wifi_tethering_off,
+              color: WorkshopTokens.textMuted,
+              message: l.printReconnecting,
+            ),
+          ],
+
           const SizedBox(height: 16),
           OutlinedButton.icon(
             onPressed: (slice == null ||
                     !widget.projectState.boundsOk ||
                     _uploadProgress != null ||
-                    widget.printerState.connection != CanvasConnection.connected)
+                    printer.connection != CanvasConnection.connected)
                 ? null
                 : _upload,
             icon: const Icon(Icons.upload_outlined),
@@ -156,87 +206,68 @@ class _PrintScreenState extends State<PrintScreen> {
           ],
           if (_uploadOk != null) ...[
             const SizedBox(height: 8),
-            _UploadResultBox(ok: true, message: _uploadOk!),
+            _InfoBox(
+              icon: Icons.check_circle_outline,
+              color: WorkshopTokens.accent,
+              message: _uploadOk!,
+            ),
           ],
           if (_uploadError != null) ...[
             const SizedBox(height: 8),
-            _UploadResultBox(ok: false, message: _uploadError!),
+            _InfoBox(
+              icon: Icons.error_outline,
+              color: const Color(0xFFFF6B6B),
+              message: _uploadError!,
+            ),
           ],
+
+          if (preflightKey != null) ...[
+            const SizedBox(height: 8),
+            _InfoBox(
+              icon: Icons.lock_outline,
+              color: WorkshopTokens.textMuted,
+              message: _preflightMessage(context, preflightKey, printer),
+            ),
+          ],
+
           const SizedBox(height: 8),
           FilledButton.icon(
-            // M4 verdrahtet den eigentlichen Druckstart. In M3 bleibt
-            // der Button deaktiviert – Klaus startet ab hier manuell.
-            onPressed: null,
+            onPressed: startEnabled ? _startPrint : null,
             icon: const Icon(Icons.play_arrow_outlined),
             label: Text(l.printStartButton),
           ),
+
+          const SizedBox(height: 20),
+          Text(l.printStatusHeading, style: theme.textTheme.titleMedium),
+          const SizedBox(height: 8),
+          _LiveStatus(printer: printer),
         ],
       ),
     );
   }
 }
 
-class _UploadResultBox extends StatelessWidget {
-  const _UploadResultBox({required this.ok, required this.message});
-  final bool ok;
-  final String message;
-  @override
-  Widget build(BuildContext context) {
-    final c = ok ? WorkshopTokens.accent : const Color(0xFFFF6B6B);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.12),
-        border: Border.all(color: c.withValues(alpha: 0.5)),
-        borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
-      ),
-      child: Row(children: [
-        Icon(ok ? Icons.check_circle_outline : Icons.error_outline,
-            color: c, size: 18),
-        const SizedBox(width: 10),
-        Expanded(child: Text(message, style: TextStyle(color: c))),
-      ]),
-    );
-  }
-}
-
-class _BoundsStatus extends StatelessWidget {
-  const _BoundsStatus({required this.projectState});
-
-  final ProjectState projectState;
-
-  @override
-  Widget build(BuildContext context) {
-    final l = AppLocalizations.of(context);
-    final violations = projectState.boundsViolations;
-    final ok = violations.isEmpty;
-    final color = ok ? WorkshopTokens.accent : const Color(0xFFFF6B6B);
-    final icon = ok ? Icons.check_circle_outline : Icons.error_outline;
-    final text = ok
-        ? l.printBoundsOk
-        : l.printBoundsFail(violations.length);
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
-        borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: color),
-          const SizedBox(width: 10),
-          Expanded(child: Text(text, style: TextStyle(color: color))),
-        ],
-      ),
-    );
+String _preflightMessage(
+    BuildContext context, String key, PrinterState printer) {
+  final l = AppLocalizations.of(context);
+  switch (key) {
+    case 'preflight.no_upload':
+      return l.printPreflightNoUpload;
+    case 'preflight.not_connected':
+      return l.printPreflightNotConnected;
+    case 'preflight.bounds_failed':
+      return l.printPreflightBoundsFailed;
+    case 'preflight.not_idle':
+      return l.printPreflightNotIdle(printer.machineStatus ?? -1);
+    case 'preflight.tray_empty':
+      return l.printPreflightTrayEmpty(printer.trayAssignmentForTool0 + 1);
+    default:
+      return key;
   }
 }
 
 class _SliceDetails extends StatelessWidget {
   const _SliceDetails({required this.slice});
-
   final SliceResult slice;
 
   @override
@@ -246,23 +277,11 @@ class _SliceDetails extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          WorkshopRow(
-            label: l.printFileLabel,
-            value: slice.gcodePath.split('/').last,
-            mono: true,
-          ),
+          WorkshopRow(label: l.printFileLabel, value: slice.gcodePath.split('/').last, mono: true),
           const Divider(),
-          WorkshopRow(
-            label: l.printSizeLabel,
-            value: '${slice.sizeBytes} B',
-            mono: true,
-          ),
+          WorkshopRow(label: l.printSizeLabel, value: '${slice.sizeBytes} B', mono: true),
           const Divider(),
-          WorkshopRow(
-            label: l.printTimeLabel,
-            value: slice.estimatedTimeFmt,
-            mono: true,
-          ),
+          WorkshopRow(label: l.printTimeLabel, value: slice.estimatedTimeFmt, mono: true),
           const Divider(),
           WorkshopRow(
             label: l.printFilamentLabel,
@@ -276,9 +295,114 @@ class _SliceDetails extends StatelessWidget {
   }
 }
 
-class _ToggleRow extends StatelessWidget {
-  const _ToggleRow({required this.label, required this.value, required this.onChanged});
+class _BoundsStatus extends StatelessWidget {
+  const _BoundsStatus({required this.projectState});
+  final ProjectState projectState;
 
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final v = projectState.boundsViolations;
+    final ok = v.isEmpty;
+    final color = ok ? WorkshopTokens.accent : const Color(0xFFFF6B6B);
+    return _InfoBox(
+      icon: ok ? Icons.check_circle_outline : Icons.error_outline,
+      color: color,
+      message: ok ? l.printBoundsOk : l.printBoundsFail(v.length),
+    );
+  }
+}
+
+class _LiveStatus extends StatelessWidget {
+  const _LiveStatus({required this.printer});
+  final PrinterState printer;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final s = printer.machineStatus;
+    final stateText = switch (s) {
+      null => l.printStatusUnknown,
+      PrinterState.statusIdle => l.printStatusIdle,
+      _ => l.printStatusPrinting, // weitere Codes: hier generisch
+    };
+    return WorkshopCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          WorkshopRow(
+            label: 'machine_status.status',
+            value: '${s ?? '-'} — $stateText',
+            mono: true,
+          ),
+          if (printer.currentLayer != null && printer.totalLayer != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                l.printLayerProgress(
+                  printer.currentLayer ?? 0,
+                  printer.totalLayer ?? 0,
+                  printer.printProgress ?? 0,
+                ),
+                style: monoStyle(context, fontSize: 13),
+              ),
+            ),
+          if (printer.printProgress != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: LinearProgressIndicator(
+                value: (printer.printProgress ?? 0) / 100.0,
+              ),
+            ),
+          const Divider(),
+          WorkshopRow(
+            label: 'heater_bed',
+            value:
+                '${printer.bedTemperature ?? '-'} / ${printer.bedTarget ?? '-'} °C',
+            mono: true,
+          ),
+          const Divider(),
+          WorkshopRow(
+            label: 'extruder',
+            value:
+                '${printer.nozzleTemperature ?? '-'} / ${printer.nozzleTarget ?? '-'} °C',
+            mono: true,
+          ),
+          if (printer.remainingSeconds != null) ...[
+            const Divider(),
+            WorkshopRow(
+              label: l.printRemainingTime(_fmtDuration(printer.remainingSeconds!)),
+              value: '',
+            ),
+          ],
+          if (printer.exceptionStatus != null &&
+              printer.exceptionStatus!.isNotEmpty) ...[
+            const Divider(),
+            WorkshopRow(
+              label: 'exception_status',
+              value: printer.exceptionStatus.toString(),
+              mono: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+String _fmtDuration(int seconds) {
+  final s = seconds.clamp(0, 365 * 24 * 3600);
+  final h = s ~/ 3600;
+  final m = (s % 3600) ~/ 60;
+  final sec = s % 60;
+  if (h > 0) return '${h}h ${m.toString().padLeft(2, '0')}m';
+  if (m > 0) return '${m}m ${sec.toString().padLeft(2, '0')}s';
+  return '${sec}s';
+}
+
+class _ToggleRow extends StatelessWidget {
+  const _ToggleRow(
+      {required this.label, required this.value, required this.onChanged});
   final String label;
   final bool value;
   final ValueChanged<bool> onChanged;
@@ -296,6 +420,33 @@ class _ToggleRow extends StatelessWidget {
             Switch(value: value, onChanged: onChanged),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _InfoBox extends StatelessWidget {
+  const _InfoBox({required this.icon, required this.color, required this.message});
+  final IconData icon;
+  final Color color;
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 10),
+          Expanded(child: Text(message, style: TextStyle(color: color))),
+        ],
       ),
     );
   }
