@@ -8,6 +8,100 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 15:20 – Nebenaufgabe: method 1047 (DELETE_FILE) am CC2 gemessen
+
+Fuer upstream Issue
+[danielcherubini/elegoo-homeassistant#432](https://github.com/danielcherubini/elegoo-homeassistant/issues/432).
+
+### Beleg Parameter-Struktur (nicht geraten)
+
+- `CC2_PROTOCOL.md` zeigt Request `{"id","method":1047,"params":{"storage_media":"local","filename":"..."}}`,
+  markiert als „Untested, no response captured".
+- `custom_components/elegoo_printer/cc2/client.py:2577-2644`
+  (`async def delete_file`) sendet exakt diesen Payload.
+- `elegoo-link/src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:1411`:
+  `// {MethodType::DELETE_FILE, 1047}` **auskommentiert**.
+- Volltext-grep im ganzen elegoo-link-Repo (243 Dateien): keine
+  aktive `deleteFile(...)`-Signatur, kein `DeleteFileParams`,
+  kein HTTP DELETE. ElegooSlicer loescht am CC2 nach aktuellem
+  main-Stand **nichts** aus dem LAN. Parameter-Struktur ist damit
+  eindeutig als `{storage_media, filename}` belegt – keine zweite,
+  abweichende Form im Code.
+
+### Was gemessen wurde
+
+- D-1: `method 1044 local` → 23 `.gcode`, 0 Videos. `sdcard` + `udisk`
+  je 0. Entry-Struktur anonymisiert in docs/networking-cc2.md
+  festgehalten.
+- D-2: Harmlose Test-G-Code-Datei `handslice_delete_test_<ts>.gcode`
+  (182 B, nur Kommentare) hochgeladen, Liste 23 → 24, Testdatei
+  genau 1× sichtbar. Klaus hat am Display bestaetigt.
+- D-3: `method 1047` fuer genau diese eine Datei:
+  **Firmware antwortet nach 13 ms mit `error_code=1003`,
+  Datei wird NICHT geloescht.** Alle anderen Dateien unveraendert
+  (name-hash-Vergleich pre/post).
+- D-4: `method 1047` fuer einen definitiv nicht existierenden Namen:
+  identische Antwort `error_code=1003`, 10 ms, Liste 24/24.
+
+### Deutung (bewusst als Vermutung formuliert)
+
+Dieselbe Firmware liefert `error_code=1003` auch fuer `method 1045`
+(frueher gemessen) und einige andere nicht implementierte
+Methoden. **Vermutung**, nicht Doku-Aussage: `1003` ist der
+generische „not available / not implemented in this firmware"-Code
+auf 02.01.01.07. 1047 ist auf dieser Firmware vermutlich nicht
+aktiv – entsprechend passt der HA-Integration-Code bereits mit „0
+= did not refuse, nicht beweis fuer deletion; re-list via 1044".
+
+### Was Klaus noch tun muss
+
+- Testdatei `handslice_delete_test_<ts>.gcode` liegt noch im local-
+  Speicher des Druckers (1047 hat sie nicht geloescht). Loeschen
+  entweder am Display, oder sie bleibt bis zur naechsten Firmware
+  mit funktionierendem 1047.
+- Issue-Kommentar-Entwurf unter
+  `docs/upstream/elegoo-homeassistant-issue-432-draft.md`. Enthaelt
+  einen `<TODO>` fuer Klaus' spezifischen Hinweis zur Druckeruhr
+  (die Briefing-Nachricht war an der Stelle abgeschnitten).
+  Observed: `create_time`-Feld in `method 1046` liefert einen
+  Unix-Timestamp, der heute ca. 1 h 33 min hinter der realen UTC
+  liegt – aber ohne Klaus' Zusatz formuliere ich das nicht als
+  Befund.
+
+---
+
+### Abschlussbericht (Rubriken nach CLAUDE.md §4)
+
+**1. Nachweislich funktioniert**
+
+- Parameter-Struktur von `method 1047` eindeutig als
+  `{storage_media, filename}` belegt (zwei Quellen).
+- Testlauf an echter Hardware: `method 1047` liefert
+  `error_code=1003` sowohl fuer existente als auch nicht-existente
+  Dateinamen; Dateiliste bleibt unveraendert.
+- Vor-/Nach-Vergleich der Dateiliste per Hash – alle anderen
+  Dateien unberuehrt.
+- Rohantworten + Pre-/Post-Snapshots anonymisiert in
+  docs/networking-cc2.md eingetragen (keine SN, IP, Access-Code
+  oder Account-IDs).
+- Issue-Kommentar-Entwurf in docs/upstream/.
+
+**2. Ungeprueft**
+
+- **1003 ≡ „not implemented"** bleibt eine Vermutung, nicht Doku –
+  Elegoo veroeffentlicht kein error-code-Mapping; die
+  HA-Integration deutet 1007 als FILE_DELETE_FAILED, nicht 1003.
+- Testdatei am Drucker noch da (siehe oben); Loeschung durch Klaus.
+
+**3. Geht nicht**
+
+- **method 1047 funktional auf Firmware 02.01.01.07.** Die Firmware
+  antwortet, aber loescht nichts. Kein Blocker fuer das Projekt –
+  die App-UI wird in Phase 2+ ohnehin `cleanup_files` nicht
+  anbieten, solange die Firmware das nicht sauber macht.
+
+---
+
 ## 2026-10-25 15:00 – Fix: Pair-Dialog-Crash + Build-Info im Header + SN-Scrub
 
 Klaus hat beim ersten Live-Lauf (Commit 828ff96) auf dem Poco

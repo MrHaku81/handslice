@@ -968,6 +968,104 @@ VPN einrichten koennen oder wollen. In der App:
 Reihenfolge in `docs/roadmap.md` Phase 2: **LAN (MVP) → VPN
 (Doku, kein Code) → Cloud-Modul (nach MVP)**.
 
+### Nachweislauf 2026-10-25: method 1047 DELETE_FILE am echten CC2
+
+Fuer upstream Issue
+[danielcherubini/elegoo-homeassistant#432](https://github.com/danielcherubini/elegoo-homeassistant/issues/432)
+gemessen. Firmware OTA 02.01.01.07, MCU/SOC-Version leer (wie bisher).
+
+**Parameter-Beleg** (nicht geraten):
+
+- `danielcherubini/elegoo-homeassistant/docs/CC2_PROTOCOL.md`
+  Abschnitt „method 1047 (DELETE_FILE)" –
+  Request `{"id":<int>,"method":1047,"params":{"storage_media":"local","filename":"<name>"}}`
+  dokumentiert, Response explizit **nicht** dokumentiert (markiert
+  als „Untested, no response captured").
+- `danielcherubini/elegoo-homeassistant/custom_components/elegoo_printer/cc2/client.py:2577-2644`
+  (`async def delete_file`) – sendet exakt diese Payload, Default
+  `storage_media="local"`.
+- `ELEGOO-3D/elegoo-link/src/lan/adapters/elegoo_fdm_cc2/elegoo_fdm_cc2_message_adapter.cpp:1411` –
+  `// {MethodType::DELETE_FILE, 1047}` **auskommentiert**.
+- `ELEGOO-3D/elegoo-link/src/lan/adapters/elegoo_fdm_cc/elegoo_fdm_cc_message_adapter.cpp:994` –
+  CC1-Opcode fuer DELETE_FILE waere `259`, ebenfalls auskommentiert.
+- Volltext-grep im gesamten elegoo-link-Repo (243 .cpp/.h-Dateien):
+  **keine** aktive `deleteFile(...)`-Signatur, kein `DeleteFileParams`,
+  kein HTTP `DELETE`. ElegooSlicer selbst loescht am CC2 nach aktuellem
+  main-Stand **nichts** aus dem LAN.
+
+**D-3 Lauf gegen die eine selbst hochgeladene Testdatei:**
+
+```
+PUB  elegoo/<cc2-sn>/<cid>/api_request
+  {"id":<rid>,"method":1047,"params":{"storage_media":"local",
+                                      "filename":"handslice_delete_test_<ts>.gcode"}}
+
+RX   elegoo/<cc2-sn>/<cid>/api_response  (13 ms)
+  {"id":<rid>,"method":1047,"result":{"error_code":1003}}
+```
+
+Vorher: 24 Dateien in `local`, Testdatei genau 1× sichtbar.
+Nachher: 24 Dateien in `local`, Testdatei **weiterhin da**, alle
+anderen Dateien unveraendert. Klaus hat am Display bestaetigt, dass
+die Testdatei nach dem Request weiterhin sichtbar war.
+
+**D-4 Lauf gegen einen definitiv nicht existierenden Namen:**
+
+```
+PUB  method=1047 params={"storage_media":"local",
+                         "filename":"handslice_does_not_exist_<ts>.gcode"}
+RX   (10 ms) {"id":<rid>,"method":1047,"result":{"error_code":1003}}
+```
+
+Liste 24/24 identisch.
+
+**Deutung** (Vermutung, nicht Befund):
+
+Firmware OTA 02.01.01.07 antwortet auf `method 1047` immer sofort mit
+`error_code=1003`, unabhaengig davon, ob die Datei existiert, und
+loescht in keinem Fall. Derselbe `error_code=1003` kam frueher
+schon zurueck fuer `method 1045` (`GET_FILE_THUMBNAIL`,
+anfang M3-Lauf) sowie fuer `method 1045` mit `storage_media="local"`
+ohne filename. `1003` scheint demnach ein generisches „not available
+/ not implemented in this firmware" zu sein – aber das ist eine
+**Vermutung**, keine Doku-Aussage.
+
+Die HA-Integration-Semantik aus `cc2/client.py:2588-2592` passt zum
+Befund: „`0` means printer did not refuse, not proof of deletion;
+caller re-lists via method 1044". In diesem Lauf laufen die
+Zuordnungen gegen die Erwartung – der Drucker refusiert mit 1003,
+und das Re-Listing bestaetigt, dass nichts geloescht wurde.
+
+### 1044-Dateiliste-Struktur (am realen Geraet gesehen)
+
+Pro Eintrag (anonymisiert):
+
+```
+{"color_map":[{"color":"#F2754E","name":"PLA","t":0}],
+ "create_time": 1792932614,
+ "filename": "<redacted>",
+ "last_print_time": 0,
+ "layer": 100,
+ "print_time": 565,
+ "size": 220261,
+ "total_filament_used": 3.52,
+ "total_print_times": 0,
+ "type": "file"}
+```
+
+`type: "file"` beobachtet; `"folder"` haben wir frueher bei
+`storage_media="udisk"` gesehen (Verzeichnis `Filme`).
+
+Bekannte `storage_media`-Werte (aus
+`elegoo_fdm_cc2_http_transfer.cpp:431-473`, nicht geraten):
+`"local"`, `"sdcard"`, `"udisk"`. In diesem Lauf: `local` = 23
+`.gcode`-Dateien (+ Testdatei), `sdcard` + `udisk` jeweils 0.
+**Keine Videos in der 1044-Liste**, obwohl Klaus zwei Zeitraffer-
+Aufnahmen am Display sieht – bestaetigt die bisherige Feststellung,
+dass Zeitraffer-Dateien nicht ueber die MQTT-Dateiliste exposiert
+werden (siehe Abschnitt „Code-Recherche 2026-10-25 10:35:
+Zeitraffer-Download-Pfad nicht belegt").
+
 ### Zusammenfassung des Pfads (nach erfolgreichem Handshake)
 
 Zum spaeteren Nachbau in Dart:
