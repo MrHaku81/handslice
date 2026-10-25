@@ -159,14 +159,16 @@ class _PrintScreenState extends State<PrintScreen> {
                 const Divider(),
                 _ToggleRow(
                   label: l.printTimelapse,
-                  value: _timelapse,
-                  onChanged: (v) => setState(() => _timelapse = v),
+                  value: _timelapse && printer.supportsTimelapse,
+                  onChanged: printer.supportsTimelapse
+                      ? (v) => setState(() => _timelapse = v)
+                      : null,
                 ),
-                if (printer.supportsTimelapse == null && _timelapse)
+                if (!printer.supportsTimelapse)
                   Padding(
                     padding: const EdgeInsets.only(top: 4, bottom: 6),
                     child: Text(
-                      l.printTimelapseUnknown,
+                      l.printTimelapseNotSupported,
                       style: theme.textTheme.bodySmall?.copyWith(
                           color: WorkshopTokens.textMuted),
                     ),
@@ -331,9 +333,8 @@ class _LiveStatus extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           WorkshopRow(
-            label: 'machine_status.status',
-            value: '${s ?? '-'} — $stateText',
-            mono: true,
+            label: l.printStatusLabel,
+            value: stateText,
           ),
           if (printer.currentLayer != null && printer.totalLayer != null)
             Padding(
@@ -356,16 +357,20 @@ class _LiveStatus extends StatelessWidget {
             ),
           const Divider(),
           WorkshopRow(
-            label: 'heater_bed',
-            value:
-                '${printer.bedTemperature ?? '-'} / ${printer.bedTarget ?? '-'} °C',
+            label: l.printBedLabel,
+            value: l.printTempFormat(
+              _fmtTemp(printer.bedTemperature),
+              _fmtTemp(printer.bedTarget),
+            ),
             mono: true,
           ),
           const Divider(),
           WorkshopRow(
-            label: 'extruder',
-            value:
-                '${printer.nozzleTemperature ?? '-'} / ${printer.nozzleTarget ?? '-'} °C',
+            label: l.printNozzleLabel,
+            value: l.printTempFormat(
+              _fmtTemp(printer.nozzleTemperature),
+              _fmtTemp(printer.nozzleTarget),
+            ),
             mono: true,
           ),
           if (printer.remainingSeconds != null) ...[
@@ -379,7 +384,7 @@ class _LiveStatus extends StatelessWidget {
               printer.exceptionStatus!.isNotEmpty) ...[
             const Divider(),
             WorkshopRow(
-              label: 'exception_status',
+              label: l.printExceptionLabel,
               value: printer.exceptionStatus.toString(),
               mono: true,
             ),
@@ -389,6 +394,9 @@ class _LiveStatus extends StatelessWidget {
     );
   }
 }
+
+String _fmtTemp(num? v) =>
+    v == null ? '—' : (v is int ? '$v' : v.toStringAsFixed(0));
 
 String _fmtDuration(int seconds) {
   final s = seconds.clamp(0, 365 * 24 * 3600);
@@ -405,18 +413,28 @@ class _ToggleRow extends StatelessWidget {
       {required this.label, required this.value, required this.onChanged});
   final String label;
   final bool value;
-  final ValueChanged<bool> onChanged;
+  // onChanged == null → Zeile deaktiviert (etwa wenn der Drucker keine
+  // Kamera meldet und Zeitraffer gesperrt ist).
+  final ValueChanged<bool>? onChanged;
 
   @override
   Widget build(BuildContext context) {
+    final enabled = onChanged != null;
     return InkWell(
-      onTap: () => onChanged(!value),
+      onTap: enabled ? () => onChanged!(!value) : null,
       borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
         child: Row(
           children: [
-            Expanded(child: Text(label, style: Theme.of(context).textTheme.bodyMedium)),
+            Expanded(
+              child: Text(
+                label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color:
+                        enabled ? null : WorkshopTokens.textMuted),
+              ),
+            ),
             Switch(value: value, onChanged: onChanged),
           ],
         ),

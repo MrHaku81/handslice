@@ -81,6 +81,7 @@ class ProjectState extends ChangeNotifier {
         modelPath: _modelPath!,
         bedType: _bedType,
         outputPath: outputPath,
+        zOffsetMm: zOffsetFor(_bedType),
       );
       _lastSlice = r;
       // Grenztest sofort nach dem Slice. Uploads werden spaeter

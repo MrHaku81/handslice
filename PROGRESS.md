@@ -8,6 +8,160 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-25 16:40 – Erster echter Druck aus der App (Commit 2b4fc1a)
+
+- Klaus hat am Poco den ersten echten Druck aus der App ausgelöst:
+  Seite A (Strukturiert), Z-Offset 0, Fach A4, PLA. Druckstart,
+  Live-Status (Zustand, Progress, Layer-Zähler, Temperaturen) und
+  Fortschrittsgefuehl in der App funktionieren; der Wuerfel ist am
+  Drucker visuell einwandfrei herausgekommen.
+- Damit ist das Phase-3-Erfolgskriterium „Slicen auf dem Geraet und
+  Drucken ueber LAN mit Live-Status" erstmals end-to-end erfuellt.
+
+### Beim Realdruck aufgefallene Befunde (M5-Agenda)
+
+1. Pair-Dialog: Vorbelegtes Adressfeld bekam den **Modellnamen**
+   („Elegoo CC2 Combo") statt der IP → „Invalid internet address"
+   beim Verbinden. Klaus hat die IP manuell eingetragen, danach lief
+   es. Dialog muss IP/Hostname halten und beim Speichern pruefen.
+2. Fortschritt in Prozent bleibt in der App stehen, waehrend der
+   Schichtzaehler mitlaeuft. Am Drucker lief der Prozentwert normal.
+   Richtiges Feld aus echtem 1002-Snapshot belegen.
+3. Zeitraffer meldet „Unterstuetzung unbekannt – Feld weggelassen",
+   obwohl der CC2 (FW 02.01.01.07) belegbar Zeitraffer kann (eigener
+   delay_video=true-Test). Fehlendes Capability-Feld muss als
+   „unterstuetzt" gelten (Model-Default fuer diesen CC2), nur ein
+   ausdrueckliches `configured=0` sperrt.
+4. Statusanzeige zeigt Rohschluessel (`machine_status.status`,
+   `heater_bed`, `extruder`) statt Zustand/Bett/Duese. Lokalisieren.
+5. Z-Offset: Nachweis aus M4c erbracht. Gespeicherten Wert der
+   gewaehlten Seite beim Slicen anwenden. Hinweis „nur gespeichert"
+   wird zu „wird beim Slicen angewendet". Nachweis: Seite B +0.02
+   verschiebt G-Code, Seite A 0 bleibt unveraendert.
+
+Bericht zur Bearbeitung der Befunde folgt als Phase-3-M5-Eintrag.
+
+---
+
+## 2026-10-25 17:10 – Phase 3 M5: 5 Befunde aus dem Erstdruck behoben
+
+### Befund 1 – Pair-Dialog: Modellname im Adressfeld
+
+- **Ursache:** keine Validierung im `_PairDialog.submit()`. Was im IP-
+  Feld stand (OS-/IME-Autofill, altes `prefs['printer.cc2.ip']`), wurde
+  ungeprueft in SharedPreferences geschrieben. Beim naechsten Verbinden
+  reichte das als Host an `InternetAddress()` – „Invalid internet
+  address".
+- **Fix (`app/lib/widgets/printer_panel.dart`):**
+  - `_looksLikeHost()` prueft IPv4 (vier Oktette 0–255) oder Hostname-
+    Label-Kette (RFC 1123, vereinfacht).
+  - Save-Button bleibt disabled, solange die IP ungueltig oder der Code
+    leer ist; Fehlertext inline unter dem IP-Feld.
+  - Autofill-/Suggestions-Hinweise an die Tastatur ausgeschaltet
+    (`autocorrect:false`, `enableSuggestions:false`, leere
+    `autofillHints`).
+  - Vorbelegung aus `widget.initialIp` wird nur uebernommen, wenn sie
+    selbst wie IP/Hostname aussieht – ein Mist-Wert in prefs faelscht
+    das Feld nicht mehr.
+- **Nachweis:** 2 neue Widget-Tests in `app/test/widget_test.dart`:
+  - „Save bleibt gesperrt bei Modellname statt IP" – gibt genau
+    `Elegoo CC2 Combo` ein, erwartet Fehlertext + Button-disabled.
+  - „Vorbelegung ignoriert Modellname aus prefs" – startet mit
+    vergiftetem Pref-Wert, Dialog oeffnet mit leerem Feld.
+
+### Befund 2 – Fortschritt in % bleibt stehen
+
+- **Ursache:** `PrinterState.printProgress` las `print_status.progress`.
+  Beim Realdruck 09:18 wandert dieses Feld nicht gleichmaessig mit;
+  `current_layer`/`total_layer` sind die zuverlaessige Fortschritts-
+  Quelle (siehe docs/networking-cc2.md Nachweislauf).
+- **Fix (`app/lib/state/printer_state.dart`):**
+  ```
+  int? get printProgress {
+    final cl = currentLayer; final tl = totalLayer;
+    if (cl != null && tl != null && tl > 0) {
+      return ((cl * 100) / tl).round().clamp(0, 100);
+    }
+    return _getInt(['print_status', 'progress']); // Fallback
+  }
+  ```
+- **Nachweis:** 2 neue Unit-Tests – aus `current=25,total=100` kommt
+  25 %, auch wenn `progress=0` gleichzeitig gepusht wird. Fallback-Pfad
+  bleibt getestet.
+
+### Befund 3 – Zeitraffer-Capability
+
+- **Ursache:** `supportsTimelapse` lieferte `null` bei fehlendem
+  `external_device.chassis_camera.configured`. UI zeigte dann
+  „Unterstuetzung unbekannt – Feld weggelassen". Fuer den CC2 ist
+  Zeitraffer aber belegbar (docs/networking-cc2.md 2026-10-25 10:30:
+  `delay_video=true` wirkt, Klaus hat das Video am Drucker gesehen).
+- **Fix:** `supportsTimelapse` ist jetzt `bool`:
+  - `configured == 1` → `true`
+  - `configured == 0` → `false` (Schalter gesperrt, Hinweis
+    „Dieser Drucker meldet keine Kamera – Zeitraffer deaktiviert")
+  - Feld fehlt → `true` als CC2-Modell-Default (Beleg s. o.)
+- Im Druckstart wird `delay_video` jetzt immer gesendet (true oder
+  false), nicht mehr weggelassen.
+- **Nachweis:** 3 neue Tests – jeder der drei Faelle einzeln.
+
+### Befund 4 – Status-Beschriftungen lokalisiert
+
+- **Fix:** `_LiveStatus` zeigt jetzt lokalisierte Labels statt
+  Rohschluessel. Neue ARB-Keys in `app/lib/l10n/app_en.arb` + `_de.arb`:
+  - `printStatusLabel` – State / Zustand
+  - `printBedLabel` – Bed / Bett
+  - `printNozzleLabel` – Nozzle / Düse
+  - `printExceptionLabel` – Printer alarms / Drucker-Alarme
+  - `printTempFormat` – `{cur} / {tgt} °C` (lokalisiertes Grad-Format)
+- Numerische Statusanzeige („2 — Printing") durch reinen lokalisierten
+  Zustandstext ersetzt.
+- **Nachweis:** Widget-Test „PrintScreen: Status-Labels sind
+  lokalisiert" – findet State/Bed/Nozzle, verifiziert, dass
+  `machine_status.status`, `heater_bed`, `extruder` nicht mehr im UI
+  stehen.
+
+### Befund 5 – Z-Offset scharf schalten
+
+- **Fix:**
+  - `SlicerService.slice(zOffsetMm: ...)` reicht den Wert als
+    `--z-offset <mm>` an `handslice-cli` durch (nur wenn ≠ 0, haelt
+    die CLI-Zeile sauber).
+  - `ProjectState.slice()` nimmt automatisch den gespeicherten
+    `zOffsetFor(_bedType)` fuer die aktive Plattenseite.
+  - UI-Hinweistexte aktualisiert: „Z-Offset pro Seite (wird beim
+    Slicen angewendet)" / „±0,50 mm, Schritte 0,01 mm — wird beim
+    Slicen angewendet".
+- **Nachweis G-Code-Vergleich (handslice-cli-x86, Kerbenwuerfel):**
+  ```
+  Seite A, baseline  vs  Seite A, --z-offset 0.000
+    → 1220/1220 Z-Zeilen identisch; nur Zeitstempel-Header differiert.
+    → "wird nicht angewendet, wenn 0" belegt.
+
+  Seite B, baseline  vs  Seite B, --z-offset 0.020
+    → 1218/1220 Z-Zeilen exakt um +0.020 verschoben.
+    → 2 Zeilen unveraendert = `G1 Z0.5` aus CC2_START_GCODE-Macro
+      (absolut im Start-Macro, nicht durch Offset beeinflusst –
+      exakt wie M4c vorhergesagt).
+    → Erste Schicht ebenfalls verschoben: 0.2 → 0.22, 0.4 → 0.42,
+      0.457143 → 0.477143.
+    → "wird beim Slicen angewendet" belegt.
+  ```
+- **Nachweis Dart-Pfad:** Widget-Test „ProjectState.slice uebergibt
+  zOffsetMm an den Slicer" – prueft, dass der gespeicherte Wert pro
+  Plattenseite byte-exakt am Slicer-Call ankommt.
+
+### Tests + Build
+
+- `flutter test test/widget_test.dart` 22/22 gruen (vorher 13; +9 neue
+  Tests fuer M5).
+- `flutter analyze` 0 Fehler (1 info in `elegoo_mock_test.dart`:
+  `dart:async`-Re-Import, nicht blockierend).
+- APK neu gebaut + auf Poco X3 Pro installiert; Badge zeigt den M5-
+  Commit (siehe Nachweis unten im Abschluss-Bericht).
+
+---
+
 ## 2026-10-25 16:00 – Phase 3 M4: Druckstart + Live-Status in der App
 
 Code-Umfang + Nachweise – Claude Code sendet 1020 NICHT an den

@@ -238,16 +238,27 @@ class _PairDialog extends StatefulWidget {
 class _PairDialogState extends State<_PairDialog> {
   late final TextEditingController _ip;
   late final TextEditingController _code;
+  String? _ipError;
 
   @override
   void initState() {
     super.initState();
-    _ip = TextEditingController(text: widget.initialIp);
+    // Vorbelegung nur uebernehmen, wenn sie wie eine IP/Hostname aussieht.
+    // Realfall 2026-10-25: ein frueherer Lauf hatte den Modellnamen
+    // ("Elegoo CC2 Combo") im Feld – Validierung muss das jetzt erkennen,
+    // sowohl beim Oeffnen (keine Mist-Vorbelegung) als auch beim Speichern.
+    _ip = TextEditingController(
+      text: _looksLikeHost(widget.initialIp) ? widget.initialIp : '',
+    );
     _code = TextEditingController();
+    _ip.addListener(_revalidate);
+    _code.addListener(_revalidate);
   }
 
   @override
   void dispose() {
+    _ip.removeListener(_revalidate);
+    _code.removeListener(_revalidate);
     // Wird gerufen, nachdem die Pop-Animation durch ist – die TextField-
     // Elements sind dann vollstaendig unmounted. Keine _dependents mehr.
     _ip.dispose();
@@ -255,7 +266,20 @@ class _PairDialogState extends State<_PairDialog> {
     super.dispose();
   }
 
+  bool get _ipValid => _looksLikeHost(_ip.text.trim());
+  bool get _canSave => _ipValid && _code.text.isNotEmpty;
+
+  void _revalidate() {
+    // Bei jeder Eingabeaenderung rebuilden – sowohl Fehlertext als
+    // auch Save-Button-Zustand haengen davon ab.
+    if (!mounted) return;
+    setState(() {
+      _ipError = (_ip.text.isNotEmpty && !_ipValid) ? 'invalid' : null;
+    });
+  }
+
   void _submit() {
+    if (!_canSave) return;
     Navigator.pop(
       context,
       PairResult(ip: _ip.text.trim(), code: _code.text),
@@ -265,6 +289,8 @@ class _PairDialogState extends State<_PairDialog> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final errorText =
+        _ipError == null ? null : l.pairDialogIpInvalid;
     return AlertDialog(
       title: Text(l.pairDialogTitle),
       content: Column(
@@ -275,13 +301,22 @@ class _PairDialogState extends State<_PairDialog> {
             autofocus: true,
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.next,
-            decoration: InputDecoration(labelText: l.pairDialogIp),
+            autocorrect: false,
+            enableSuggestions: false,
+            autofillHints: const <String>[],
+            decoration: InputDecoration(
+              labelText: l.pairDialogIp,
+              errorText: errorText,
+            ),
           ),
           const SizedBox(height: 8),
           TextField(
             controller: _code,
             obscureText: true,
             textInputAction: TextInputAction.done,
+            autocorrect: false,
+            enableSuggestions: false,
+            autofillHints: const <String>[],
             decoration: InputDecoration(labelText: l.pairDialogCode),
             onSubmitted: (_) => _submit(),
           ),
@@ -293,10 +328,35 @@ class _PairDialogState extends State<_PairDialog> {
           child: Text(l.pairDialogCancel),
         ),
         FilledButton(
-          onPressed: _submit,
+          onPressed: _canSave ? _submit : null,
           child: Text(l.pairDialogSave),
         ),
       ],
     );
   }
+}
+
+// Validierung: entweder IPv4 (vier Oktette 0–255) oder Hostname-Label-
+// Kette (RFC 1123, vereinfacht). Reicht fuer das LAN-Pair-Feld und
+// deckt den Realfall ab, in dem jemand/etwas den Modellnamen einfuegt.
+bool _looksLikeHost(String raw) {
+  final s = raw.trim();
+  if (s.isEmpty || s.length > 253) return false;
+  if (s.contains(' ')) return false;
+  // IPv4
+  final ipParts = s.split('.');
+  if (ipParts.length == 4 &&
+      ipParts.every((p) {
+        final n = int.tryParse(p);
+        return n != null && n >= 0 && n <= 255 && p == n.toString();
+      })) {
+    return true;
+  }
+  // Hostname: Labels [a-z0-9] + optional '-' (nicht am Rand), 1–63 Zeichen,
+  // Punkte als Trenner. Keine Umlaute (CC2 hat eh ASCII-Hostnamen).
+  final label = RegExp(r'^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$');
+  for (final part in s.split('.')) {
+    if (!label.hasMatch(part)) return false;
+  }
+  return true;
 }

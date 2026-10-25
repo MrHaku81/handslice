@@ -85,7 +85,11 @@ class AppLocalizationsDe extends AppLocalizations {
   String get pairDialogTitle => 'Mit CC2 koppeln';
 
   @override
-  String get pairDialogIp => 'Drucker-IP (z. B. <cc2-ip>)';
+  String get pairDialogIp => 'Drucker-IP oder Hostname';
+
+  @override
+  String get pairDialogIpInvalid =>
+      'IPv4-Adresse oder Hostname eintragen (keine Leerzeichen, kein Modellname).';
 
   @override
   String get pairDialogCode => 'Zugangscode (Drucker-Display)';
@@ -100,7 +104,8 @@ class AppLocalizationsDe extends AppLocalizations {
   String get projectFilaments => 'Filamente / Slot-Zuordnung';
 
   @override
-  String get projectZOffset => 'Z-Offset pro Seite (nur gespeichert)';
+  String get projectZOffset =>
+      'Z-Offset pro Seite (wird beim Slicen angewendet)';
 
   @override
   String get projectZOffsetDecrement => 'Z-Offset um 0,01 mm verringern';
@@ -110,7 +115,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get projectZOffsetHint =>
-      '±0,50 mm, Schritte 0,01 mm — noch nicht angewendet.';
+      '±0,50 mm, Schritte 0,01 mm — wird beim Slicen angewendet.';
 
   @override
   String get projectSliceButton => 'Auf dem Gerät slicen';
@@ -202,11 +207,28 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get printTimelapseUnknown =>
-      'Zeitraffer-Unterstützung unbekannt – Feld weggelassen.';
+  String get printTimelapseNotSupported =>
+      'Dieser Drucker meldet keine Kamera – Zeitraffer deaktiviert.';
 
   @override
   String get printReconnecting => 'Verbindung verloren – wird neu aufgebaut…';
+
+  @override
+  String get printStatusLabel => 'Zustand';
+
+  @override
+  String get printBedLabel => 'Bett';
+
+  @override
+  String get printNozzleLabel => 'Düse';
+
+  @override
+  String get printExceptionLabel => 'Drucker-Alarme';
+
+  @override
+  String printTempFormat(String cur, String tgt) {
+    return '$cur / $tgt °C';
+  }
 
   @override
   String printLayerProgress(int cur, int tot, int pct) {

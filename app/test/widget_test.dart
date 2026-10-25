@@ -65,8 +65,14 @@ Future<PrinterState> _makePrinter({ElegooCc2Client? client}) async {
 }
 
 // Fake Slicer: antwortet synthetisch – kein Process.run, kein Binary.
+// Hinter dem Capturing-Hook merken wir uns das zuletzt uebergebene
+// z_offset-Argument, damit der M5-Test „Z-Offset wird beim Slicen
+// angewendet" nachweisen kann, dass ProjectState den Wert durchreicht.
 class _FakeSlicer extends SlicerService {
   _FakeSlicer();
+
+  double? lastZOffset;
+  BedType? lastBedType;
 
   @override
   bool get isReady => true;
@@ -76,8 +82,11 @@ class _FakeSlicer extends SlicerService {
     required String modelPath,
     required BedType bedType,
     required String outputPath,
+    double zOffsetMm = 0.0,
     bool noCenter = true,
   }) async {
+    lastZOffset = zOffsetMm;
+    lastBedType = bedType;
     return SliceResult(
       gcodePath: outputPath,
       sizeBytes: 220261,
@@ -245,10 +254,18 @@ void main() {
     final tf = find.byType(TextField);
     expect(tf, findsNWidgets(2));
     await tester.enterText(tf.first, '192.168.0.42');
+    await tester.pump();
     await tester.enterText(tf.last, 'secret42');
+    await tester.pumpAndSettle(); // Save-Button-Zustand neu berechnen
 
     // Speichern tippen
-    await tester.tap(find.text('Save'));
+    final saveBtn = find.widgetWithText(FilledButton, 'Save');
+    expect(
+      tester.widget<FilledButton>(saveBtn).onPressed,
+      isNotNull,
+      reason: 'Save-Button muss nach gueltiger Eingabe aktiv sein',
+    );
+    await tester.tap(saveBtn);
     // Pop + Framework-Dispose durchfahren
     await tester.pumpAndSettle();
 
@@ -311,6 +328,167 @@ void main() {
     expect(cfg.containsKey('delay_video'), isFalse);
     expect(cfg['bedlevel_force'], true);
     expect(cfg['printer_check'], true);
+  });
+
+  // Befund 1 (M5): Pair-Dialog validiert IP/Hostname und laesst keinen
+  // Modellnamen durch – Realfall 2026-10-25: Feld bekam "Elegoo CC2 Combo"
+  // und wurde ungeprueft gespeichert, Verbinden lief dann in
+  // "Invalid internet address".
+  testWidgets('PairDialog: Save bleibt gesperrt bei Modellname statt IP',
+      (tester) async {
+    final printer = await _makePrinter();
+    await tester.pumpWidget(_wrap(
+      Scaffold(body: PrinterPanel(printer: printer)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pair printer…'));
+    await tester.pumpAndSettle();
+
+    final tf = find.byType(TextField);
+    // "Elegoo CC2 Combo" – was Klaus beim Realdruck tatsaechlich sah.
+    await tester.enterText(tf.first, 'Elegoo CC2 Combo');
+    await tester.enterText(tf.last, 'secret42');
+    await tester.pumpAndSettle();
+
+    // Fehlertext sichtbar
+    expect(find.textContaining('IPv4'), findsOneWidget);
+    // Save-Button im disabled-Zustand (Tap darf nicht poppen)
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pair with CC2'), findsOneWidget); // Dialog noch offen
+    expect(printer.ip, isNull);
+
+    // Jetzt gueltige IP → Fehler weg, Save geht durch
+    await tester.enterText(tf.first, '192.168.1.50');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect(printer.ip, '192.168.1.50');
+  });
+
+  testWidgets('PairDialog: Vorbelegung ignoriert Modellname aus prefs',
+      (tester) async {
+    // Simuliert den Realfall rueckwaerts: in prefs steht Mist drin.
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'printer.cc2.ip': 'Elegoo CC2 Combo',
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final printer = PrinterState(prefs: prefs, secure: _FakeSecureStorage());
+    await tester.pumpWidget(_wrap(
+      Scaffold(body: PrinterPanel(printer: printer)),
+    ));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Pair printer…'));
+    await tester.pumpAndSettle();
+
+    // Feld muss leer sein – der Modellname darf NICHT vorbelegt sein.
+    final tf = find.byType(TextField);
+    final ipField = tester.widget<TextField>(tf.first);
+    expect(ipField.controller?.text, isEmpty);
+  });
+
+  // Befund 2 (M5): Fortschritt kommt aus current_layer/total_layer,
+  // nicht aus `print_status.progress` – letzteres wandert laut
+  // Realdruck 09:18 nicht gleichmaessig mit.
+  test('PrinterState.printProgress: aus current/total abgeleitet', () async {
+    final p = await _makePrinter();
+    p.injectLiveStateForTest({
+      'print_status': {
+        'current_layer': 25,
+        'total_layer': 100,
+        'progress': 0, // Firmware pusht stehengebliebenen Wert
+      }
+    });
+    expect(p.printProgress, 25);
+    // Fortschritt wandert mit current_layer, auch wenn progress stehen bleibt
+    p.injectLiveStateForTest({
+      'print_status': {'current_layer': 50, 'total_layer': 100}
+    });
+    expect(p.printProgress, 50);
+  });
+
+  test('PrinterState.printProgress: Fallback auf Firmware-Feld wenn Layer fehlen',
+      () async {
+    final p = await _makePrinter();
+    p.injectLiveStateForTest({
+      'print_status': {'progress': 42}
+    });
+    expect(p.printProgress, 42);
+  });
+
+  // Befund 3 (M5): Zeitraffer-Capability – fehlendes Feld = unterstuetzt
+  // (CC2-Modell-Default, delay_video=true belegt am 2026-10-25 10:30).
+  test('PrinterState.supportsTimelapse: configured==1 → true', () async {
+    final p = await _makePrinter();
+    p.injectLiveStateForTest({
+      'external_device': {
+        'chassis_camera': {'configured': 1}
+      }
+    });
+    expect(p.supportsTimelapse, isTrue);
+  });
+
+  test('PrinterState.supportsTimelapse: configured==0 → false (gesperrt)',
+      () async {
+    final p = await _makePrinter();
+    p.injectLiveStateForTest({
+      'external_device': {
+        'chassis_camera': {'configured': 0}
+      }
+    });
+    expect(p.supportsTimelapse, isFalse);
+  });
+
+  test('PrinterState.supportsTimelapse: Feld fehlt → true (CC2-Default)',
+      () async {
+    final p = await _makePrinter();
+    // nichts injecten
+    expect(p.supportsTimelapse, isTrue);
+  });
+
+  // Befund 4 (M5): Status-Beschriftungen lokalisiert statt Rohschluessel.
+  testWidgets('PrintScreen: Status-Labels sind lokalisiert', (tester) async {
+    final state = await _makeState();
+    state.setModel('/x/kerbe.stl');
+    await state.slice(_FakeSlicer(), '/tmp/x.gcode');
+
+    // Grosser Viewport, damit _LiveStatus ohne Scrollen gerendert wird.
+    tester.view.physicalSize = const Size(1200, 2800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(_wrap(
+      PrintScreen(projectState: state, printerState: await _makePrinter()),
+    ));
+    await tester.pumpAndSettle();
+
+    // Lokalisierte Labels sichtbar
+    expect(find.text('State'), findsOneWidget);
+    expect(find.text('Bed'), findsOneWidget);
+    expect(find.text('Nozzle'), findsOneWidget);
+    // Keine Rohschluessel mehr
+    expect(find.text('machine_status.status'), findsNothing);
+    expect(find.text('heater_bed'), findsNothing);
+    expect(find.text('extruder'), findsNothing);
+  });
+
+  // Befund 5 (M5): Z-Offset wird beim Slicen angewendet (an den
+  // Slicer durchgereicht).
+  test('ProjectState.slice uebergibt zOffsetMm an den Slicer', () async {
+    final state = await _makeState();
+    final slicer = _FakeSlicer();
+    state.setModel('/x/kerbe.stl');
+    state.setBedType(BedType.smoothB);
+    await state.setZOffsetFor(BedType.smoothB, 0.020);
+    await state.slice(slicer, '/tmp/x.gcode');
+    expect(slicer.lastBedType, BedType.smoothB);
+    expect(slicer.lastZOffset, closeTo(0.020, 1e-9));
+    // Umstellen auf Seite A mit 0 → kein Offset
+    state.setBedType(BedType.texturedA);
+    await state.setZOffsetFor(BedType.texturedA, 0.0);
+    await state.slice(slicer, '/tmp/x.gcode');
+    expect(slicer.lastZOffset, 0.0);
   });
 
   testWidgets('PrinterState.printPreflight: alle Sperren', (tester) async {

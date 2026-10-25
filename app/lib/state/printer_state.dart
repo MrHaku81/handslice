@@ -67,10 +67,31 @@ class PrinterState extends ChangeNotifier {
   String? get lastUploadedName => _lastUploadedName;
   bool get reconnecting => _reconnecting;
 
+  // Nur fuer Widget-Tests gedacht: ersetzt bzw. merge-t den Live-State
+  // ohne echten MQTT-Pfad. Nicht im Produktionscode aufrufen.
+  @visibleForTesting
+  void injectLiveStateForTest(Map<String, dynamic> delta,
+      {bool replace = true}) {
+    if (replace) _liveState.clear();
+    _mergeStatus(delta);
+  }
+
   // --- Hilfs-Getter fuer die UI (lesen aggregierten Live-State) ---
 
   int? get machineStatus => _getInt(['machine_status', 'status']);
-  int? get printProgress => _getInt(['print_status', 'progress']);
+  // Beim Realdruck 2026-10-25 09:18 beobachtet: `print_status.progress`
+  // wandert in der echten Firmware nicht gleichmaessig mit, waehrend
+  // `current_layer`/`total_layer` zuverlaessig per Delta kommen. Deshalb
+  // ist der Layer-Quotient die primaere Fortschrittsquelle; das Firmware-
+  // Feld dient nur als Rueckfall, wenn die Layer-Zahlen (noch) fehlen.
+  int? get printProgress {
+    final cl = currentLayer;
+    final tl = totalLayer;
+    if (cl != null && tl != null && tl > 0) {
+      return ((cl * 100) / tl).round().clamp(0, 100);
+    }
+    return _getInt(['print_status', 'progress']);
+  }
   int? get currentLayer => _getInt(['print_status', 'current_layer']);
   int? get totalLayer => _getInt(['print_status', 'total_layer']);
   bool? get printEnable => _getBool(['print_status', 'enable']);
@@ -87,13 +108,17 @@ class PrinterState extends ChangeNotifier {
   bool get isPrinting =>
       machineStatus != null && machineStatus != statusIdle;
 
-  // delay_video wird nur gesendet, wenn die Capability belegt ist.
-  // Siehe elegoo-link cpp:1148-1163: supportsTimeLapse kommt aus
-  // external_device.chassis_camera.configured == 1 (via api_status).
-  // Unbekannt → null → Feld weglassen.
-  bool? get supportsTimelapse {
+  // Zeitraffer-Capability. Reihenfolge der Belege:
+  //  - `external_device.chassis_camera.configured == 1` → unterstuetzt
+  //    (elegoo-link cpp:1148-1163).
+  //  - `… == 0` → ausdruecklich nicht unterstuetzt → gesperrt.
+  //  - Feld fehlt → unterstuetzt per Model-Default fuer den CC2
+  //    (docs/networking-cc2.md 2026-10-25 10:30: delay_video=true am
+  //    CC2 FW 02.01.01.07 wirkt nachweislich). Fruehere "unbekannt →
+  //    Feld weglassen"-Variante hat beim Realdruck fehlgeleitet.
+  bool get supportsTimelapse {
     final c = chassisCameraConfigured;
-    if (c == null) return null;
+    if (c == null) return true;
     return c == 1;
   }
 
@@ -299,12 +324,11 @@ class PrinterState extends ChangeNotifier {
       notifyListeners();
       return null;
     }
-    // delay_video nur senden, wenn Capability belegt (siehe
-    // supportsTimelapse-Getter).
-    final cap = supportsTimelapse; // true/false/null
-    final bool? delayVideo = (cap == null)
-        ? null                     // unbekannt → Feld weglassen
-        : (cap && enableTimelapse);
+    // delay_video entscheidet sich aus Capability-Flag + User-Switch:
+    //  - unterstuetzt (Default fuer CC2) und User aktiv → true
+    //  - sonst → false (bei nicht-unterstuetzt wird false explizit
+    //    gesendet, damit die Firmware es nicht raet).
+    final bool delayVideo = supportsTimelapse && enableTimelapse;
     try {
       final r = await _client.startPrint(
         filename: _lastUploadedName!,

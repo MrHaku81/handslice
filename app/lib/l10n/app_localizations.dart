@@ -239,8 +239,14 @@ abstract class AppLocalizations {
   /// No description provided for @pairDialogIp.
   ///
   /// In en, this message translates to:
-  /// **'Printer IP (e.g. <cc2-ip>)'**
+  /// **'Printer IP or hostname'**
   String get pairDialogIp;
+
+  /// No description provided for @pairDialogIpInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter an IPv4 address or hostname (no spaces, no model name).'**
+  String get pairDialogIpInvalid;
 
   /// No description provided for @pairDialogCode.
   ///
@@ -269,7 +275,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectZOffset.
   ///
   /// In en, this message translates to:
-  /// **'Z-offset per plate (saved only)'**
+  /// **'Z-offset per plate (applied at slice time)'**
   String get projectZOffset;
 
   /// No description provided for @projectZOffsetDecrement.
@@ -287,7 +293,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectZOffsetHint.
   ///
   /// In en, this message translates to:
-  /// **'±0.50 mm, 0.01 mm steps — not applied yet.'**
+  /// **'±0.50 mm, 0.01 mm steps — applied when slicing.'**
   String get projectZOffsetHint;
 
   /// No description provided for @projectSliceButton.
@@ -452,17 +458,47 @@ abstract class AppLocalizations {
   /// **'Selected tray (A{slot}) is empty.'**
   String printPreflightTrayEmpty(int slot);
 
-  /// No description provided for @printTimelapseUnknown.
+  /// No description provided for @printTimelapseNotSupported.
   ///
   /// In en, this message translates to:
-  /// **'Timelapse support unknown — flag omitted.'**
-  String get printTimelapseUnknown;
+  /// **'This printer reports no camera — timelapse disabled.'**
+  String get printTimelapseNotSupported;
 
   /// No description provided for @printReconnecting.
   ///
   /// In en, this message translates to:
   /// **'Connection lost — reconnecting…'**
   String get printReconnecting;
+
+  /// No description provided for @printStatusLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'State'**
+  String get printStatusLabel;
+
+  /// No description provided for @printBedLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Bed'**
+  String get printBedLabel;
+
+  /// No description provided for @printNozzleLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Nozzle'**
+  String get printNozzleLabel;
+
+  /// No description provided for @printExceptionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer alarms'**
+  String get printExceptionLabel;
+
+  /// No description provided for @printTempFormat.
+  ///
+  /// In en, this message translates to:
+  /// **'{cur} / {tgt} °C'**
+  String printTempFormat(String cur, String tgt);
 
   /// No description provided for @printLayerProgress.
   ///

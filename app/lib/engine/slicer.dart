@@ -132,6 +132,7 @@ class SlicerService {
     required String modelPath,
     required BedType bedType,
     required String outputPath,
+    double zOffsetMm = 0.0,
     bool noCenter = true,
   }) async {
     if (!isReady) {
@@ -139,6 +140,9 @@ class SlicerService {
     }
     final resources = _resourcesDir!;
     final profiles = '$resources/profiles/Elegoo';
+    // --z-offset nur mitgeben, wenn nicht genau 0 (vermeidet unnoetige
+    // Config-Overrides und haelt die CLI-Zeile sauber).
+    final bool applyZ = zOffsetMm.abs() > 1e-9;
     final args = <String>[
       '--machine', '$profiles/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json',
       '--process', '$profiles/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json',
@@ -146,6 +150,7 @@ class SlicerService {
       '--resources', resources,
       '--output', outputPath,
       '--bed-type', bedType.cliArg,
+      if (applyZ) ...['--z-offset', zOffsetMm.toStringAsFixed(3)],
       '--quiet',
       if (noCenter) '--no-center',
       modelPath,

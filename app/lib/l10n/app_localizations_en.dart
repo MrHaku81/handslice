@@ -84,7 +84,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pairDialogTitle => 'Pair with CC2';
 
   @override
-  String get pairDialogIp => 'Printer IP (e.g. <cc2-ip>)';
+  String get pairDialogIp => 'Printer IP or hostname';
+
+  @override
+  String get pairDialogIpInvalid =>
+      'Enter an IPv4 address or hostname (no spaces, no model name).';
 
   @override
   String get pairDialogCode => 'Access code (printer display)';
@@ -99,7 +103,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectFilaments => 'Filaments / Slot assignment';
 
   @override
-  String get projectZOffset => 'Z-offset per plate (saved only)';
+  String get projectZOffset => 'Z-offset per plate (applied at slice time)';
 
   @override
   String get projectZOffsetDecrement => 'Decrease Z-offset by 0.01 mm';
@@ -108,7 +112,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectZOffsetIncrement => 'Increase Z-offset by 0.01 mm';
 
   @override
-  String get projectZOffsetHint => '±0.50 mm, 0.01 mm steps — not applied yet.';
+  String get projectZOffsetHint =>
+      '±0.50 mm, 0.01 mm steps — applied when slicing.';
 
   @override
   String get projectSliceButton => 'Slice on device';
@@ -199,11 +204,28 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get printTimelapseUnknown =>
-      'Timelapse support unknown — flag omitted.';
+  String get printTimelapseNotSupported =>
+      'This printer reports no camera — timelapse disabled.';
 
   @override
   String get printReconnecting => 'Connection lost — reconnecting…';
+
+  @override
+  String get printStatusLabel => 'State';
+
+  @override
+  String get printBedLabel => 'Bed';
+
+  @override
+  String get printNozzleLabel => 'Nozzle';
+
+  @override
+  String get printExceptionLabel => 'Printer alarms';
+
+  @override
+  String printTempFormat(String cur, String tgt) {
+    return '$cur / $tgt °C';
+  }
 
   @override
   String printLayerProgress(int cur, int tot, int pct) {
