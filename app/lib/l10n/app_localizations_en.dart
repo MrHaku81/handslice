@@ -303,6 +303,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get settingsSaveAsProfile => 'Save as profile';
 
   @override
+  String get settingsSaveAsNewProfile => 'Save as new profile…';
+
+  @override
+  String get settingsUpdateProfile => 'Update profile';
+
+  @override
   String get settingsSaveDialogTitle => 'Save process profile';
 
   @override

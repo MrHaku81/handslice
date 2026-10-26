@@ -90,10 +90,9 @@ class _ProjectScreenState extends State<ProjectScreen> {
   }
 
   void _applyProfile(SavedProfile p) {
-    widget.overrides.clearAll();
-    for (final e in p.overrides.entries) {
-      widget.overrides.set(e.key, e.value);
-    }
+    // applyProfile setzt Baseline + Werte in einem Rutsch (Orca-Verhalten):
+    // "N Ueberschreibungen" ist danach 0, Reset zeigt auf Profil-Wert.
+    widget.overrides.applyProfile(p.overrides);
   }
 
   String _activeProfileLabel(AppLocalizations l) {
@@ -159,7 +158,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
     );
     if (chosen == null || !mounted) return;
     if (chosen.reset) {
-      widget.overrides.clearAll();
+      widget.overrides.clearProfile();
       await widget.projectState.setActiveProfileSlug(null);
     } else if (chosen.profile != null) {
       _applyProfile(chosen.profile!);

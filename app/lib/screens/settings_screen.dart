@@ -50,6 +50,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
+  // Zuletzt geladene Profile – fuer "Profil aktualisieren" brauchen
+  // wir Name, inherits und type, damit die Datei wieder exakt
+  // dieselbe Semantik bekommt.
+  SavedProfile? _activeProcessProfile;
+  final Map<int, SavedProfile?> _activeFilamentProfiles = {};
+
   @override
   void initState() {
     super.initState();
@@ -60,7 +66,63 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final q = _searchCtrl.text.trim().toLowerCase();
       if (q != _searchQuery) setState(() => _searchQuery = q);
     });
+    // Beim Start: die vom ProjectState persistierten slugs auf die
+    // tatsaechlichen SavedProfile-Objekte abbilden.
+    _reloadActiveProfiles();
   }
+
+  Future<void> _reloadActiveProfiles() async {
+    final ps = widget.projectState;
+    if (ps == null) return;
+    final all = await const ProfileReader().list();
+    if (!mounted) return;
+    SavedProfile? byProcess;
+    final processSlug = ps.activeProfileSlug;
+    if (processSlug != null && processSlug.isNotEmpty) {
+      final hit = all
+          .where((p) => p.type == 'process'
+              && ProfileWriterSlug.of(p.name) == processSlug)
+          .toList();
+      if (hit.isNotEmpty) byProcess = hit.first;
+    }
+    final filByTray = <int, SavedProfile?>{};
+    for (var t = 0; t < 4; t++) {
+      final s = ps.filamentActiveProfileSlug(t);
+      if (s == null || s.isEmpty) {
+        filByTray[t] = null;
+        continue;
+      }
+      final hit = all
+          .where((p) => p.type == 'filament'
+              && ProfileWriterSlug.of(p.name) == s)
+          .toList();
+      filByTray[t] = hit.isNotEmpty ? hit.first : null;
+    }
+    // Baseline nach App-Neustart wiederherstellen: wenn ein slug
+    // persistiert ist, zeigt der Counter sonst "N Abweichungen"
+    // gegen leer, obwohl der Nutzer gerade frisch aus dem Profil
+    // kommt. Werte selbst nicht ueberschreiben – die Session
+    // bleibt, aber die Zaehlbasis stimmt.
+    if (byProcess != null && widget.overrides.baseline.isEmpty) {
+      widget.overrides.setBaseline(byProcess.overrides);
+    }
+    for (final t in filByTray.keys) {
+      final p = filByTray[t];
+      if (p == null) continue;
+      final ov = widget.filamentOverrides.forTray(t);
+      if (ov.baseline.isEmpty) ov.setBaseline(p.overrides);
+    }
+    setState(() {
+      _activeProcessProfile = byProcess;
+      _activeFilamentProfiles
+        ..clear()
+        ..addAll(filByTray);
+    });
+  }
+
+  SavedProfile? get _activeAreaProfile => _area == _SettingsArea.process
+      ? _activeProcessProfile
+      : _activeFilamentProfiles[_activeTray];
 
   @override
   void dispose() {
@@ -156,12 +218,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
         type = 'process';
         ov = widget.overrides.all;
       }
+      final nameTrim = nameCtrl.text.trim();
       final file = await const ProfileWriter().save(
-        name: nameCtrl.text.trim(),
+        name: nameTrim,
         baseInherits: baseInherits,
         type: type,
         overrides: ov,
       );
+      // Neu gespeichertes Profil ist ab jetzt die Baseline: Counter
+      // springt auf 0, ↺-Marker beziehen sich auf diese Werte.
+      final saved = SavedProfile(
+        file: file,
+        name: nameTrim,
+        baseInherits: baseInherits,
+        type: type,
+        overrides: Map<String, String>.from(ov),
+      );
+      final activeOv = _activeOverrides;
+      activeOv.applyProfile(saved.overrides);
+      final slug = ProfileWriterSlug.of(nameTrim);
+      final ps = widget.projectState;
+      if (isFilament) {
+        _activeFilamentProfiles[_activeTray] = saved;
+        if (ps != null) {
+          await ps.setFilamentActiveProfileSlug(_activeTray, slug);
+        }
+      } else {
+        _activeProcessProfile = saved;
+        if (ps != null) {
+          await ps.setActiveProfileSlug(slug);
+        }
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(l.settingsProfileSaved(file.path.split('/').last))));
@@ -244,15 +331,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final tray = _activeTray;
     final ov = widget.filamentOverrides.forTray(tray);
     if (chosen.reset) {
-      ov.clearAll();
+      ov.clearProfile();
       await projectState.setFilamentActiveProfileSlug(tray, null);
+      setState(() => _activeFilamentProfiles[tray] = null);
     } else if (chosen.profile != null) {
-      ov.clearAll();
-      for (final e in chosen.profile!.overrides.entries) {
-        ov.set(e.key, e.value);
-      }
+      ov.applyProfile(chosen.profile!.overrides);
       await projectState.setFilamentActiveProfileSlug(
           tray, ProfileWriterSlug.of(chosen.profile!.name));
+      setState(() => _activeFilamentProfiles[tray] = chosen.profile);
+    }
+  }
+
+  /// "Profil aktualisieren" (Orca-Verhalten): schreibt das aktuell
+  /// aktive Profil mit den aktuellen Overrides zurueck. Danach setzt
+  /// `applyProfile` die Baseline auf die neuen Werte – der Counter geht
+  /// wieder auf 0, es gibt keine Abweichungen mehr.
+  Future<void> _updateActiveProfile() async {
+    final l = AppLocalizations.of(context);
+    final p = _activeAreaProfile;
+    if (p == null) return;
+    try {
+      final ov = _activeOverrides;
+      final file = await const ProfileWriter().save(
+        name: p.name,
+        baseInherits: p.baseInherits,
+        type: p.type,
+        overrides: ov.all,
+      );
+      final updated = SavedProfile(
+        file: file,
+        name: p.name,
+        baseInherits: p.baseInherits,
+        type: p.type,
+        overrides: Map<String, String>.from(ov.all),
+      );
+      if (_area == _SettingsArea.process) {
+        _activeProcessProfile = updated;
+      } else {
+        _activeFilamentProfiles[_activeTray] = updated;
+      }
+      // Baseline nach dem Speichern = neuer Profil-Stand.
+      ov.applyProfile(updated.overrides);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(l.settingsProfileSaved(file.path.split('/').last))));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(l.settingsProfileSaveFailed(e.toString()))));
     }
   }
 
@@ -322,11 +448,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
-              TextButton.icon(
-                onPressed:
-                    _activeOverrides.isEmpty ? null : _saveAsProfile,
-                icon: const Icon(Icons.save_outlined),
-                label: Text(l.settingsSaveAsProfile),
+              _SaveMenu(
+                hasActiveProfile: _activeAreaProfile != null,
+                enabled: !_activeOverrides.isEmpty,
+                saveAsLabel: l.settingsSaveAsProfile,
+                saveAsNewLabel: l.settingsSaveAsNewProfile,
+                updateLabel: l.settingsUpdateProfile,
+                onUpdate: _updateActiveProfile,
+                onSaveAs: _saveAsProfile,
               ),
             ],
           ),
@@ -1188,4 +1317,53 @@ class _FilamentPickerResult {
   const _FilamentPickerResult({this.reset = false, this.profile});
   final bool reset;
   final SavedProfile? profile;
+}
+
+/// Save-Menue: ohne aktives Profil ein normaler Button
+/// "Als Profil speichern"; mit aktivem Profil ein Dropdown
+/// "Profil aktualisieren" + "Als neues Profil…".
+class _SaveMenu extends StatelessWidget {
+  const _SaveMenu({
+    required this.hasActiveProfile,
+    required this.enabled,
+    required this.saveAsLabel,
+    required this.saveAsNewLabel,
+    required this.updateLabel,
+    required this.onUpdate,
+    required this.onSaveAs,
+  });
+  final bool hasActiveProfile;
+  final bool enabled;
+  final String saveAsLabel;
+  final String saveAsNewLabel;
+  final String updateLabel;
+  final VoidCallback onUpdate;
+  final VoidCallback onSaveAs;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!hasActiveProfile) {
+      return TextButton.icon(
+        onPressed: enabled ? onSaveAs : null,
+        icon: const Icon(Icons.save_outlined),
+        label: Text(saveAsLabel),
+      );
+    }
+    return PopupMenuButton<String>(
+      enabled: enabled,
+      onSelected: (v) {
+        if (v == 'update') onUpdate();
+        if (v == 'new') onSaveAs();
+      },
+      itemBuilder: (ctx) => [
+        PopupMenuItem(value: 'update', child: Text(updateLabel)),
+        PopupMenuItem(value: 'new', child: Text(saveAsNewLabel)),
+      ],
+      child: TextButton.icon(
+        onPressed: null, // Taps gehen an das PopupMenu
+        icon: const Icon(Icons.save_outlined),
+        label: Text(updateLabel),
+      ),
+    );
+  }
 }

@@ -608,6 +608,18 @@ abstract class AppLocalizations {
   /// **'Save as profile'**
   String get settingsSaveAsProfile;
 
+  /// No description provided for @settingsSaveAsNewProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Save as new profile…'**
+  String get settingsSaveAsNewProfile;
+
+  /// No description provided for @settingsUpdateProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Update profile'**
+  String get settingsUpdateProfile;
+
   /// No description provided for @settingsSaveDialogTitle.
   ///
   /// In en, this message translates to:

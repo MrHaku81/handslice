@@ -90,6 +90,8 @@
   "settingsNoMatches": "Keine Einstellungen passen zum aktuellen Filter.",
   "settingsOverridesCount": "{count, plural, =0{Keine Überschreibungen} =1{1 Überschreibung} other{{count} Überschreibungen}}",
   "settingsSaveAsProfile": "Als Profil speichern",
+  "settingsSaveAsNewProfile": "Als neues Profil…",
+  "settingsUpdateProfile": "Profil aktualisieren",
   "settingsSaveDialogTitle": "Prozess-Profil speichern",
   "settingsSaveDialogHint": "Speichert die aktuellen Überschreibungen als Orca-Preset mit inherits auf das aktive Basisprofil. Lokal auf dem Gerät.",
   "settingsSaveFilamentDialogTitle": "Filament-Profil speichern",

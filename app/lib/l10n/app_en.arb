@@ -107,6 +107,8 @@
   "settingsOverridesCount": "{count, plural, =0{No overrides} =1{1 override} other{{count} overrides}}",
   "@settingsOverridesCount": {"placeholders": {"count": {"type": "int"}}},
   "settingsSaveAsProfile": "Save as profile",
+  "settingsSaveAsNewProfile": "Save as new profile…",
+  "settingsUpdateProfile": "Update profile",
   "settingsSaveDialogTitle": "Save process profile",
   "settingsSaveDialogHint": "Saves your current overrides as an Orca-style preset with inherits onto the active base profile. Stored locally.",
   "settingsSaveFilamentDialogTitle": "Save filament profile",

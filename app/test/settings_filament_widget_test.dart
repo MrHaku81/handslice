@@ -275,6 +275,50 @@ void main() {
     expect(forPlaPro.first.name, 'PLA kalt');
   });
 
+  // Phase-4.4-Nacharbeit: Zaehler respektiert Baseline (geladenes
+  // Profil). Direkt am SettingsOverrides; UI-Rendering testet
+  // settings_overrides_baseline_test.dart ausfuehrlicher.
+  testWidgets('Overrides-Count zeigt Abweichungen vom geladenen Profil',
+      (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final filamentOv = FilamentOverrides(prefs);
+    final printer = _FakeSlotsPrinter([
+      CanvasSlot(trayId: 3, filamentType: 'PLA',
+          filamentName: 'ELEGOO RAPID PLA+', filamentColor: '#FFFFFF'),
+    ], prefs);
+
+    await tester.pumpWidget(_wrap(SettingsScreen(
+      schema: filamentSchema(),
+      overrides: SettingsOverrides(),
+      filamentOverrides: filamentOv,
+      printerState: printer,
+    )));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Filament').first);
+    await tester.pumpAndSettle();
+
+    // Direkt applyProfile: Baseline = Werte → Counter 0.
+    filamentOv.forTray(3).applyProfile({'nozzle_temperature': '220'});
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Keine Überschreibungen'), findsOneWidget,
+        reason:
+            'Mit geladenem Profil darf der Zaehler nicht die Profil-Werte '
+            'als Abweichungen zaehlen');
+
+    // Abweichung vom Profil → 1.
+    filamentOv.forTray(3).set('nozzle_temperature', '235');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('1 Überschreibung'), findsOneWidget);
+
+    // Zurueck auf Profil-Wert (reset) → 0.
+    filamentOv.forTray(3).reset('nozzle_temperature');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Keine Überschreibungen'), findsOneWidget);
+    expect(filamentOv.forTray(3).get('nozzle_temperature'), '220',
+        reason: 'Reset bringt den Wert auf Profil-Wert, nicht loeschen');
+  });
+
   // Phase-4.4-Nacharbeit: ProjectState speichert pro Fach einen slug;
   // Round-Trip ueber dieselbe Normalisierung wie ProfileWriter.
   test('ProjectState: pro-Fach Filament-Profil-Slug persistiert',

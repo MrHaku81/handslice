@@ -308,6 +308,12 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsSaveAsProfile => 'Als Profil speichern';
 
   @override
+  String get settingsSaveAsNewProfile => 'Als neues Profil…';
+
+  @override
+  String get settingsUpdateProfile => 'Profil aktualisieren';
+
+  @override
   String get settingsSaveDialogTitle => 'Prozess-Profil speichern';
 
   @override
