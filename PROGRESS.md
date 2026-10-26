@@ -62,6 +62,32 @@ Zwei Befunde aus der Poco-Abnahme (APK 5699b13) adressiert.
 
 - —
 
+### Nachtrag 4 (Override `nozzle_temperature_range_high=230` im Abnahme-G-Code belegt)
+
+Klaus' Hinweis: "my-test" hatte NICHT die Drucktemperatur ueberschrieben,
+sondern nur `nozzle_temperature_range_high` von 240 auf 230 gesenkt.
+Deshalb steht im MQTT-Mitschnitt bei den Hot-End-Setpoints 220 °C
+(= Rapid-PLA+-Default). Zur Verifikation die hochgeladene Datei direkt
+vom Drucker geholt und im Config-Block geprueft:
+
+```
+GET http://<cc2-ip>/download?X-Token=<access>&file_name=handslice_1793029586062.gcode
+→ 221 140 B (identisch zur Vorhersage und zur 1044-Groesse)
+```
+
+Config-Block (ab Zeile 9384):
+```
+; nozzle_temperature       = 220
+; nozzle_temperature_range_high = 230   ← Override von Klaus (default 240)
+; nozzle_temperature_range_low  = 190
+```
+
+Beleg vollstaendig: der Filament-Override aus dem "my-test"-Profil ist
+in der CLI aufgeloest und im an den Drucker uebertragenen G-Code
+sichtbar. Die MQTT-Zeitachse weiter oben zeigt deshalb konsistent
+220 °C als Hot-End-Target – das ist der Druck-Setpoint, nicht die
+Range-Grenze.
+
 ### Nachtrag 3 (Overrides-Counter respektiert geladenes Profil + Mitschnitt-Auswertung)
 
 - Commit `a138bcf`: `SettingsOverrides` kennt eine Baseline; count,
