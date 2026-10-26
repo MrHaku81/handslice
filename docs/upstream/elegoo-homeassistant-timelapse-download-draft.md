@@ -133,7 +133,7 @@ is in the same order of magnitude.
 separate 1051 runs produced `status 1 → 12 → 1` in under a second
 with `3020 → 3022` and no change to `time_lapse_video_status`:
 
-| URL form | Raw frames available? | Dauer |
+| URL form | Raw frames available? | Duration |
 |---|---|---:|
 | `picture/<name><ts>` on 12-day-old entry (deleted at display) | no | 1 s |
 | `video/<name>.mp4` on a `status=2` entry | no (post-composite) | 1 ms |
@@ -175,8 +175,8 @@ transition. On the next `method 1036` the entry is gone and
 printer and the printer's own on-screen time-lapse list are
 unchanged.** Measured by downloading the removed entry's URL
 immediately after 1038 — the same bytes with the same md5 as the
-pre-call baseline, and the owner confirmed the display still
-listed the entry.
+pre-call baseline, and I confirmed the display still listed the
+entry.
 
 | Delete path | 1036 history | MP4 on `/opt/usr/video/` | Display list |
 |---|:-:|:-:|:-:|
@@ -192,8 +192,9 @@ The printer's clock is **not** synced to real time and the
 offset drifts across sessions. On one measured print it was
 ~8 hours ahead of UTC — the time-lapse filename stamp
 `<name>20261026143807` came from a print whose MQTT-side
-`begin_time` was `06:38:07Z`. The Elegoo code reads the clock
-with `localtime_r`
+`begin_time` was `06:38:07Z`. That +8 h offset is China Standard
+Time; most likely the factory default on this hardware. The
+Elegoo code reads the clock with `localtime_r`
 (`elegoo/extras/ai_camera/module/util/time_lapse_control.cpp:166-172`),
 so whichever TZ the system has configured ends up in the
 filename. Treat `begin_time`, `end_time` and the filename stamp as
