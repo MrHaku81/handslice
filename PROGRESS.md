@@ -62,6 +62,49 @@ Zwei Befunde aus der Poco-Abnahme (APK 5699b13) adressiert.
 
 - —
 
+### Nachtrag 5 (zweiter 1051-Erfolgsfall + Composite-Dauer + Historie-"Nicht verbunden")
+
+Klaus hat am Poco 18:15 Ortszeit den Zeitraffer der
+Abnahmedruck-Session komponieren und herunterladen lassen; Video
+ist in Movies/Handslice sichtbar. Galerie-Ablage damit abgenommen.
+
+MQTT-Mitschnitt hat den Vorgang erfasst
+(logs/cc2-sniff-2026-10-26-152237.jsonl):
+
+| Zeit (UTC) | Ereignis | Beleg |
+|---|---|---|
+| 17:14:26.885 | `method 1036` Request | pre-check history |
+| 17:14:27.392 | `method 1036` Response | Historie geladen |
+| 17:14:51.976 | `method 1051` Request | `url: picture/handslice_1793029586062.gcode20261026234633` |
+| 17:14:52.177 | `method 1051` Response ok | `url: video/handslice_1793029586062.gcode20261026234633.mp4` |
+| 17:14:52.382 | `status 1 → 12, sub_status → 3020` | **Composing beginnt** |
+| 17:15:15.531 | `sub_status 3020 → 3021` | Composing abgeschlossen |
+| 17:15:15.531 | `method 1036` Request (zweite) | Erfolgs-Verifikation |
+| 17:15:15.531 | `status 12 → 1` | zurueck idle |
+
+**Composite-Dauer** (3020 → 3021): **23.149 s**.
+
+Damit ist der 2a/2b-Pfad fuer diesen Druck end-to-end belegt:
+startPrint → Druck → 1051 → 3020→3021 → 1036 → Download →
+MediaStore (Movies/Handslice). mqtt-sniff anschliessend
+beendet (PID 49144).
+
+### Historie-Reiter: "Nicht verbunden" statt "Noch keine Drucke"
+
+Beobachtung: wenn die App nicht beim Drucker war, meldete der
+Reiter "Druckhistorie" trotzdem "Noch keine Drucke."
+`CanvasConnection.connected` kann true sein, bevor `method 1036`
+jemals geantwortet hat (direkt nach Pairing, oder nach
+MQTT-Reconnect ohne Request).
+
+Fix: zusaetzliches Flag `_hasFetched`, das nur nach einer
+erfolgreichen `getHistory()`-Antwort auf true geht. Die
+Not-Connected-View bleibt sichtbar, bis `_hasFetched && connected`
+beide true sind. Widget-Test
+`Reiter Drucker: ohne 1036-Antwort bleibt Hinweis sichtbar` deckt
+den Standardfall ab (`PrinterState` im Default-Zustand → Hinweis,
+keine "Noch keine Drucke"-Meldung). 3/3 PrinterScreen-Tests gruen.
+
 ### Nachtrag 4 (Override `nozzle_temperature_range_high=230` im Abnahme-G-Code belegt)
 
 Klaus' Hinweis: "my-test" hatte NICHT die Drucktemperatur ueberschrieben,

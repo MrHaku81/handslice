@@ -58,6 +58,12 @@ class _PrinterScreenState extends State<PrinterScreen> {
 
   List<HistoryTask> _tasks = const [];
   bool _loading = false;
+  // true, sobald `method 1036` einmal erfolgreich durchgelaufen ist.
+  // Bevor das passiert ist, zeigt die UI "nicht verbunden" statt
+  // "keine Drucke" (Phase-4.4-Nacharbeit: Klaus beobachtete, dass
+  // der Reiter "Noch keine Drucke" meldete, obwohl die MQTT-Session
+  // noch gar nicht stand).
+  bool _hasFetched = false;
   String? _error;
   final Map<String, _TaskUiState> _ui = {};
 
@@ -112,7 +118,11 @@ class _PrinterScreenState extends State<PrinterScreen> {
       // verwendet, nicht als Datum.
       list.sort((a, b) => b.beginTime.compareTo(a.beginTime));
       if (!mounted) return;
-      setState(() { _tasks = list; _loading = false; });
+      setState(() {
+        _tasks = list;
+        _loading = false;
+        _hasFetched = true;
+      });
       // Fuer alle Status-2-Eintraege Head-Probe anstossen.
       for (final t in list) {
         if (t.hasVideo) {
@@ -275,7 +285,15 @@ class _PrinterScreenState extends State<PrinterScreen> {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final connected = widget.printerState.connection == CanvasConnection.connected;
+    // "verbunden" fuer die Anzeige = der Reiter hat tatsaechlich schon
+    // eine 1036-Antwort bekommen. Allein `CanvasConnection.connected`
+    // reicht nicht: direkt nach dem Oeffnen (vor dem ersten _refresh)
+    // oder nach einem Verbindungsabbruch der kein Status-Update
+    // ausloeste, wuerde sonst "Noch keine Drucke" angezeigt – obwohl
+    // in Wirklichkeit nur niemand mit dem Drucker gesprochen hat.
+    final connected =
+        widget.printerState.connection == CanvasConnection.connected &&
+            _hasFetched;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
