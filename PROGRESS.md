@@ -18,6 +18,56 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-26 14:40 UTC – Phase 4.4-Nacharbeit: Filament-Save + Material-Picker + Ueberschrift
+
+Zwei Befunde aus der Poco-Abnahme (APK 5699b13) adressiert.
+
+### Nachweislich
+
+- Code: Commit `1bc94ad4d5` (lokal, nicht gepusht).
+  - `app/lib/screens/settings_screen.dart`: Save-Button jetzt auch im
+    Filament-Bereich; `_saveAsProfile` schreibt type=`filament`,
+    inherits=Material-Basisprofil des aktiven Fachs (via
+    `FilamentMapping.resolve`). Picker-Zeile `_FilamentProfilePickerRow`
+    oeffnet Dialog, der nur Filament-Profile mit passendem `inherits`
+    anbietet (= Zuordnung an das Material, nicht an das Fach).
+  - `app/lib/state/project_state.dart`: pro-Fach-slug persistiert
+    (`project.filament_profile_slug.A<n>`).
+  - `app/lib/settings/profile_writer.dart`: `ProfileWriterSlug.of()`
+    oeffentlich, damit Picker-Vergleich und ProjectScreen dieselbe
+    Normalisierung nutzen.
+  - L10n: neue Keys `settingsSourceCaptionFilament`,
+    `settingsSaveFilamentDialogTitle/Hint`,
+    `settingsFilamentActiveProfile/PickTitle/PickDefault/PickEmpty/
+    NoMatch` (de + en).
+- Tests: 52/52 gruen (`cd app && flutter test`), inklusive 5 neuer
+  Faelle in `test/settings_filament_widget_test.dart`:
+  1. Ueberschrift wechselt Prozess ↔ Filament bei Bereichswechsel.
+  2. Save-Button im Filament-Bereich sichtbar, disabled solange Fach
+     ohne Overrides, aktiv nach erstem Override.
+  3. ProfileWriter mit type=filament schreibt Preset-JSON mit
+     `type: "filament"` und erwartetem `inherits`; Reader liest es
+     als `SavedProfile.type == 'filament'` zurueck.
+  4. Picker-Filter: `inherits == Material-Basisprofil des Fachs` →
+     PETG-Profil nicht im PLA-Picker und umgekehrt; Prozess-Profile
+     nicht in Filament-Pickern.
+  5. ProjectState: pro-Fach-slug Round-Trip (set, Nachbar-Fach
+     unberuehrt, neue Instanz liest zurueck, clear).
+- APK: `app/build/app/outputs/flutter-apk/app-release.apk`
+  SHA256 `0be21bbe485d7c9ebf152d7d3f9769371779f315a754d14d391eaf94b4e2f79c`,
+  31 907 373 Byte, commit `1bc94ad4d5` + cli `761249e97b` eingebrannt,
+  INTERNET-Permission vorhanden (Build-Guard gruen).
+
+### Ungeprueft
+
+- **Install + Screenshot am Poco X3 Pro.** `lsusb` meldet das Poco
+  (Xiaomi Inc. Mi/Redmi series, MTP+ADB), aber `adb devices` liefert
+  leere Liste – vermutlich steht USB gerade auf MTP ohne Debugging,
+  weil Klaus den Abnahme-Druck/Zeitraffer-Export macht. ADB-Server
+  2x neu gestartet, kein Effekt. Install und Screenshot des
+  Filament-Bereichs mit "Als Profil speichern"-Knopf folgen, sobald
+  das Gerät wieder im Debugging-Modus angesteckt ist.
+
 ## 2026-10-26 09:30 UTC – Test E: `method 1047`-Shape-Probe (danielcherubini#432) → eindeutig 11× `1003`
 
 Lesender Beitrag zum HA-Integration-Issue #432. Repo-Clone
