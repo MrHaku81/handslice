@@ -129,7 +129,13 @@ void usage(std::ostream& os) {
         "--scale <f>  Uniforme Skalierung des Modells vor der Zentrierung.\n"
         "             f > 0, 1.0 = unveraendert. Nutzt ModelObject::scale(Vec3d)\n"
         "             aus libslic3r/Model.hpp:495, dieselbe Routine, die auch\n"
-        "             Orcas GUI unter \"Scale\" aufruft.\n";
+        "             Orcas GUI unter \"Scale\" aufruft.\n"
+        "\n"
+        "--overrides '<json>' | @<file>\n"
+        "             Map opt_key -> Wert. Wert darf Zahl, Bool oder String sein\n"
+        "             (werden intern zum serialisierten String konvertiert, so wie\n"
+        "             Orcas Preset ihn speichert). JSON-Arrays werden mit klarer\n"
+        "             Fehlermeldung abgelehnt – statt [\"250\"] gib \"250\" uebergeben.\n";
 }
 
 Args parse_args(int argc, char** argv) {
@@ -656,12 +662,37 @@ static int run(int argc, char** argv) {
         for (auto it = ov.begin(); it != ov.end(); ++it) {
             const std::string key = it.key();
             std::string value;
-            if (it.value().is_string())      value = it.value().get<std::string>();
-            else if (it.value().is_boolean()) value = it.value().get<bool>() ? "1" : "0";
-            else if (it.value().is_number_integer()) value = std::to_string(it.value().get<long long>());
-            else if (it.value().is_number())  value = std::to_string(it.value().get<double>());
-            else if (it.value().is_array())   value = it.value().dump(); // Vektor-Serialisierung roh
-            else die("--overrides: unsupported value type for key '" + key + "'");
+            // Erlaubt: Strings (serialisierte Werte, exakt so wie Orca
+            // sie im Preset ablegt) sowie Zahlen und Booleans (werden
+            // zu Strings konvertiert, damit Edit-Widgets nicht nach
+            // jedem Nullwert-Vergleich den String-Umweg selbst gehen
+            // muessen).
+            if (it.value().is_string()) {
+                value = it.value().get<std::string>();
+            } else if (it.value().is_boolean()) {
+                value = it.value().get<bool>() ? "1" : "0";
+            } else if (it.value().is_number_integer()) {
+                value = std::to_string(it.value().get<long long>());
+            } else if (it.value().is_number()) {
+                value = std::to_string(it.value().get<double>());
+            } else if (it.value().is_array()) {
+                // Arrays sind in Orcas Preset-Dateien die Vektor-
+                // Darstellung (`"nozzle_temperature": ["250"]`). Fuer
+                // --overrides erwartet die CLI den serialisierten
+                // Einzelwert ("250"), nicht die Array-Hulle. Fehler
+                // explizit, damit App und Tests den Unterschied sehen.
+                die("--overrides: value for key '" + key +
+                    "' is a JSON array; pass the serialized single "
+                    "value as a string instead (e.g. \"250\" instead "
+                    "of [\"250\"])");
+            } else if (it.value().is_null()) {
+                die("--overrides: value for key '" + key +
+                    "' is null; use the serialized default string or "
+                    "omit the key");
+            } else {
+                die("--overrides: unsupported value type for key '" +
+                    key + "' (expected string, number, or bool)");
+            }
 
             // Nur Keys zulassen, die print_config_def kennt – alles andere ist
             // ein Benutzerfehler und muss klar gemeldet werden.

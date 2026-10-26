@@ -108,6 +108,68 @@ mitgenommen).
 
 ---
 
+## 2026-10-26 15:40 MEZ – Phase-4.4-Nacharbeiten: arm64-Lauf + CLI-Override-Typen abgesichert
+
+### Nachweislich
+
+- **cli-contract-arm64.sh am Poco** komplett grün: Abschnitte
+  1-4 (Flag-Vertrag + Z-Diff), 5 (Phase-4.3-Overrides),
+  6 (Ungueltiger Key abgelehnt), 7 (libslic3r-Validate-Fehler
+  sauber abgefangen) **und Abschnitt 6 (Phase 4.4
+  Filament-Overrides)** – byte-identische Baseline (modulo
+  Timestamp-Zeile), M104 S260, M190 S88 A, G1 E-2.4. Hinweis:
+  Baseline-Vergleich im arm64-Teil nutzt jetzt dieselbe
+  `md5_sanitized`-Funktion wie der x86-Vertragstest, weil die
+  Timestamp-Zeile sonst zwei frische Laeufe nie byte-gleich
+  macht.
+- **CLI-Overrides-Typsicherung**
+  (`engine/cli/handslice-cli.cpp`): JSON-Zahlen (int+float) und
+  Booleans werden zu Strings konvertiert, Strings bleiben
+  unveraendert. **Arrays werden explizit abgelehnt** mit einer
+  Fehlermeldung, die den Key und einen Hinweis `["250"]` →
+  `"250"` nennt. Null-Werte ebenfalls mit klarer Meldung.
+  Help-Text im `--help` ergaenzt um einen Abschnitt zu
+  `--overrides`.
+- **Vertragstest `engine/test/overrides-types-contract.sh`**
+  (lokal x86, 4 Checks):
+  - Int `nozzle_temperature: 260` → `M104 S260` im G-Code.
+  - Bool `enable_pressure_advance: true` → exit 0, Bool-Array
+    `[true]` wird abgelehnt.
+  - Array `nozzle_temperature: [260]` → exit != 0, Fehlermeldung
+    nennt den Key und das Wort „array", kein terminate/abort.
+  - Null `nozzle_temperature: null` → exit != 0, Fehlermeldung
+    erwaehnt „null".
+- **x86 + arm64 CLI neu gebaut** auf Commit-Stand des aktuellen
+  HEAD (Phase-4.4-Commit). arm64 Binary ist noch nicht in jniLibs
+  der App gewandert – das macht der naechste App-Build. Der
+  Vertragstest in Abschnitt 6 lief auf dem **neuen** arm64-Binary.
+- **Bestehende Vertragstests** `filament-overrides-contract.sh`
+  und `scale-contract.sh` nach dem Rebuild weiterhin grün.
+
+### Ungeprueft
+
+- Enum-opt_keys als JSON-Zahl (z. B. `bed_type: 3` statt `"3"`):
+  der Code konvertiert den Int zu `"3"` und reicht ihn in Orcas
+  Preset-Parser. Das sollte funktionieren, ist aber nicht
+  explizit getestet. Phase 4.4 nutzt diesen Pfad nicht.
+
+### Geht nicht / Konsequenz
+
+- Weiterhin kein `null` erlaubt. Die App soll Overrides, die auf
+  Default zurueckgesetzt wurden, per `SettingsOverrides.reset(key)`
+  komplett entfernen, nicht als `null` schicken.
+
+### Artefakte
+
+- `engine/cli/handslice-cli.cpp` – Override-Validierung + Help.
+- `engine/test/overrides-types-contract.sh` – neuer Vertragstest.
+- `engine/test/cli-contract-arm64.sh` – `md5_sanitized`-Fix im
+  Phase-4.4-Abschnitt.
+- `engine/bin/handslice-cli-x86` / `-arm64` – neu gebaut, Commit
+  `761249e97b`.
+
+---
+
 ## 2026-10-26 15:15 MEZ – Phase 4.4 Filament-Einstellungen pro Fach
 
 Pendant zu Phase 4.2 (Prozess) + 4.3 (Save-as-Profil), diesmal fuer
