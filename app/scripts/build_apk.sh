@@ -86,6 +86,30 @@ flutter build apk --$MODE \
     --dart-define=CLI_COMMIT="$ARM_HASH"
 
 APK="build/app/outputs/flutter-apk/app-$MODE.apk"
-echo "APK: $APK"
-echo "SHA256: $(sha256sum "$APK" | awk '{print $1}')"
-echo "size:   $(stat --printf='%s' "$APK") byte"
+APK_SHA=$(sha256sum "$APK" | awk '{print $1}')
+APK_SIZE=$(stat --printf='%s' "$APK")
+
+# Verifikation: libapp.so (Dart-AOT-Blob) muss den Commit-Hash als
+# Byte-Sequenz enthalten. Die APK selbst ist DEFLATE-komprimiert,
+# deshalb kein grep auf dem Rohbyte-APK, sondern unzip -p auf die
+# arm64-Variante. Fehlt der Hash im Binary, wurde das --dart-define
+# nicht wirksam -> App faellt am Geraet in den Startup-Guard
+# (siehe app/lib/main.dart). Lieber hier abbrechen, damit solche
+# APKs gar nicht erst auf den Poco wandern.
+# `unzip -p … | grep -q` scheitert unter `set -euo pipefail`, weil
+# `grep -q` nach erstem Treffer schliesst → `unzip` bekommt SIGPIPE
+# → Pipe-Exit nicht-0. Deshalb vorher nach tmp extrahieren.
+tmp_libapp=$(mktemp)
+trap 'rm -f "$tmp_libapp"' EXIT
+unzip -p "$APK" lib/arm64-v8a/libapp.so > "$tmp_libapp" 2>/dev/null
+if ! grep -a -q "$COMMIT" "$tmp_libapp"; then
+    echo "ABBRUCH: lib/arm64-v8a/libapp.so in $APK enthaelt" >&2
+    echo "         den Commit-Hash $COMMIT nicht –" >&2
+    echo "         --dart-define wurde offenbar nicht weitergegeben." >&2
+    exit 4
+fi
+
+echo "APK:    $APK"
+echo "SHA256: $APK_SHA"
+echo "size:   $APK_SIZE byte"
+echo "commit-im-APK: ok ($COMMIT gefunden; cli $ARM_HASH)"

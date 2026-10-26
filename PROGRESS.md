@@ -108,6 +108,75 @@ mitgenommen).
 
 ---
 
+## 2026-10-26 11:30 UTC – Phase-5-Build-Guard: Build ohne Hashes bricht ab
+
+Klaus hat am Poco gemerkt: der Phase-5-APK vom Vorlauf zeigte im
+Badge nur `v0.1 · app – cli` (beides als `-` aus `defaultValue`),
+weil ich `flutter build apk --release` direkt gerufen hatte statt
+`app/scripts/build_apk.sh --release`. Dadurch fehlten die
+`--dart-define`-Werte `BUILD_COMMIT` / `CLI_COMMIT` / `BUILD_TIME`.
+
+### Nachweislich
+
+- **Ursache belegt** (`app/lib/widgets/build_info_badge.dart:16-22`):
+  `String.fromEnvironment` mit `defaultValue: '-'` – ohne
+  `--dart-define` bleibt alles auf `-`. Build-Skript
+  `app/scripts/build_apk.sh` setzt die drei Werte korrekt, wurde
+  aber nicht benutzt.
+- **Zwei-Gurt-Loesung:**
+  1. **Startup-Guard in der App** (`main.dart`): neue Getter-Flagge
+     `BuildInfoBadge.hasMissingMetadata`. Wenn beim Start irgendein
+     Hash `-` ist, startet nicht die normale UI, sondern ein
+     Vollbild-Fehler-Overlay („Build-Metadaten fehlen"). Greift
+     auch im Release-Build und auch bei einem APK, das nicht via
+     Skript gebaut wurde.
+  2. **Verify-Schritt im Build-Skript**: Nach `flutter build apk`
+     wird `lib/arm64-v8a/libapp.so` aus der APK extrahiert und auf
+     den Commit-Hash gegreppt. Fehlt der Hash im AOT-Blob, bricht
+     das Skript mit Exit-Code 4 ab – die APK landet nicht am Poco.
+     (Direkter grep auf die APK scheitert, weil der ZIP-Container
+     DEFLATE-komprimiert; deshalb Umweg ueber temp-File. Pipe
+     `unzip | grep -q` scheiterte an SIGPIPE + `pipefail`.)
+- **Build via Skript** erfolgreich, Verify-Schritt greift korrekt:
+  ```
+  Build-APK (release) commit=785e5cbb2d cli=ee4da3d7b5 time=2026-10-26T10:25Z
+  APK:    build/app/outputs/flutter-apk/app-release.apk
+  SHA256: 30ce0e2a7ddefb9fdbb0e68a973351af9070955d17ed1927a2c3bd819b7002cd
+  size:   31799137 byte
+  commit-im-APK: ok (785e5cbb2d gefunden; cli ee4da3d7b5)
+  ```
+  (31.8 MB statt vorher 16 MB – Default-Skript baut alle drei ABIs;
+  der vorige `--target-platform=android-arm64`-Build war nur eine.)
+- **Installiert auf Poco** (`adb install -r` → Success).
+- **Badge-Nachweis** `local-test/phase5-badge-hashes.png` zeigt:
+  ```
+  v0.1 · app 785e5cbb2d
+  cli ee4da3d7b5
+  2026-10-26T10:26Z
+  ```
+
+### Ungeprueft
+
+- Startup-Guard greift sicher in Debug (per `--dart-define`
+  weggelassen); fuer Release ist das Verhalten per Konstruktion
+  identisch (`String.fromEnvironment` ist statisch gebunden).
+  Expliziter Test eines fehlerhaften Builds steht aus, aber die
+  Logik ist trivial.
+
+### Geht nicht
+
+- Flutter kann `--dart-define` nicht aus Gradle-Pre-Hooks erzwingen;
+  jemand koennte `flutter build apk --release` immer noch direkt
+  rufen – dann greift aber jetzt der Startup-Guard am Gerät.
+
+### Konsequenz
+
+Der Weg bleibt: **immer** `app/scripts/build_apk.sh --release`.
+Direkter `flutter build apk` liefert zwar ein APK, aber dieses
+weigert sich beim Start und meldet den Fehler per UI.
+
+---
+
 ## 2026-10-26 11:15 UTC – Phase 5 (Zeitraffer in der App): 5a + 5b + 5c steht
 
 Neuer Reiter „Drucker" (vierter Tab) + Netzwerk-Pfade fuer 1036 / 1051

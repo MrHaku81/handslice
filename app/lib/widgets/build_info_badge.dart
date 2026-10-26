@@ -21,6 +21,12 @@ class BuildInfoBadge extends StatelessWidget {
   static const String buildTime =
       String.fromEnvironment('BUILD_TIME', defaultValue: '-');
 
+  // Startup-Guard-Signal fuer main.dart. true = APK wurde ohne die
+  // dart-defines gebaut (also wahrscheinlich mit `flutter build apk`
+  // direkt statt via app/scripts/build_apk.sh). Siehe main.dart.
+  static bool get hasMissingMetadata =>
+      buildCommit == '-' || cliCommit == '-' || buildTime == '-';
+
   @override
   Widget build(BuildContext context) {
     final labelStyle =

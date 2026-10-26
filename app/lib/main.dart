@@ -14,6 +14,7 @@ import 'settings/settings_schema.dart';
 import 'state/printer_state.dart';
 import 'state/project_state.dart';
 import 'theme/workshop_theme.dart';
+import 'widgets/build_info_badge.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +24,18 @@ Future<void> main() async {
     systemNavigationBarColor: WorkshopTokens.surface,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
+
+  // Startup-Guard: Wenn die Build-Metadaten fehlen (BUILD_COMMIT/
+  // CLI_COMMIT/BUILD_TIME), wurde das APK nicht via
+  // app/scripts/build_apk.sh gebaut – die App startet dann nicht
+  // als Projekt-/Druck-UI, sondern zeigt ein Vollbild-Fehler-Overlay
+  // mit konkretem Hinweis. Grund: ein Release ohne Hashes verwirrt
+  // bei Debug-Rueckfragen ("welche App-/CLI-Version lief?"), und
+  // Flutter kann dart-defines selbst nicht erzwingen.
+  if (BuildInfoBadge.hasMissingMetadata) {
+    runApp(const _MissingBuildMetadataApp());
+    return;
+  }
 
   // Harte Startreihenfolge: Prefs + Slicer init vor runApp – damit die
   // Projekt-Screen beim ersten Build schon lauffaehigen State hat.
@@ -171,6 +184,65 @@ class _RootShellState extends State<RootShell> {
               label: l.tabSettings,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Fehler-UI, wenn `BuildInfoBadge.hasMissingMetadata` beim Start true
+// war. Blockiert die restliche App bewusst – ein Release ohne
+// nachvollziehbaren Build-Stand wird nicht angeboten.
+class _MissingBuildMetadataApp extends StatelessWidget {
+  const _MissingBuildMetadataApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: buildWorkshopTheme(),
+      home: Scaffold(
+        backgroundColor: WorkshopTokens.background,
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Icon(Icons.error_outline,
+                      size: 48, color: Color(0xFFE57373)),
+                  SizedBox(height: 16),
+                  Text(
+                    'Build-Metadaten fehlen',
+                    style: TextStyle(
+                      color: WorkshopTokens.text,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    'Dieses APK wurde ohne die üblichen Build-Hashes '
+                    'erstellt. App-Commit und CLI-Commit sind unbekannt, '
+                    'deshalb lässt sich dieser Stand im Zweifelsfall nicht '
+                    'reproduzieren.',
+                    style: TextStyle(color: WorkshopTokens.text),
+                  ),
+                  SizedBox(height: 12),
+                  Text(
+                    'Fix: statt flutter build apk das Skript '
+                    'app/scripts/build_apk.sh verwenden (setzt '
+                    '--dart-define BUILD_COMMIT / CLI_COMMIT / '
+                    'BUILD_TIME und prüft, dass die arm64-CLI zum '
+                    'App-Commit passt).',
+                    style: TextStyle(color: WorkshopTokens.textMuted),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
