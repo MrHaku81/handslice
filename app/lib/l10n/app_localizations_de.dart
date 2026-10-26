@@ -336,6 +336,21 @@ class AppLocalizationsDe extends AppLocalizations {
       'Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet.';
 
   @override
+  String get projectProfilePickTitle => 'Profil laden';
+
+  @override
+  String get projectProfileStandard => 'Orca-Standard (0.20mm Standard)';
+
+  @override
+  String get projectProfilePickEmpty =>
+      'Noch keine eigenen Profile gespeichert. Unter Einstellungen → Als Profil speichern anlegen.';
+
+  @override
+  String projectProfileMissing(String slug) {
+    return 'Gespeichertes Profil fehlt: $slug';
+  }
+
+  @override
   String get tabPrinter => 'Drucker';
 
   @override

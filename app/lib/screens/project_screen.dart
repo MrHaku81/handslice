@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
+import '../settings/profile_reader.dart';
 import '../settings/settings_overrides.dart';
 import '../state/printer_state.dart';
 import '../state/project_state.dart';
@@ -34,10 +35,13 @@ class ProjectScreen extends StatefulWidget {
 }
 
 class _ProjectScreenState extends State<ProjectScreen> {
+  List<SavedProfile> _profiles = const [];
+
   @override
   void initState() {
     super.initState();
     widget.projectState.addListener(_onStateChanged);
+    _reloadProfiles();
   }
 
   @override
@@ -48,6 +52,115 @@ class _ProjectScreenState extends State<ProjectScreen> {
 
   void _onStateChanged() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _reloadProfiles() async {
+    final list = await const ProfileReader().list();
+    if (!mounted) return;
+    setState(() => _profiles = list);
+    // Beim ersten Build: falls ein Profil als aktiv gespeichert ist,
+    // dessen Overrides in `SettingsOverrides` einspielen – aber nur,
+    // wenn die aktuellen Overrides leer sind (sonst wuerde man einen
+    // laufenden Nutzer-Zustand ueberschreiben).
+    final slug = widget.projectState.activeProfileSlug;
+    if (slug != null && slug.isNotEmpty && widget.overrides.isEmpty) {
+      final match = list.where((p) => _slugify(p.name) == slug).toList();
+      if (match.isNotEmpty) _applyProfile(match.first);
+    }
+  }
+
+  // Muss exakt mit ProfileWriter._slugify uebereinstimmen.
+  static String _slugify(String s) {
+    final down = s.toLowerCase();
+    final out = StringBuffer();
+    for (final cu in down.runes) {
+      final c = String.fromCharCode(cu);
+      if (RegExp(r'[a-z0-9]').hasMatch(c)) {
+        out.write(c);
+      } else if (RegExp(r'[\s_\-\.]').hasMatch(c)) {
+        out.write('-');
+      }
+    }
+    final cleaned = out.toString().replaceAll(RegExp(r'-+'), '-');
+    return cleaned.replaceAll(RegExp(r'^-+|-+$'), '');
+  }
+
+  void _applyProfile(SavedProfile p) {
+    widget.overrides.clearAll();
+    for (final e in p.overrides.entries) {
+      widget.overrides.set(e.key, e.value);
+    }
+  }
+
+  String _activeProfileLabel(AppLocalizations l) {
+    final slug = widget.projectState.activeProfileSlug;
+    if (slug == null || slug.isEmpty) {
+      return '0.20mm Standard @Elegoo CC2 0.4 nozzle';
+    }
+    final match = _profiles.where((p) => _slugify(p.name) == slug).toList();
+    if (match.isEmpty) {
+      return l.projectProfileMissing(slug);
+    }
+    return match.first.name;
+  }
+
+  Future<void> _openProfilePicker() async {
+    await _reloadProfiles(); // frischen Stand holen, falls jemand gespeichert hat
+    if (!mounted) return;
+    final l = AppLocalizations.of(context);
+    final current = widget.projectState.activeProfileSlug;
+    final chosen = await showDialog<_PickerResult>(
+      context: context,
+      builder: (ctx) {
+        return SimpleDialog(
+          title: Text(l.projectProfilePickTitle),
+          children: [
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx,
+                  const _PickerResult(reset: true)),
+              child: Row(
+                children: [
+                  Icon(current == null ? Icons.radio_button_checked
+                                        : Icons.radio_button_unchecked, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text(l.projectProfileStandard)),
+                ],
+              ),
+            ),
+            if (_profiles.isNotEmpty) const Divider(height: 0),
+            for (final p in _profiles)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx, _PickerResult(profile: p)),
+                child: Row(
+                  children: [
+                    Icon(_slugify(p.name) == current
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(p.name)),
+                    Text('${p.overrides.length}',
+                        style: Theme.of(ctx).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+            if (_profiles.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+                child: Text(l.projectProfilePickEmpty,
+                    style: Theme.of(ctx).textTheme.bodySmall),
+              ),
+          ],
+        );
+      },
+    );
+    if (chosen == null || !mounted) return;
+    if (chosen.reset) {
+      widget.overrides.clearAll();
+      await widget.projectState.setActiveProfileSlug(null);
+    } else if (chosen.profile != null) {
+      _applyProfile(chosen.profile!);
+      await widget.projectState.setActiveProfileSlug(_slugify(chosen.profile!.name));
+    }
   }
 
   Future<void> _pickModel() async {
@@ -112,9 +225,31 @@ class _ProjectScreenState extends State<ProjectScreen> {
                   value: 'Elegoo Centauri Carbon 2 — 0.4 nozzle',
                 ),
                 const Divider(),
-                WorkshopRow(
-                  label: l.projectProfile,
-                  value: '0.20mm Standard @Elegoo CC2 0.4 nozzle',
+                InkWell(
+                  onTap: _openProfilePicker,
+                  borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(l.projectProfile,
+                                  style: theme.textTheme.bodySmall),
+                              const SizedBox(height: 4),
+                              Text(
+                                _activeProfileLabel(l),
+                                style: theme.textTheme.bodyMedium,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down),
+                      ],
+                    ),
+                  ),
                 ),
                 const Divider(),
                 Padding(
@@ -524,4 +659,10 @@ class _ErrorBox extends StatelessWidget {
       child: Text(message, style: const TextStyle(color: Color(0xFFFF6B6B))),
     );
   }
+}
+
+class _PickerResult {
+  const _PickerResult({this.profile, this.reset = false});
+  final SavedProfile? profile;
+  final bool reset;
 }

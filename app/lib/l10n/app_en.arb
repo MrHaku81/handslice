@@ -118,6 +118,12 @@
   "focusHintDpad": "Use D-pad / Tab to move focus, Enter / Space to activate.",
   "sampleBannerPlaceholder": "Milestone 1 scaffold with sample data — nothing is wired yet.",
 
+  "projectProfilePickTitle": "Load profile",
+  "projectProfileStandard": "Orca default (0.20mm Standard)",
+  "projectProfilePickEmpty": "No saved profiles yet. Save one from Settings → Save as profile.",
+  "projectProfileMissing": "Saved profile missing: {slug}",
+  "@projectProfileMissing": {"placeholders": {"slug": {"type": "String"}}},
+
   "tabPrinter": "Printer",
   "printerHistoryHeading": "Print history",
   "printerHistoryEmpty": "No prints yet.",

@@ -650,6 +650,30 @@ abstract class AppLocalizations {
   /// **'Milestone 1 scaffold with sample data — nothing is wired yet.'**
   String get sampleBannerPlaceholder;
 
+  /// No description provided for @projectProfilePickTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Load profile'**
+  String get projectProfilePickTitle;
+
+  /// No description provided for @projectProfileStandard.
+  ///
+  /// In en, this message translates to:
+  /// **'Orca default (0.20mm Standard)'**
+  String get projectProfileStandard;
+
+  /// No description provided for @projectProfilePickEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No saved profiles yet. Save one from Settings → Save as profile.'**
+  String get projectProfilePickEmpty;
+
+  /// No description provided for @projectProfileMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved profile missing: {slug}'**
+  String projectProfileMissing(String slug);
+
   /// No description provided for @tabPrinter.
   ///
   /// In en, this message translates to:

@@ -28,6 +28,9 @@ class ProjectState extends ChangeNotifier {
   // Keys fuer die z-offset-Persistenz
   static const _kZOffsetA = 'project.z_offset.A_mm';
   static const _kZOffsetB = 'project.z_offset.B_mm';
+  // Phase 5b-Nacharbeit: zuletzt geladenes User-Profil (slug) persistent.
+  // null/leer = Orca-Standard.
+  static const _kActiveProfile = 'project.active_profile_slug';
 
   // Projekt-Vorgabe: ±0.50 mm, Schritte 0.01 mm. Grenzen hier zentral,
   // damit UI und Tests dieselbe Quelle nutzen.
@@ -64,6 +67,18 @@ class ProjectState extends ChangeNotifier {
   Future<void> nudgeZOffset(BedType b, double deltaMm) async {
     final current = zOffsetFor(b);
     await setZOffsetFor(b, current + deltaMm);
+  }
+
+  // --- aktives User-Profil (null = Orca-Standard) ---
+  String? get activeProfileSlug => _prefs.getString(_kActiveProfile);
+
+  Future<void> setActiveProfileSlug(String? slug) async {
+    if (slug == null || slug.isEmpty) {
+      await _prefs.remove(_kActiveProfile);
+    } else {
+      await _prefs.setString(_kActiveProfile, slug);
+    }
+    notifyListeners();
   }
 
   void setModel(String path) {

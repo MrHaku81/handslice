@@ -99,6 +99,11 @@
   "focusHintDpad": "D-Pad / Tab bewegen den Fokus, Enter / Leertaste aktivieren.",
   "sampleBannerPlaceholder": "Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet.",
 
+  "projectProfilePickTitle": "Profil laden",
+  "projectProfileStandard": "Orca-Standard (0.20mm Standard)",
+  "projectProfilePickEmpty": "Noch keine eigenen Profile gespeichert. Unter Einstellungen → Als Profil speichern anlegen.",
+  "projectProfileMissing": "Gespeichertes Profil fehlt: {slug}",
+
   "tabPrinter": "Drucker",
   "printerHistoryHeading": "Druckhistorie",
   "printerHistoryEmpty": "Noch keine Drucke.",

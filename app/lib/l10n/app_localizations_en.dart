@@ -331,6 +331,21 @@ class AppLocalizationsEn extends AppLocalizations {
       'Milestone 1 scaffold with sample data — nothing is wired yet.';
 
   @override
+  String get projectProfilePickTitle => 'Load profile';
+
+  @override
+  String get projectProfileStandard => 'Orca default (0.20mm Standard)';
+
+  @override
+  String get projectProfilePickEmpty =>
+      'No saved profiles yet. Save one from Settings → Save as profile.';
+
+  @override
+  String projectProfileMissing(String slug) {
+    return 'Saved profile missing: $slug';
+  }
+
+  @override
   String get tabPrinter => 'Printer';
 
   @override
