@@ -251,43 +251,77 @@ where the MP4 was already available. Behavior:
   only reliable success signal is a head-probe on the expected
   `video/<name>.mp4` URL after the status returns to 1.
 
-### Realtest observations on `method 1051` (currently inconclusive)
+### Realtest observations on `method 1051`: confirmed success path
 
-I did send 1051 against one of the two `video_status=1` entries on
-my printer today, but — because the raw frames had also been
-removed via the display — the test is **invalidated** by the
-same stale-history behavior described above. Observations in that
-degenerate case, worth documenting since they'll be useful during
-error handling even if they are not proof of the normal 1051
-behavior:
+Follow-up to the inconclusive runs: ran the full
+`method 1051 params.url=picture/<name><ts>` cycle from an app
+against a freshly captured time-lapse (raw frames still on the
+printer, no USB export in between). Result: **the method
+produces a usable MP4 over MQTT**, and the full flow — `method
+1036` → „render" button → `method 1051` → wait for
+`machine_status.status == 12` to leave → re-poll `method 1036`
+→ GET `/download?file_name=video/<name>.mp4` — works end to end.
 
-- `method 1051` replied `result.error_code = 0` in ~230 ms. The
-  reply payload included `result.url` already pointing at the
-  would-be `video/<name>.mp4` destination.
-- Status 12 was entered 27 ms later with `sub_status = 3020`
-  („generating"), and left after only **972 ms** with
-  `sub_status = 3022`. The known USB-triggered success path uses
-  `3020 → 3021 → 1` and took 26 s on the same printer for a
-  100-frame clip.
-- After returning to idle, `method 1036` for the targeted task was
-  unchanged: `time_lapse_video_status` still 1, `time_lapse_video_url`
-  still `picture/<name><ts>`, `time_lapse_video_size` still 0.
-  Only `time_lapse_video_duration` moved from 0 to 4.
-- `GET /download` against the response URL timed out at the
-  response-head stage; the control-GET against the one surviving
-  MP4 answered 200 in ~70 ms.
+Observations worth having in the integration:
 
-Likely interpretation (not hard-proven): `sub_status 3022` means
-„no frames to render", not „compose error". Separately, the ai_camera
-composite path checks the picture directory first
-(`elegoo/extras/ai_camera/module/util/time_lapse_control.cpp:93-107`)
-and bails out when absent; the failure is only reflected in the
-sub_status transition, not in the MQTT `error_code`.
+- `method 1051` replies immediately with `result.error_code = 0`;
+  the reply's `result.url` already points at the eventual
+  `video/<name>.mp4`, but the file does not exist yet.
+- `machine_status.status` transitions to 12 for the duration of
+  the composite, then back to 1 when it is done. On a 100-frame
+  (~3-second) clip on a Centauri Carbon 2 with firmware
+  02.01.01.07, the USB-triggered variant of the same composite
+  took ~26 s; the MQTT variant on the same printer is in the
+  same order of magnitude (not benchmarked to the millisecond in
+  my test).
+- After `status` returns to 1, `method 1036` shows the target
+  task with `time_lapse_video_status = 2` and the URL rewritten
+  to `video/<name>.mp4`. A short HTTP GET against that URL
+  succeeds, Content-Length matches `time_lapse_video_size` from
+  the history entry, and the body is a valid MP4 (H.264 /
+  640×360 / 30 fps in my tests).
+- The printer's **display shows no dialog** during an MQTT-
+  triggered 1051. The USB-export path shows „Generating
+  video" / „Copying video" while the sub_status walks
+  `3020 → 3021`, but a 1051 from LAN runs silent on the
+  display. The only user-visible progress signal is the
+  `api_status` stream — the integration should drive its spinner
+  from `machine_status.status == 12`, not expect any
+  display-side event.
 
-**Suggestion for the integration:** treat 1051 success the same as
-every other time-lapse state check — probe the resulting URL with
-a short HTTP GET. Do not infer success from `error_code=0` or
-from `status==1` after `status==12`.
+### Earlier `3022` runs (why they are not success)
+
+Two separate 1051 runs on different `video_status=1` entries
+produced `machine_status.status 1 → 12 → 1` in **under a
+second**, with `sub_status 3020 → 3022` and no change to
+`time_lapse_video_status`. Both runs were against entries whose
+raw frames were no longer on the printer (one was 12 days old
+and had been deleted at the display; the other was for a
+`video_status=2` entry — the composite had already consumed
+its own raw frames). So:
+
+- `sub_status 3022` means „no raw frames at the requested
+  path", independent of why they are missing (never captured,
+  deleted at display, consumed by a previous composite, or
+  wrong URL form).
+- The ai_camera composite path checks the directory first
+  (`elegoo/extras/ai_camera/module/util/time_lapse_control.cpp:93-107`)
+  and bails out when absent; the failure is only reflected in
+  the sub_status transition, not in the MQTT `error_code`.
+- The window where 1051 can succeed on this firmware is narrow:
+  **a `video_status=1` entry whose composite has not yet been
+  triggered by any path** (display USB export, or an earlier
+  1051). After the first successful composite the raw-frame
+  directory is `rm -rf`'d by the ai_camera module.
+
+**Suggestion for the integration:** treat 1051 success the same
+as every other time-lapse state check — probe the resulting URL
+with a short HTTP GET. Do not infer success from
+`error_code = 0` or from `status == 1` after `status == 12`.
+When a `video_status=1` entry is older or has already been
+inspected via display, the next render attempt is likely to end
+in `3022` with no MP4; this is a non-fatal „nothing to do"
+signal.
 
 ### Printer clock caveat (expanded)
 

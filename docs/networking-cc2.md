@@ -1840,6 +1840,96 @@ melden.
 
 ---
 
+## Test F 2026-10-26: 1051-Erfolgsfall belegt (App am echten CC2)
+
+Phase-5-App-Realtest durch Klaus, 2026-10-26 12:07 MEZ (= ca. 11:07
+UTC). Nach den Tests A–E war der 1051-Erfolgsfall (`3020→3021`) ueber
+MQTT der einzige noch offene Punkt. Dieser Lauf schliesst ihn.
+
+### Ablauf
+
+1. Druck mit Zeitraffer aus der App gestartet (Fach **A3**, PLA Pro
+   schwarz; freie Fachwahl funktioniert). Zeitraffer-Flag ging ueber
+   den etablierten `method 1020 config.delay_video=true`-Pfad.
+2. Druckende, Historie-Eintrag mit `video_status=1` + URL
+   `picture/<name><ts>` erschien in der App.
+3. In der App „Video erzeugen" → App schickt
+   `method 1051 params.url="picture/<name><ts>"`.
+4. App beobachtet `machine_status.status`-Wechsel 1 → 12 → 1 und
+   holt dann `method 1036` erneut.
+5. Target-Eintrag wechselt auf `video_status=2`, URL ist jetzt
+   `video/<name><ts>.mp4`; Head-Probe liefert HTTP 200.
+6. Download aufs Handy ueber den App-Button, Teilen via
+   Android-Share funktioniert.
+
+### Belegte Fakten
+
+- **1051 erzeugt tatsaechlich ein MP4** – das vorher nur
+  USB-Export-wege bewiesene Composite ist jetzt auch per MQTT real.
+- Video-Eigenschaften: **640×360, 100 Frames, 3,3 s**. Deckt sich
+  mit dem heute-frueh-USB-Composite (siehe „Realtest 2026-10-26:
+  1036 + HTTP-Download") – gleiche Aufloesung, gleiche Framezahl,
+  gleiche Dauer. **Der Encoder-Pfad fuer MQTT-Rendern und
+  Display-/USB-Rendern ist derselbe.**
+- Head-Probe erkennt die bereits am Display geloeschten alten
+  Zeitraffer korrekt als „nicht mehr verfuegbar" (Timeout statt
+  Download-Button) – das ist das Live-Verhalten des stale-History-
+  Pfads aus Test E.
+
+### Beobachtung: Display zeigt beim MQTT-1051 nichts an
+
+Beim **USB-Export** (`06:50:54` UTC heute frueh) zeigte das Drucker-
+Display zuerst „Video wird generiert" und kurz vor 100 % „Video
+wird kopiert" (passt zu sub_status `3020 → 3021`, siehe
+docs-Abschnitt „Historie ist stale" weiter unten).
+
+Beim **MQTT-1051** zeigt das Display laut Klaus **keinen Dialog**
+und keinen Fortschritt. Der Status wandert nur in den
+`api_status`-Deltas. Fuer die App bedeutet das:
+
+- **Fortschrittsanzeige geht ausschliesslich ueber MQTT**, nicht
+  ueber eine Display-Interaktion. Der aktuelle Spinner-Pfad
+  (`machine_status.status == 12` → zurueck auf 1) ist der einzige
+  Signalweg und reicht.
+- Benutzer am Drucker merkt waehrend eines App-ausgeloesten
+  Composite nichts; das ist nicht schlimm, aber als Erwartungs-
+  Setzung dokumentiert.
+
+### Composite-Dauer (ungemessen in diesem Lauf)
+
+Der passive MQTT-Mitschnitt (`tools/mqtt-sniff.py`) lief in
+diesem Realtest **nicht**, also fehlt die exakte Zeitachse
+`3020 → 3021`. Groessenordnungs-Vergleich:
+
+- USB-Export heute frueh (`06:50:54 → 06:51:20` UTC) bei
+  demselben 100-Frame-Video dauerte **26 s** (`3020 → 3021 → 1`).
+- Klaus' User-Sicht beim App-Lauf: der App-Spinner „Erzeugt
+  Video…" war „nicht lange" sichtbar; keine Minutenschleife.
+- **Vermutung** (nicht gemessen): App-1051 liegt in der gleichen
+  Groessenordnung wie der USB-Export (zehnersekunden), weil der
+  Encoder-Pfad identisch ist.
+
+Konkrete Messung beim naechsten App-Lauf, falls Klaus Lust hat:
+`tools/mqtt-sniff.py` vorher starten, dann „Video erzeugen"
+drueken. Dann steht die Zeitachse im JSONL.
+
+### Was damit entschieden ist
+
+- Der komplette Zeitraffer-Fluss der App (`1036` → `1051` →
+  `machine_status==12` → `1036` + Head-Probe → `/download`)
+  **funktioniert in jedem Schritt gegen die echte Firmware
+  02.01.01.07**.
+- `1051` ist **in beiden Formen** nutzbar: USB-Export durch den
+  Benutzer am Display, oder MQTT-1051 durch die App. Beide
+  Pfade teilen sich den `ai_camera`-Composite-Code
+  (siehe `elegoo/extras/ai_camera/.../time_lapse_control.cpp`).
+- Der offene Punkt „Erfolgsfall `3020→3021` ueber MQTT" aus Test
+  B/C ist damit **geschlossen** – wenn Rohframes tatsaechlich
+  noch vorhanden sind (frischer Druck, kein USB-Export dazwischen),
+  rendert `1051` sauber durch.
+
+---
+
 ## Historie ist stale: 1036 kennt geloeschte Zeitraffer nicht (2026-10-26)
 
 Entscheidender Befund **nach** dem 1051-Test weiter unten, der den

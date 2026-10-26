@@ -72,7 +72,7 @@ Shell-History.
 - Discovery-Verhalten im Script: Broadcast an 255.255.255.255 **und**
   Subnet-Broadcast 192.168.0.255 blieben in diesem LAN ohne
   Antwort; direkter Unicast an `<cc2-ip>:52700` klappt (seit
-  2026-10-25 bekannt). Workaround im Wrapper: SN statisch
+  2026-10-25 bekannt). Workaround im Wrapper: SN statisch gesetzt
   (`--serial <cc2-sn>`).
 
 ### Geht nicht
@@ -105,6 +105,85 @@ Shell-History.
 
 Nichts committed, nichts gepusht (dieser Abschnitt wird gleich
 mitgenommen).
+
+---
+
+## 2026-10-26 12:07 MEZ – Phase 5 am echten CC2 bestaetigt (offener 1051-Erfolgsfall geschlossen)
+
+Klaus hat den ganzen Fluss gegen den realen CC2 durchgespielt.
+
+### Nachweislich
+
+- Druck mit Zeitraffer **aus der App** gestartet (Fach **A3**, PLA
+  Pro schwarz – freie Fachwahl funktioniert, nicht nur A4). Nach
+  Druckende Historien-Eintrag mit `video_status=1`.
+- In der App „Video erzeugen" → App ruft `method 1051`
+  `params.url=picture/<name><ts>`. Nach `machine_status.status
+  12 → 1` holt die App automatisch `method 1036` neu; Target-
+  Eintrag ist jetzt `video_status=2` + `video/<name><ts>.mp4`.
+- Head-Probe liefert HTTP 200; Download-Button startet den
+  tatsaechlichen Pull aufs Handy.
+- Share-Intent via `share_plus` funktioniert.
+- Video-Properties identisch zum heute-frueh-USB-Composite:
+  **640×360, 100 Frames, 3,3 s**. Encoder-Pfad ist derselbe.
+- **Head-Probe erkennt die am Display geloeschten alten Zeitraffer
+  korrekt als „nicht mehr verfuegbar"** – kein versehentlicher
+  Download-Button fuer stale `video_status=2`-Eintraege.
+- **Display zeigt beim MQTT-1051 NICHTS** (anders als beim
+  USB-Export, der „Video wird generiert"/„Video wird kopiert"
+  anzeigt). Der Fortschritt kommt **nur ueber api_status**;
+  Spinner-Pfad der App (Status 12 → 1) ist der einzige Signalweg.
+
+Damit ist der nach Test B/C verbliebene offene Punkt „1051 im
+Erfolgsfall ueber MQTT" **geschlossen**.
+
+### Ungeprueft
+
+- **Exakte Composite-Dauer** ueber MQTT (3020→3021): nicht
+  gemessen – `tools/mqtt-sniff.py` lief in diesem Lauf nicht.
+  USB-Export-Vergleichswert: 26 s fuer 100 Frames; App-Lauf
+  laut Klaus „nicht lange" (vermutlich dieselbe
+  Groessenordnung, Encoder identisch). Konkrete Zahl beim
+  naechsten Lauf nachtragen – Sniff vorher starten.
+
+### Geht nicht / Nacharbeit
+
+- **Download-Ablage versteckt**: aktuell schreibt die App nach
+  `getExternalStorageDirectory()/handslice-timelapses/`, das ist
+  der app-eigene Pfad unter `/storage/emulated/0/Android/data/
+  dev.handslice.handslice/files/handslice-timelapses/`. Dort
+  **nicht in der Galerie sichtbar** und **bei Deinstallation
+  weg**. Share-Intent funktioniert zwar, aber der Weg „einfach
+  Galerie oeffnen" fehlt.
+- Nacharbeit (nicht in diesem Commit): entweder in den
+  **oeffentlichen Downloads-Ordner** schreiben (`/storage/
+  emulated/0/Download/`, braucht ab API 30
+  `WRITE_EXTERNAL_STORAGE` / `MANAGE_EXTERNAL_STORAGE` oder
+  Storage-Access-Framework) **oder** per **MediaStore-API** nach
+  `MediaStore.Video.Media` eintragen (dann in der Galerie
+  sichtbar, keine extra Berechtigung noetig ab API 30). Letzteres
+  ist der moderne Weg; braucht ein kleines Platform-Channel-
+  Integral, da Flutter das nicht out-of-the-box koennen.
+- Als **offenes M5-Follow-up** vermerkt; nicht blockierend fuer
+  Phase 5.
+
+### App-Konsequenz
+
+- Keine Code-Aenderung noetig – M5 funktioniert so, wie
+  spezifiziert.
+- Issue-Draft fuer `danielcherubini#432` entfaellt die „currently
+  inconclusive"-Reserve zum 1051; der Draft wird entsprechend
+  umgestellt.
+
+### Artefakte
+
+- MP4 des Phase-5-Testdrucks liegt auf Klaus' Handy.
+- `tools/mqtt-sniff.py` – nicht gelaufen; falls Klaus beim
+  naechsten Zeitraffer-Druck Zahlen will, vorher starten.
+
+Nichts committed in diesem Lauf gegenueber dem Phase-5-Code;
+nur Doku-Updates (networking-cc2.md Test F, PROGRESS.md,
+upstream-Draft).
 
 ---
 
