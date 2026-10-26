@@ -331,6 +331,21 @@ class AppLocalizationsEn extends AppLocalizations {
       'Milestone 1 scaffold with sample data — nothing is wired yet.';
 
   @override
+  String get settingsAreaProcess => 'Process';
+
+  @override
+  String get settingsAreaFilament => 'Filament';
+
+  @override
+  String settingsFilamentBase(String name) {
+    return 'Base profile: $name';
+  }
+
+  @override
+  String get settingsFilamentNoSlot =>
+      'No slot assignment known. Connect to the printer and reload Canvas.';
+
+  @override
   String get projectProfilePickTitle => 'Load profile';
 
   @override

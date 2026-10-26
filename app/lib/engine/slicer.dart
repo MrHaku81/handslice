@@ -168,6 +168,11 @@ class SlicerService {
     // angewendet. Leer → Flag wird weggelassen, G-Code bleibt
     // byte-gleich zum Baseline.
     Map<String, String> overrides = const {},
+    // Phase 4.4: optionaler Pfad zum Filamentprofil
+    // (relativ zum Resources-Verzeichnis, ohne fuehrenden Slash),
+    // z. B. "profiles/Elegoo/filament/ECC2/Elegoo PLA PRO @ECC2.json".
+    // Leer = Default "Elegoo PLA @ECC2.json" (vorige Phase).
+    String? filamentProfileRelative,
   }) async {
     if (!isReady) {
       throw StateError('SlicerService.init() wurde nicht aufgerufen');
@@ -177,10 +182,14 @@ class SlicerService {
     // --z-offset nur mitgeben, wenn nicht genau 0 (vermeidet unnoetige
     // Config-Overrides und haelt die CLI-Zeile sauber).
     final bool applyZ = zOffsetMm.abs() > 1e-9;
+    final filamentPath = (filamentProfileRelative == null ||
+            filamentProfileRelative.isEmpty)
+        ? '$profiles/filament/ECC2/Elegoo PLA @ECC2.json'
+        : '$resources/$filamentProfileRelative';
     final args = <String>[
       '--machine', '$profiles/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json',
       '--process', '$profiles/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json',
-      '--filament', '$profiles/filament/ECC2/Elegoo PLA @ECC2.json',
+      '--filament', filamentPath,
       '--resources', resources,
       '--output', outputPath,
       '--bed-type', bedType.cliArg,

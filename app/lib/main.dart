@@ -9,6 +9,7 @@ import 'screens/project_screen.dart';
 import 'screens/print_screen.dart';
 import 'screens/printer_screen.dart';
 import 'screens/settings_screen.dart';
+import 'settings/filament_overrides.dart';
 import 'settings/settings_overrides.dart';
 import 'settings/settings_schema.dart';
 import 'state/printer_state.dart';
@@ -66,6 +67,7 @@ Future<void> main() async {
     settings = const SettingsSchema(orcaVersion: '', pagesByArea: {});
   }
   final overrides = SettingsOverrides();
+  final filamentOverrides = FilamentOverrides(prefs);
 
   runApp(HandsliceApp(
     slicer: slicer,
@@ -73,6 +75,7 @@ Future<void> main() async {
     printerState: printerState,
     settingsSchema: settings,
     overrides: overrides,
+    filamentOverrides: filamentOverrides,
   ));
 }
 
@@ -84,6 +87,7 @@ class HandsliceApp extends StatelessWidget {
     required this.printerState,
     required this.settingsSchema,
     required this.overrides,
+    required this.filamentOverrides,
   });
 
   final SlicerService slicer;
@@ -91,6 +95,7 @@ class HandsliceApp extends StatelessWidget {
   final PrinterState printerState;
   final SettingsSchema settingsSchema;
   final SettingsOverrides overrides;
+  final FilamentOverrides filamentOverrides;
 
   @override
   Widget build(BuildContext context) {
@@ -106,6 +111,7 @@ class HandsliceApp extends StatelessWidget {
         printerState: printerState,
         settingsSchema: settingsSchema,
         overrides: overrides,
+        filamentOverrides: filamentOverrides,
       ),
     );
   }
@@ -119,6 +125,7 @@ class RootShell extends StatefulWidget {
     required this.printerState,
     required this.settingsSchema,
     required this.overrides,
+    required this.filamentOverrides,
   });
 
   final SlicerService slicer;
@@ -126,6 +133,7 @@ class RootShell extends StatefulWidget {
   final PrinterState printerState;
   final SettingsSchema settingsSchema;
   final SettingsOverrides overrides;
+  final FilamentOverrides filamentOverrides;
 
   @override
   State<RootShell> createState() => _RootShellState();
@@ -143,6 +151,7 @@ class _RootShellState extends State<RootShell> {
         projectState: widget.projectState,
         printerState: widget.printerState,
         overrides: widget.overrides,
+        filamentOverrides: widget.filamentOverrides,
       ),
       PrintScreen(
         projectState: widget.projectState,
@@ -152,6 +161,8 @@ class _RootShellState extends State<RootShell> {
       SettingsScreen(
         schema: widget.settingsSchema,
         overrides: widget.overrides,
+        filamentOverrides: widget.filamentOverrides,
+        printerState: widget.printerState,
       ),
     ];
 

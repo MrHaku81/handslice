@@ -118,6 +118,12 @@
   "focusHintDpad": "Use D-pad / Tab to move focus, Enter / Space to activate.",
   "sampleBannerPlaceholder": "Milestone 1 scaffold with sample data — nothing is wired yet.",
 
+  "settingsAreaProcess": "Process",
+  "settingsAreaFilament": "Filament",
+  "settingsFilamentBase": "Base profile: {name}",
+  "@settingsFilamentBase": {"placeholders": {"name": {"type": "String"}}},
+  "settingsFilamentNoSlot": "No slot assignment known. Connect to the printer and reload Canvas.",
+
   "projectProfilePickTitle": "Load profile",
   "projectProfileStandard": "Orca default (0.20mm Standard)",
   "projectProfilePickEmpty": "No saved profiles yet. Save one from Settings → Save as profile.",

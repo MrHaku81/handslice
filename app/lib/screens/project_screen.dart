@@ -6,6 +6,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
+import '../settings/filament_mapping.dart';
+import '../settings/filament_overrides.dart';
 import '../settings/profile_reader.dart';
 import '../settings/settings_overrides.dart';
 import '../state/printer_state.dart';
@@ -23,12 +25,14 @@ class ProjectScreen extends StatefulWidget {
     required this.projectState,
     required this.printerState,
     required this.overrides,
+    required this.filamentOverrides,
   });
 
   final SlicerService slicer;
   final ProjectState projectState;
   final PrinterState printerState;
   final SettingsOverrides overrides;
+  final FilamentOverrides filamentOverrides;
 
   @override
   State<ProjectScreen> createState() => _ProjectScreenState();
@@ -179,7 +183,29 @@ class _ProjectScreenState extends State<ProjectScreen> {
     final dir = await getApplicationSupportDirectory();
     final outPath = '${dir.path}/handslice_project.gcode';
     _lastOutPath = outPath;
-    await state.slice(widget.slicer, outPath, overrides: widget.overrides);
+
+    // Phase 4.4: Fach → Filamentprofil-Pfad + Fach-spezifische Overrides.
+    final tray = widget.printerState.trayAssignmentForTool0;
+    final slot = widget.printerState.slots
+        .where((s) => s.trayId == tray)
+        .toList();
+    String? filamentRelative;
+    if (slot.isNotEmpty) {
+      final ref = const FilamentMapping().resolve(
+        filamentName: slot.first.filamentName,
+        filamentType: slot.first.filamentType,
+      );
+      filamentRelative = 'profiles/Elegoo/filament/ECC2/${ref.assetName}';
+    }
+    final filamentOv = widget.filamentOverrides.forTray(tray);
+
+    await state.slice(
+      widget.slicer,
+      outPath,
+      overrides: widget.overrides,
+      filamentOverrides: filamentOv,
+      filamentProfileRelative: filamentRelative,
+    );
   }
 
   String? _lastOutPath;

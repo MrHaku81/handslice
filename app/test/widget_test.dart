@@ -16,6 +16,7 @@ import 'package:handslice/net/elegoo_cc2_client.dart';
 import 'package:handslice/screens/print_screen.dart';
 import 'package:handslice/screens/project_screen.dart';
 import 'package:handslice/screens/settings_screen.dart';
+import 'package:handslice/settings/filament_overrides.dart';
 import 'package:handslice/settings/settings_overrides.dart';
 import 'package:handslice/settings/settings_schema.dart';
 import 'package:handslice/state/printer_state.dart';
@@ -68,6 +69,12 @@ Future<PrinterState> _makePrinter({ElegooCc2Client? client}) async {
   );
 }
 
+Future<FilamentOverrides> _makeFilament() async {
+  SharedPreferences.setMockInitialValues(<String, Object>{});
+  final prefs = await SharedPreferences.getInstance();
+  return FilamentOverrides(prefs);
+}
+
 // Fake Slicer, der eine Weile wartet und auf Cancel reagiert, indem er
 // `SliceProcessException(killedBySignal:true)` wirft – als haette der
 // Prozess SIGKILL bekommen. ProjectState.cancelSlice() setzt vorher
@@ -85,6 +92,7 @@ class _CancellableSlicer extends SlicerService {
     bool noCenter = false,
     void Function(Process proc)? onProcessStarted,
     Map<String, String> overrides = const {},
+    String? filamentProfileRelative,
   }) async {
     // "Prozess laeuft" – wir warten bis zu 2 s, der Test cancelled
     // vorher.
@@ -114,6 +122,7 @@ class _OomSlicer extends SlicerService {
     bool noCenter = false,
     void Function(Process proc)? onProcessStarted,
     Map<String, String> overrides = const {},
+    String? filamentProfileRelative,
   }) async {
     throw SliceProcessException(
       exitCode: -9,
@@ -147,6 +156,7 @@ class _FakeSlicer extends SlicerService {
     bool noCenter = false,
     void Function(Process proc)? onProcessStarted,
     Map<String, String> overrides = const {},
+    String? filamentProfileRelative,
   }) async {
     lastZOffset = zOffsetMm;
     lastBedType = bedType;
@@ -179,6 +189,7 @@ void main() {
         projectState: state,
         printerState: await _makePrinter(),
         overrides: SettingsOverrides(),
+        filamentOverrides: await _makeFilament(),
       ),
     ));
     await tester.pumpAndSettle();
@@ -203,6 +214,7 @@ void main() {
         projectState: state,
         printerState: await _makePrinter(),
         overrides: SettingsOverrides(),
+        filamentOverrides: await _makeFilament(),
       ),
     ));
     await tester.pumpAndSettle();
@@ -305,7 +317,12 @@ void main() {
     final sch = miniSchema();
     final ov  = SettingsOverrides();
     await tester.pumpWidget(_wrap(
-      SettingsScreen(schema: sch, overrides: ov),
+      SettingsScreen(
+        schema: sch,
+        overrides: ov,
+        filamentOverrides: await _makeFilament(),
+        printerState: await _makePrinter(),
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -334,7 +351,12 @@ void main() {
     final sch = miniSchema();
     final ov  = SettingsOverrides();
     await tester.pumpWidget(_wrap(
-      SettingsScreen(schema: sch, overrides: ov),
+      SettingsScreen(
+        schema: sch,
+        overrides: ov,
+        filamentOverrides: await _makeFilament(),
+        printerState: await _makePrinter(),
+      ),
     ));
     await tester.pumpAndSettle();
 
@@ -361,7 +383,12 @@ void main() {
     final sch = miniSchema();
     final ov  = SettingsOverrides();
     await tester.pumpWidget(_wrap(
-      SettingsScreen(schema: sch, overrides: ov),
+      SettingsScreen(
+        schema: sch,
+        overrides: ov,
+        filamentOverrides: await _makeFilament(),
+        printerState: await _makePrinter(),
+      ),
     ));
     await tester.pumpAndSettle();
 

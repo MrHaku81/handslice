@@ -205,4 +205,67 @@ fi
 echo "PASS (exit=$rc)"
 
 echo
+echo "=== 6  Filament-Overrides (Phase 4.4) ==="
+# Belegen, dass pro-Fach-Overrides auf Filament-opt_keys im G-Code
+# ankommen. PETG-Basisprofil (A1), bed-type B:
+#   - nozzle_temperature=260 → "M104 S260 ; set nozzle temperature"
+#   - hot_plate_temp_initial_layer=88 → "M190 S88 A" am ersten Layer
+#   - retraction_length=2.4 → "G1 E-2.4" statt Baseline-0.728
+# Baseline ohne Overrides muss byte-gleich zu einem zweiten Baseline-
+# Lauf sein (Null-Change-Garantie, uebernommen aus Phase 4.3).
+FIL_PETG="${REMOTE_RES}/profiles/Elegoo/filament/ECC2/Elegoo PETG @ECC2.json"
+OUT_FBASE="${REMOTE}/fbase.gcode"
+OUT_FBASE2="${REMOTE}/fbase2.gcode"
+OUT_FN="${REMOTE}/fn.gcode"
+OUT_FB="${REMOTE}/fb.gcode"
+OUT_FR="${REMOTE}/fr.gcode"
+adb shell "${REMOTE_CLI} --machine '${MACHINE}' --process '${PROCESS}' --filament '${FIL_PETG}' --resources '${REMOTE_RES}' --output '${OUT_FBASE}'  --bed-type B --quiet --no-center '${REMOTE_STL}'" > /dev/null
+adb shell "${REMOTE_CLI} --machine '${MACHINE}' --process '${PROCESS}' --filament '${FIL_PETG}' --resources '${REMOTE_RES}' --output '${OUT_FBASE2}' --bed-type B --quiet --no-center '${REMOTE_STL}'" > /dev/null
+adb shell "${REMOTE_CLI} --machine '${MACHINE}' --process '${PROCESS}' --filament '${FIL_PETG}' --resources '${REMOTE_RES}' --output '${OUT_FN}'     --bed-type B --overrides '{\"nozzle_temperature\":\"260\"}' --quiet --no-center '${REMOTE_STL}'" > /dev/null
+adb shell "${REMOTE_CLI} --machine '${MACHINE}' --process '${PROCESS}' --filament '${FIL_PETG}' --resources '${REMOTE_RES}' --output '${OUT_FB}'     --bed-type B --overrides '{\"hot_plate_temp_initial_layer\":\"88\"}' --quiet --no-center '${REMOTE_STL}'" > /dev/null
+adb shell "${REMOTE_CLI} --machine '${MACHINE}' --process '${PROCESS}' --filament '${FIL_PETG}' --resources '${REMOTE_RES}' --output '${OUT_FR}'     --bed-type B --overrides '{\"retraction_length\":\"2.4\"}' --quiet --no-center '${REMOTE_STL}'" > /dev/null
+adb pull "${OUT_FBASE}"  "${LOCAL_TMP}/fbase.gcode"  >/dev/null
+adb pull "${OUT_FBASE2}" "${LOCAL_TMP}/fbase2.gcode" >/dev/null
+adb pull "${OUT_FN}"     "${LOCAL_TMP}/fn.gcode"     >/dev/null
+adb pull "${OUT_FB}"     "${LOCAL_TMP}/fb.gcode"     >/dev/null
+adb pull "${OUT_FR}"     "${LOCAL_TMP}/fr.gcode"     >/dev/null
+
+python3 <<PY
+import sys, hashlib, re
+def md5(p):
+    h = hashlib.md5(); h.update(open(p,'rb').read()); return h.hexdigest()
+mb1 = md5('${LOCAL_TMP}/fbase.gcode')
+mb2 = md5('${LOCAL_TMP}/fbase2.gcode')
+if mb1 != mb2:
+    print(f'FAIL: zwei Baseline-Laeufe nicht byte-identisch ({mb1} vs {mb2})', file=sys.stderr); sys.exit(1)
+print(f'  Baseline byte-identisch (md5 {mb1[:10]}…)')
+
+def grep_lines(p, pattern):
+    r = re.compile(pattern)
+    return [ln.rstrip() for ln in open(p) if r.search(ln)]
+
+# 1) nozzle_temperature=260 muss als M104 S260 (set nozzle temperature) auftauchen.
+nozzle_lines = grep_lines('${LOCAL_TMP}/fn.gcode', r'^M104 S\d+ ; set nozzle temperature')
+if not any('S260' in l for l in nozzle_lines):
+    print('FAIL: nozzle_temperature=260 nicht als M104 S260 im G-Code', file=sys.stderr)
+    print('   gefundene set-Zeilen:', nozzle_lines[:3], file=sys.stderr); sys.exit(1)
+print(f'  nozzle=260: {next(l for l in nozzle_lines if "S260" in l)}')
+
+# 2) hot_plate_temp_initial_layer=88 muss als M190 S88 am ersten Layer (vor dem Druck) stehen.
+mb_lines = grep_lines('${LOCAL_TMP}/fb.gcode', r'^M190 S\d+ A')
+if not any('S88' in l for l in mb_lines):
+    print('FAIL: hot_plate_temp_initial_layer=88 nicht als M190 S88 A im G-Code', file=sys.stderr)
+    print('   gefundene M190 S* A Zeilen:', mb_lines[:3], file=sys.stderr); sys.exit(1)
+print(f'  bed B initial=88: {next(l for l in mb_lines if "S88" in l)}')
+
+# 3) retraction_length=2.4 muss sich in G1 E-2.4-Zuegen zeigen.
+retract_e = set(re.findall(r'G1 E(-[0-9.]+)', open('${LOCAL_TMP}/fr.gcode').read()))
+if '-2.4' not in retract_e and '-2.400' not in retract_e:
+    print('FAIL: retraction_length=2.4 nicht als G1 E-2.4 im G-Code', file=sys.stderr)
+    print('   gefundene retract-Werte:', sorted(retract_e)[:6], file=sys.stderr); sys.exit(1)
+print(f'  retract=2.4: G1 E-2.4 in retract-Zuegen gefunden')
+print('PASS (Filament-Overrides mit G-Code-Markern belegt)')
+PY
+
+echo
 echo "Vertragstest bestanden. CLI-Commit auf dem Geraet: ${CLI_COMMIT}"

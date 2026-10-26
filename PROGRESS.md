@@ -108,6 +108,119 @@ mitgenommen).
 
 ---
 
+## 2026-10-26 15:15 MEZ – Phase 4.4 Filament-Einstellungen pro Fach
+
+Pendant zu Phase 4.2 (Prozess) + 4.3 (Save-as-Profil), diesmal fuer
+den Filament-Bereich mit CANVAS-A1..A4-spezifischen Overrides.
+
+### Nachweislich funktioniert
+
+- **Material → Orca-Profil-Mapping** (`app/lib/settings/filament_mapping.dart`):
+  - ELEGOO PETG → `Elegoo PETG @ECC2.json`
+  - ELEGOO RAPID PETG → `Elegoo Rapid PETG @ECC2.json`
+  - ELEGOO PLA PRO → `Elegoo PLA PRO @ECC2.json`
+  - ELEGOO RAPID PLA+ → `Elegoo Rapid PLA+ @ECC2.json`
+  - PLA-Typ ohne Markenname → `Elegoo PLA @ECC2.json` (generisch,
+    kein Fallback-Hinweis).
+  - Alles andere → `Elegoo PLA @ECC2.json` **mit sichtbarem
+    Hinweis** `fallbackReason`.
+- **Per-Fach-Overrides** (`FilamentOverrides`): 4 Instanzen (A1..A4),
+  persistent in SharedPreferences unter
+  `filament.overrides.A<n>`. Fachwechsel haelt die Maps strikt
+  getrennt (Unit-Test
+  `app/test/filament_overrides_test.dart`), Save/Reload
+  roundtrip-sicher.
+- **Settings-UI** (`app/lib/screens/settings_screen.dart`):
+  - Area-Toggle oben: **Prozess | Filament**.
+  - Im Filament-Bereich zusaetzlich A1..A4-Fach-Umschalter mit
+    Material-Label pro Fach aus `PrinterState.slots` (2005).
+  - Unter dem Umschalter die Fallback-Hinweis-Zeile mit gelbem
+    Info-Icon, wenn `FilamentProfileRef.generic == true`.
+  - Reiter+Gruppen aus Schema `area=filament`
+    (7 Reiter / 22 Gruppen / 83 Optionen, siehe Phase 4.1).
+  - „Als Profil speichern" bleibt nur im Prozess-Bereich sichtbar
+    (Filament-Overrides sind pro Fach persistent und brauchen
+    keinen Save-Dialog).
+- **Slicer-CLI-Durchreichung** (`app/lib/engine/slicer.dart` +
+  `app/lib/state/project_state.dart`):
+  - CLI nimmt `--filament <pfad>` mehrfach entgegen
+    (Beleg: `engine/cli/handslice-cli.cpp:145` + 592, bereits
+    bestehend). Fuer Phase 4.4 reicht **ein** Fach; Multimaterial
+    kommt spaeter.
+  - App waehlt beim Slicen das Filamentprofil des aktiven Fachs
+    (`trayAssignmentForTool0`) und reicht die Fach-Overrides
+    gemerged mit den Prozess-Overrides per `--overrides` an die
+    CLI. Prozess- und Filament-opt_keys sind disjunkt im Schema.
+- **Bettemperatur pro Plattenart** belegt
+  (`engine/test/filament-overrides-contract.sh`, lokal x86):
+  Baseline-Doppel-Lauf **byte-identisch** (modulo Timestamp-Zeile),
+  dann drei Einzel-Overrides mit G-Code-Marker:
+
+  | Override | opt_key | G-Code-Beleg |
+  |---|---|---|
+  | Duesentemperatur 260 °C | `nozzle_temperature=260` | `M104 S260 ; set nozzle temperature` |
+  | Hot-Plate initial 88 °C (Seite B) | `hot_plate_temp_initial_layer=88` | `M190 S88 A` am Pre-Heat |
+  | Retract 2.4 mm | `retraction_length=2.4` | `G1 E-2.4`-Zuege statt Baseline 0.728 |
+
+- **Vertragstest arm64** (`engine/test/cli-contract-arm64.sh`
+  Abschnitt „=== 6 Filament-Overrides"): dieselben drei
+  Checks mit `adb` am Poco. Laeuft Klaus beim naechsten Device-
+  Test; Logik und erwartete Marker sind identisch zum x86-Test.
+- **Widget-Tests gruen**
+  (`app/test/settings_filament_widget_test.dart`, 2 Tests):
+  Fachwechsel A1 ↔ A3 haelt Overrides getrennt + Persistenz-
+  Roundtrip; unbekanntes Material zeigt Fallback-Hinweis mit
+  „nicht erkannt".
+- **Alle Tests zusammen gruen:** 47/47 (`flutter test test/`).
+- **APK via `build_apk.sh --release`**:
+  - SHA256 `b4e63a97daa11b729d22c900625e624093ad4d7680d1961fc0baf4af57600e29`
+  - 31.9 MB, Commit-Guard greift, INTERNET-Permission vorhanden.
+  - Auf Poco installiert; Smoke-Nachweis
+    `local-test/phase44-step1.png`: Einstellungen-Reiter mit
+    **Area-Toggle „Prozess | Filament"** oben sichtbar + Zaehler
+    „Keine Ueberschreibungen" und „Als Profil speichern"-Button
+    (nur im Prozess-Bereich).
+
+### Ungeprueft
+
+- **Multimaterial** (mehrere `--filament`-Flags gleichzeitig mit
+  Pro-Filament-Overrides): die CLI-Logik ist aktuell so, dass
+  Overrides nach dem letzten Filament-Profil global ueber die
+  Config geschichtet werden – fuer Mehrfarbe muss ein eigenes
+  Mapping Fach→Werte-Set rein. Fuer Phase 4.4 nicht gebraucht
+  (Klaus startet mono-material).
+- **Live-Vertragstest am Poco**: `cli-contract-arm64.sh` muss
+  Klaus beim naechsten Lauf triggern; die Logik ist durch die
+  x86-Variante bereits grün.
+
+### Geht nicht / Konsequenz
+
+- Overrides-Werte muessen als **String** uebergeben werden
+  (`"88"`, nicht `[88]` oder `88` als Int). Grund: Orcas Overrides-
+  Parser schaltet nur bei String-Werten den `coInts`-Pfad korrekt;
+  JSON-Arrays werden roh als `"[88]"` serialisiert und fallen in
+  Orcas Validate. In `SettingsOverrides.set(key, value)` ist das
+  schon so vorgesehen; neue Edit-Widgets muessen das weiter
+  einhalten.
+
+### Artefakte
+
+- `app/lib/settings/filament_mapping.dart` – Material→Profil.
+- `app/lib/settings/filament_overrides.dart` – Pro-Fach-State.
+- `app/lib/screens/settings_screen.dart` – Area-Toggle + Fach-
+  Umschalter + Fallback-Hinweis.
+- `app/lib/engine/slicer.dart` + `project_state.dart` –
+  Filament-Pfad + gemergte Overrides zur CLI.
+- `engine/test/filament-overrides-contract.sh` – x86-Vertragstest.
+- `engine/test/cli-contract-arm64.sh` Abschnitt 6 – arm64-
+  Vertragstest (laeuft Klaus beim naechsten Lauf).
+- `app/test/filament_overrides_test.dart` + `settings_filament_widget_test.dart`.
+- `local-test/phase44-step1.png` – Smoke-Screenshot.
+
+Kein Druck in dieser Session; den startet Klaus.
+
+---
+
 ## 2026-10-26 12:07 MEZ – Phase 5 am echten CC2 bestaetigt (offener 1051-Erfolgsfall geschlossen)
 
 Klaus hat den ganzen Fluss gegen den realen CC2 durchgespielt.

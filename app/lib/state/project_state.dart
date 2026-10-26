@@ -94,7 +94,9 @@ class ProjectState extends ChangeNotifier {
   }
 
   Future<void> slice(SlicerService slicer, String outputPath,
-      {SettingsOverrides? overrides}) async {
+      {SettingsOverrides? overrides,
+      SettingsOverrides? filamentOverrides,
+      String? filamentProfileRelative}) async {
     if (_modelPath == null) return;
     _slicing = true;
     _cancelRequested = false;
@@ -104,12 +106,21 @@ class ProjectState extends ChangeNotifier {
     _boundsViolations = const [];
     notifyListeners();
     try {
+      // Prozess- und Filament-Overrides mergen (disjunkte Key-Mengen,
+      // Phase-4-Schema trennt die beiden Bereiche sauber). Prozess-
+      // Overrides zuerst, Filament-Overrides setzen die filament-
+      // spezifischen Felder.
+      final merged = <String, String>{
+        ...overrides?.all ?? const {},
+        ...filamentOverrides?.all ?? const {},
+      };
       final r = await slicer.slice(
         modelPath: _modelPath!,
         bedType: _bedType,
         outputPath: outputPath,
         zOffsetMm: zOffsetFor(_bedType),
-        overrides: overrides?.all ?? const {},
+        overrides: merged,
+        filamentProfileRelative: filamentProfileRelative,
         onProcessStarted: (p) {
           _activeProc = p;
           // Falls Cancel vor dem Hochfahren kam: direkt beenden.

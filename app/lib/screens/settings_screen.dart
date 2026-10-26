@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import '../settings/filament_mapping.dart';
+import '../settings/filament_overrides.dart';
 import '../settings/profile_writer.dart';
 import '../settings/settings_overrides.dart';
 import '../settings/settings_schema.dart';
+import '../state/printer_state.dart';
 import '../theme/workshop_theme.dart';
 import '../widgets/workshop_card.dart';
 
@@ -17,18 +20,26 @@ class SettingsScreen extends StatefulWidget {
     super.key,
     required this.schema,
     required this.overrides,
+    required this.filamentOverrides,
+    required this.printerState,
   });
 
   final SettingsSchema schema;
   final SettingsOverrides overrides;
+  final FilamentOverrides filamentOverrides;
+  final PrinterState printerState;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
+enum _SettingsArea { process, filament }
+
 class _SettingsScreenState extends State<SettingsScreen> {
   SettingTier _tier = SettingTier.fortgeschritten;
   int _activePage = 0;
+  int _activeTray = 3; // Default A4 (deckt sich mit PrinterState-Default)
+  _SettingsArea _area = _SettingsArea.process;
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
@@ -36,6 +47,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     widget.overrides.addListener(_onOverridesChanged);
+    widget.filamentOverrides.addListener(_onOverridesChanged);
+    widget.printerState.addListener(_onOverridesChanged);
     _searchCtrl.addListener(() {
       final q = _searchCtrl.text.trim().toLowerCase();
       if (q != _searchQuery) setState(() => _searchQuery = q);
@@ -45,6 +58,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     widget.overrides.removeListener(_onOverridesChanged);
+    widget.filamentOverrides.removeListener(_onOverridesChanged);
+    widget.printerState.removeListener(_onOverridesChanged);
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -53,7 +68,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() {});
   }
 
-  List<SettingPage> get _pages => widget.schema.pagesFor('print');
+  List<SettingPage> get _pages {
+    final area = _area == _SettingsArea.process ? 'print' : 'filament';
+    return widget.schema.pagesFor(area);
+  }
+
+  // Overrides-Instanz des gerade aktiven Bereichs + Fachs.
+  SettingsOverrides get _activeOverrides => _area == _SettingsArea.process
+      ? widget.overrides
+      : widget.filamentOverrides.forTray(_activeTray);
 
   Future<void> _saveAsProfile() async {
     final l = AppLocalizations.of(context);
@@ -87,6 +110,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed != true || !mounted) return;
     try {
+      // Phase 4.3 speichert nur Prozess-Profile; Filament-Overrides
+      // werden pro Fach direkt persistiert (siehe FilamentOverrides).
       final file = await const ProfileWriter().save(
         name: nameCtrl.text.trim(),
         baseInherits: '0.20mm Standard @Elegoo CC2 0.4 nozzle',
@@ -125,24 +150,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 12),
 
+          _AreaToggle(
+            value: _area,
+            onChanged: (a) => setState(() { _area = a; _activePage = 0; }),
+          ),
+          const SizedBox(height: 10),
+
+          if (_area == _SettingsArea.filament) ...[
+            _TrayPicker(
+              activeTray: _activeTray,
+              slots: widget.printerState.slots,
+              onChanged: (t) => setState(() => _activeTray = t),
+            ),
+            const SizedBox(height: 8),
+            _FilamentBaseHint(
+              tray: _activeTray,
+              slots: widget.printerState.slots,
+            ),
+            const SizedBox(height: 10),
+          ],
+
           Row(
             children: [
               Expanded(
                 child: Text(
-                  l.settingsOverridesCount(widget.overrides.count),
+                  l.settingsOverridesCount(_activeOverrides.count),
                   style: theme.textTheme.bodySmall?.copyWith(
-                    color: widget.overrides.isEmpty
+                    color: _activeOverrides.isEmpty
                         ? WorkshopTokens.textMuted
                         : WorkshopTokens.accent,
                   ),
                 ),
               ),
-              TextButton.icon(
-                onPressed:
-                    widget.overrides.isEmpty ? null : _saveAsProfile,
-                icon: const Icon(Icons.save_outlined),
-                label: Text(l.settingsSaveAsProfile),
-              ),
+              if (_area == _SettingsArea.process)
+                TextButton.icon(
+                  onPressed:
+                      widget.overrides.isEmpty ? null : _saveAsProfile,
+                  icon: const Icon(Icons.save_outlined),
+                  label: Text(l.settingsSaveAsProfile),
+                ),
             ],
           ),
           const SizedBox(height: 8),
@@ -174,7 +220,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               pageName: page.display(locale),
               groupName: group.display(locale),
               options: opts,
-              overrides: widget.overrides,
+              overrides: _activeOverrides,
               locale: locale,
               showPageName: searching,
             );
@@ -782,5 +828,174 @@ class _NumberInputState extends State<_NumberInput> {
         ),
       ],
     );
+  }
+}
+
+// Bereichsumschalter oben: Prozess | Filament. Fuer Filament kommt
+// darunter noch der Fach-Umschalter.
+class _AreaToggle extends StatelessWidget {
+  const _AreaToggle({required this.value, required this.onChanged});
+  final _SettingsArea value;
+  final ValueChanged<_SettingsArea> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final labels = {
+      _SettingsArea.process:  l.settingsAreaProcess,
+      _SettingsArea.filament: l.settingsAreaFilament,
+    };
+    return Row(
+      children: _SettingsArea.values.map((a) {
+        final selected = a == value;
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: GestureDetector(
+              onTap: () => onChanged(a),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? WorkshopTokens.accent.withValues(alpha: 0.18)
+                      : null,
+                  border: Border.all(
+                    color: selected
+                        ? WorkshopTokens.accent
+                        : WorkshopTokens.border,
+                  ),
+                  borderRadius:
+                      BorderRadius.circular(WorkshopTokens.radiusMedium),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  labels[a]!,
+                  style: TextStyle(
+                    color: selected ? WorkshopTokens.accent : WorkshopTokens.text,
+                    fontWeight:
+                        selected ? FontWeight.w500 : FontWeight.w400,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+/// A1..A4-Umschalter. Zeigt pro Fach den Material-Namen aus dem
+/// zuletzt empfangenen 2005 (oder "–"), damit klar ist, welches
+/// Material belegt wird. State des Umschalters liegt im Parent.
+class _TrayPicker extends StatelessWidget {
+  const _TrayPicker({
+    required this.activeTray,
+    required this.slots,
+    required this.onChanged,
+  });
+  final int activeTray;
+  final List<dynamic> slots; // typed CanvasSlot aus printer_state
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: List.generate(4, (i) {
+        final selected = i == activeTray;
+        final slot = slots.where((s) => s.trayId == i).toList();
+        final label = slot.isNotEmpty ? (slot.first.filamentName as String) : '–';
+        return Expanded(
+          child: Padding(
+            padding: EdgeInsets.only(right: i == 3 ? 0 : 6),
+            child: GestureDetector(
+              onTap: () => onChanged(i),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? WorkshopTokens.accent.withValues(alpha: 0.18)
+                      : null,
+                  border: Border.all(
+                    color: selected
+                        ? WorkshopTokens.accent
+                        : WorkshopTokens.border,
+                  ),
+                  borderRadius:
+                      BorderRadius.circular(WorkshopTokens.radiusMedium),
+                ),
+                child: Column(
+                  children: [
+                    Text('A${i + 1}',
+                        style: TextStyle(
+                          color: selected
+                              ? WorkshopTokens.accent
+                              : WorkshopTokens.text,
+                          fontWeight: FontWeight.w500,
+                        )),
+                    const SizedBox(height: 2),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: WorkshopTokens.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+/// Hinweiszeile unter dem Fach-Umschalter: welches Orca-Filamentprofil
+/// als Ausgangspunkt genommen wird. Hebt sichtbar hervor, wenn ein
+/// Fallback zum Einsatz kommt (Material aus 2005 nicht eindeutig).
+class _FilamentBaseHint extends StatelessWidget {
+  const _FilamentBaseHint({required this.tray, required this.slots});
+  final int tray;
+  final List<dynamic> slots;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final match = slots.where((s) => s.trayId == tray).toList();
+    if (match.isEmpty) {
+      return Text(l.settingsFilamentNoSlot,
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: WorkshopTokens.textMuted));
+    }
+    final ref = const FilamentMapping().resolve(
+      filamentName: match.first.filamentName as String,
+      filamentType: match.first.filamentType as String,
+    );
+    final profile = ref.assetName.replaceAll('.json', '');
+    final baseText = l.settingsFilamentBase(profile);
+    if (ref.generic) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, size: 14, color: Color(0xFFF2B241)),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              '$baseText — ${ref.fallbackReason}',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: const Color(0xFFF2B241)),
+            ),
+          ),
+        ],
+      );
+    }
+    return Text(baseText,
+        style: theme.textTheme.bodySmall
+            ?.copyWith(color: WorkshopTokens.textMuted));
   }
 }

@@ -99,6 +99,11 @@
   "focusHintDpad": "D-Pad / Tab bewegen den Fokus, Enter / Leertaste aktivieren.",
   "sampleBannerPlaceholder": "Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet.",
 
+  "settingsAreaProcess": "Prozess",
+  "settingsAreaFilament": "Filament",
+  "settingsFilamentBase": "Basisprofil: {name}",
+  "settingsFilamentNoSlot": "Keine Fach-Zuordnung bekannt. Mit dem Drucker verbinden und Fächer neu laden.",
+
   "projectProfilePickTitle": "Profil laden",
   "projectProfileStandard": "Orca-Standard (0.20mm Standard)",
   "projectProfilePickEmpty": "Noch keine eigenen Profile gespeichert. Unter Einstellungen → Als Profil speichern anlegen.",

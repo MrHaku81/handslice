@@ -650,6 +650,30 @@ abstract class AppLocalizations {
   /// **'Milestone 1 scaffold with sample data — nothing is wired yet.'**
   String get sampleBannerPlaceholder;
 
+  /// No description provided for @settingsAreaProcess.
+  ///
+  /// In en, this message translates to:
+  /// **'Process'**
+  String get settingsAreaProcess;
+
+  /// No description provided for @settingsAreaFilament.
+  ///
+  /// In en, this message translates to:
+  /// **'Filament'**
+  String get settingsAreaFilament;
+
+  /// No description provided for @settingsFilamentBase.
+  ///
+  /// In en, this message translates to:
+  /// **'Base profile: {name}'**
+  String settingsFilamentBase(String name);
+
+  /// No description provided for @settingsFilamentNoSlot.
+  ///
+  /// In en, this message translates to:
+  /// **'No slot assignment known. Connect to the printer and reload Canvas.'**
+  String get settingsFilamentNoSlot;
+
   /// No description provided for @projectProfilePickTitle.
   ///
   /// In en, this message translates to:

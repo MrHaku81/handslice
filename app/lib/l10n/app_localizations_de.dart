@@ -336,6 +336,21 @@ class AppLocalizationsDe extends AppLocalizations {
       'Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet.';
 
   @override
+  String get settingsAreaProcess => 'Prozess';
+
+  @override
+  String get settingsAreaFilament => 'Filament';
+
+  @override
+  String settingsFilamentBase(String name) {
+    return 'Basisprofil: $name';
+  }
+
+  @override
+  String get settingsFilamentNoSlot =>
+      'Keine Fach-Zuordnung bekannt. Mit dem Drucker verbinden und Fächer neu laden.';
+
+  @override
   String get projectProfilePickTitle => 'Profil laden';
 
   @override
