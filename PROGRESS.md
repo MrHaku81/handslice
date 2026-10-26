@@ -62,6 +62,45 @@ Zwei Befunde aus der Poco-Abnahme (APK 5699b13) adressiert.
 
 - —
 
+### Nachtrag 2 (Filament-Assets vollstaendig + Slice-Beleg)
+
+Problem bei der Abnahme: Fehler beim Slicen auch mit Basisprofil,
+unabhaengig von "My Test". Direkte Pruefung am Poco mit `run-as`
+zeigt den Grund: `files/profiles/Elegoo/filament/ECC2/` enthielt
+nur `Elegoo PLA @ECC2.json` (1168 B, 2026-10-25 12:58). Alle
+anderen Mapping-Zielnamen (Rapid PLA+, PETG, PLA PRO, PETG HF
+usw.) fehlten komplett – `_extractBundledProfiles()` extrahierte
+nur die harte Liste aus pubspec.yaml, und die hatte nur das PLA
+drin. APK-Beleg: `unzip -l app-release.apk | grep filament.*ECC2`
+→ 1 Zeile.
+
+Fix (Commit `ec9098b`):
+- Alle 30 ECC2-Filamentprofile + 7 Elegoo-BASE + 8
+  fdm_filament_*-Common aus engine/OrcaSlicer/resources nach
+  app/assets/profiles/Elegoo/filament/ kopiert.
+- pubspec.yaml: Verzeichnisse statt Hand-Liste.
+- _extractBundledProfiles(): iteriert jetzt ueber
+  AssetManifest.loadFromAssetBundle; ueberschreibt bei abweichender
+  Byte-Laenge (App-Updates mit frischeren Profilen wirksam).
+- Vertragstest `filament_mapping_assets_test.dart` deckt alle
+  Mapping-Zielnamen, BASE-Dateien und fdm-Common-Dateien ab.
+- Picker-Zeile zeigt "Standard (Basisprofil)" statt "–"
+  (settingsFilamentActiveProfileNone de+en).
+
+Nachweis am Poco (Release-APK SHA `79af3208...081c`, commit
+`ec9098b471`):
+- `files/profiles/Elegoo/filament/ECC2/` enthaelt jetzt **30**
+  Dateien (vorher: 1). Gesamt 52 Profile unter files/profiles.
+- Direkt-Aufruf der CLI mit
+  `--filament "profiles/Elegoo/filament/ECC2/Elegoo Rapid PLA+ @ECC2.json"`
+  liefert RC=0, 220 261 B G-Code (9m 25s, 3.52g); G-Code zeigt
+  `filament_density: 1.25`, `M109 S220` – korrektes Rapid-PLA+-
+  Preset wurde aufgeloest.
+- Screenshot `docs/screenshots/4-4-nacharbeit-04-filament-standard-label.png`
+  zeigt Picker-Zeile "Standard (Basisprofil)" + "Basisprofil:
+  Elegoo Rapid PLA+ @ECC2" am aktiven A4-Fach.
+- Tests: 55/55 gruen.
+
 ### Nachtrag (nach Install via WLAN-ADB)
 
 - USB-ADB brach reproduzierbar mit `errno 71 (Protocol error)`
