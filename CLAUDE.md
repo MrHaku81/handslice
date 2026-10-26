@@ -27,6 +27,14 @@ jedem Start.
 - Das Testgerät (Poco X3 Pro, per ADB) darfst du frei nutzen: installieren,
   starten, Logs ziehen, Dateien kopieren, zurücksetzen von App-Daten.
   **Kein** Factory-Reset, kein Flashen, keine Systemeinstellungen.
+- **Zugangsdaten (Access-Code, SN, IP, Tokens, Passwörter) tauchen in
+  keinem Bericht, keinem stdout, keiner Doku-Datei auf** – auch nicht
+  als Suchmuster in grep-Verifikationen. Scrub-Scripts lesen den Wert
+  aus `.env` und greppen stumm; die Ausgabe meldet nur „N Treffer" (bei
+  0 ist der Scrub erfolgreich). Beispiele für falsch:
+  `grep -c "<access-code-wert>" datei` (Wert erscheint in der
+  Kommandozeile / im Terminal-Log). Richtig: ein Python-Skript liest
+  den Wert intern aus `.env` und gibt nur die Trefferzahl aus.
 
 ## 3. Drei-Versuche-Regel
 
