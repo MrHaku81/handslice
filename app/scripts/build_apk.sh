@@ -109,7 +109,31 @@ if ! grep -a -q "$COMMIT" "$tmp_libapp"; then
     exit 4
 fi
 
+# Permission-Guard: Release-APK muss android.permission.INTERNET
+# enthalten. Debug-Overlay (android/app/src/debug/AndroidManifest.xml)
+# fuegt sie nur fuer Debug-Builds hinzu; eine Release-APK ohne diese
+# Zeile scheitert am Geraet mit "Failed to create datagram socket".
+# Beleg: 2026-10-26, Release-APK 785e5cb – siehe PROGRESS.md.
+AAPT_CANDIDATES=(
+    "$ANDROID_HOME/build-tools/36.0.0/aapt2"
+    "$ANDROID_HOME/build-tools/34.0.0/aapt2"
+)
+AAPT=""
+for c in "${AAPT_CANDIDATES[@]}"; do
+    [[ -x "$c" ]] && AAPT="$c" && break
+done
+if [[ -z "$AAPT" ]]; then
+    echo "WARNUNG: kein aapt2 gefunden, Permission-Verify uebersprungen." >&2
+elif ! "$AAPT" dump permissions "$APK" | grep -q "android.permission.INTERNET"; then
+    echo "ABBRUCH: $APK enthaelt KEINE android.permission.INTERNET." >&2
+    echo "         android/app/src/main/AndroidManifest.xml muss" >&2
+    echo "         <uses-permission android:name=\"android.permission.INTERNET\"/>" >&2
+    echo "         enthalten (nicht nur im debug/-Overlay)." >&2
+    exit 5
+fi
+
 echo "APK:    $APK"
 echo "SHA256: $APK_SHA"
 echo "size:   $APK_SIZE byte"
 echo "commit-im-APK: ok ($COMMIT gefunden; cli $ARM_HASH)"
+echo "manifest:      INTERNET-Permission vorhanden"

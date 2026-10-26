@@ -108,6 +108,63 @@ mitgenommen).
 
 ---
 
+## 2026-10-26 11:45 UTC – Release-APK ohne INTERNET-Permission → Datagram-Socket-Fehler
+
+Klaus am Poco: nach Koppeln beim „Verbinden & Faecher laden":
+„Netz-/Discovery-Fehler: Netzwerk: Failed to create datagram socket".
+Phase-5-Release-APK `785e5cb` konnte **keine** UDP-Discovery
+aufbauen; MQTT war in Folge auch nicht erreichbar.
+
+### Nachweislich
+
+- **Ursache:** `android/app/src/main/AndroidManifest.xml` hatte
+  **keine** `<uses-permission android:name="android.permission.INTERNET"/>`.
+  Flutter hat die Permission nur im Debug-Overlay
+  (`android/app/src/debug/AndroidManifest.xml`); dieses Overlay wird
+  **nur in Debug-Builds** gemergt. Release-APKs bekommen die
+  Permission daher nicht.
+- **Beleg:** `aapt2 dump permissions app-release.apk` auf
+  `785e5cb` listete nur
+  `dev.handslice.handslice.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION`
+  (von share_plus), **keine INTERNET**. Logcat selbst war fuer
+  die App leer – die Ausgabe passiert ausschliesslich in der
+  Dart-UI (SnackBar); der eigentliche DNS-/Socket-Fehler wird
+  nicht nach `logcat` geroutet. Der Code-Review der Manifeste
+  reicht als Beweis.
+- **Fix an der Wurzel:**
+  `android/app/src/main/AndroidManifest.xml` enthaelt jetzt
+  `<uses-permission android:name="android.permission.INTERNET" />`.
+  Debug-Overlay bleibt bewusst stehen (Flutter-Konvention).
+- **Zwei neue Gurtschnallen:**
+  1. **Dart-Test** (`app/test/android_manifest_test.dart`):
+     greppt die main-Manifest-XML nach „android.permission.INTERNET".
+     Faellt schon bei `flutter test`, nicht erst beim APK-Bau.
+  2. **Build-Script-Verify** (`app/scripts/build_apk.sh`):
+     `aapt2 dump permissions` auf die neu gebaute APK; fehlt
+     INTERNET, bricht das Skript mit Exit-Code 5 ab.
+
+### Ungeprueft
+
+- Realer Verbindungstest **gegen den CC2** mit dem neuen APK
+  steht noch aus (direkt nach diesem Commit, in diesem Lauf).
+
+### Geht nicht / Konsequenz
+
+- Debug-Overlay ohne main-Permission ist eine Fluter-Falle, die
+  erst im Release-Build auffaellt. Beide neuen Gurtschnallen
+  verhindern eine Wiederholung: Dart-Test bricht bei Code-Change,
+  Build-Verify bricht beim APK-Bau.
+
+### Artefakt
+
+- APK aktuell (`2e09f75` ohne Fix-Commit): SHA256
+  `fb6ed867a4d2b6b3361812ab7d1b699a71a03eb8854a3ee1d07b186743e30c5e`
+  mit INTERNET. Nach dem anstehenden Fix-Commit folgt ein zweiter
+  Build mit passendem Hash im Badge; den installiere ich und
+  dokumentiere den Device-SHA256 + Verbindungs-Screenshot.
+
+---
+
 ## 2026-10-26 11:30 UTC – Phase-5-Build-Guard: Build ohne Hashes bricht ab
 
 Klaus hat am Poco gemerkt: der Phase-5-APK vom Vorlauf zeigte im

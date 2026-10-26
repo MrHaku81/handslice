@@ -1,4 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Pflicht fuer Release-Builds: Flutter nimmt die Debug-Overlay-
+         INTERNET-Permission (android/app/src/debug/AndroidManifest.xml)
+         NICHT in Release-APKs mit auf. Ohne diese Zeile wirft
+         RawDatagramSocket.bind() am Geraet "Failed to create datagram
+         socket" (UDP-Discovery scheitert, dann MQTT ebenfalls). Beleg:
+         aapt2 dump permissions auf der 785e5cb-Release-APK zeigte nur
+         DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION, keine INTERNET. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="handslice"
         android:name="${applicationName}"
