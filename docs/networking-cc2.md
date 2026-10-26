@@ -2683,3 +2683,62 @@ braechte es Zugriff auf `/opt/usr/picture/`; haben wir nicht.
 - Lokal gespeichert blieb nur das heute-frueh-MP4 unter
   `local-test/`; **kein neues MP4 heruntergeladen**, weil keines
   existierte.
+
+## Abnahmedruck 2026-10-26: MQTT-Zeitachse (Sniff-Mitschnitt)
+
+Mitschnitt: `logs/cc2-sniff-2026-10-26-152237.jsonl` (Start 14:22
+UTC, Ende 16:43 UTC). Drucker SN **<cc2-sn>**, Fach A4
+(ELEGOO Rapid PLA+). Nur `subscribe` auf `elegoo/#`, kein PUBLISH.
+
+### Zeitachse (alle Zeiten UTC)
+
+| Zeit | Ereignis | method / Nachweis |
+|------|----------|-------------------|
+| 15:46:27.012 | Dateiliste geholt | `method 1044 storage_media=local` → `handslice_1793029586062.gcode` (221 140 B, Vorhersage 565 s / 9 m 25 s, Material PLA #F2754E) |
+| 15:46:32.435 | **startPrint-Request** | `method 1020 params={filename, bedlevel_force:true, printer_check:true, slo…}` |
+| 15:46:33.154 | startPrint-Response | `error_code=0` |
+| 15:46:33.660 | `machine_status.status` 1 → **2** (Druck beginnt) | 6000-Report |
+| 15:46:33.828 | Hot-End-Target 140 °C, Bett-Target **60 °C** | `extruder.target` / `heater_bed.target` |
+| 15:47:13.630 | `sub_status` 1405 → 1066 (prepare) | 6000-Report |
+| 15:47:35.631 | Hot-End-Target **200 °C** (Nivellierungs-Temp) | 6000 |
+| 15:47:58.454 | Hot-End-Target **180 °C** | 6000 |
+| 15:50:49.578 | Hot-End-Target **220 °C** (Druck-Setpoint) | 6000; entspricht Default des Rapid-PLA+-Presets (vererbt aus `fdm_filament_pla.json`), **kein Override** |
+| 15:51:20.381 | `sub_status` → 2075 (aktives Drucken) | 6000 |
+| 16:01:53.991 | `sub_status` → 2077 (Finishing) | 6000 |
+| 16:01:54.013 | `machine_status.status` 2 → **1** (Druckende) | 6000 |
+
+**Druck-Netto-Dauer:** 16:01:54 − 15:46:33 = **15 m 21 s**.
+Vorhersage CLI: **9 m 25 s**. Delta +5 m 56 s deckt die
+Bettnivellierung (`bedlevel_force=true` ≈ +200 s) und die Heiz-/
+Preparation-Phase (~2 min Pre-Heat Hot-End + Bett 60 °C) ab.
+
+### Beobachtungen nach dem Druck
+
+Von 16:01:54 bis Log-Ende 16:43:33 (41 Minuten):
+
+- **Keine `method 1051`** (Zeitraffer-Composite-Request).
+- **Kein `machine_status.status 12`** und **keine 3020→3021**-
+  Übergänge (Composing).
+- **Kein zweites `method 1036`** nach dem Druck (die eine 1036 im
+  Log stammt von 14:23 UTC — anderer Client-ID, vor der Abnahme).
+- **Keine Download-Aktivität** sichtbar (HTTP geht ausserhalb MQTT;
+  im Sniff waere allenfalls ein 1036-Call mit `time_lapse_video_url`
+  erkennbar gewesen, aber auch der fehlt).
+
+Interpretation: Klaus hat waehrend des Abnahmedrucks **kein
+Zeitraffer-Composite ausgeloest**. Entweder war `printTimelapse=false`
+beim Slicen, oder der Composite wurde nach Druckende nicht angetippt.
+Fuer die Phase-4.4-Nacharbeit (Filament-Overrides, Material-Picker,
+Save-Flow) ist das nicht blockierend; der Composite-Pfad ist aber
+im Abnahme-Mitschnitt nicht erneut belegt.
+
+### Was war der Override?
+
+Der im G-Code sichtbare Düsen-Setpoint **220 °C** entspricht dem
+Default des Rapid-PLA+-Presets (vererbt aus `fdm_filament_pla.json`,
+Zeile `nozzle_temperature=['220']`). **Kein wirksamer Override auf
+die Düsentemperatur** war im Mitschnitt zu beobachten – weder in den
+`6000`-Reports noch indirekt in Status-/Phase-Uebergaengen. Falls
+Klaus einen Override setzen *wollte* und keine Abweichung sieht, war
+der Override identisch zum Preset-Default (oder wurde vor dem
+Abnahme-Druck zurueckgenommen).

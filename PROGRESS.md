@@ -62,6 +62,32 @@ Zwei Befunde aus der Poco-Abnahme (APK 5699b13) adressiert.
 
 - —
 
+### Nachtrag 3 (Overrides-Counter respektiert geladenes Profil + Mitschnitt-Auswertung)
+
+- Commit `a138bcf`: `SettingsOverrides` kennt eine Baseline; count,
+  has, reset beziehen sich jetzt auf das geladene Profil, nicht
+  mehr auf den Orca-Default. Save-Button bei aktivem Profil zeigt
+  "Profil aktualisieren" (Primary) + "Als neues Profil…"
+  (PopupMenu). Prozess und Filament gleichermaßen. Reset bringt
+  Profil-Keys auf Profil-Wert zurueck, Nicht-Profil-Keys loescht
+  er. 66/66 Tests gruen (10 reine Baseline-Tests + ein UI-Test
+  "Overrides-Count zeigt Abweichungen vom geladenen Profil").
+
+- Abnahme-Mitschnitt `logs/cc2-sniff-2026-10-26-152237.jsonl`
+  (Laufzeit 14:22–16:43 UTC) ausgewertet, Zeitachse in
+  docs/networking-cc2.md ("Abnahmedruck 2026-10-26: MQTT-
+  Zeitachse"). Kernzahlen:
+  - Druckstart 15:46:33 UTC (`1020` → `status 1→2`).
+  - Hot-End-Setpoints 140 → 200 → 180 → **220 °C** (= Default
+    des Rapid-PLA+-Presets aus `fdm_filament_pla.json`), Bett
+    **60 °C**. **Kein wirksamer Düsen-Override** im Mitschnitt.
+  - Druckende 16:01:54 UTC (`status 2→1`), Netto 15 m 21 s;
+    CLI-Vorhersage war 9 m 25 s. Delta erklaert sich aus
+    `bedlevel_force=true` (≈ +200 s) + Pre-Heat ~2 min.
+  - **Kein `1051`, kein Status 12, kein 3020→3021, kein zweites
+    `1036`, keine Download-Spur** nach dem Druck – Zeitraffer-
+    Composite wurde in diesem Druck nicht angetippt.
+
 ### Nachtrag 2 (Filament-Assets vollstaendig + Slice-Beleg)
 
 Problem bei der Abnahme: Fehler beim Slicen auch mit Basisprofil,
