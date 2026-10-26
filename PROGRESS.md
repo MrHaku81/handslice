@@ -60,13 +60,31 @@ Zwei Befunde aus der Poco-Abnahme (APK 5699b13) adressiert.
 
 ### Ungeprueft
 
-- **Install + Screenshot am Poco X3 Pro.** `lsusb` meldet das Poco
-  (Xiaomi Inc. Mi/Redmi series, MTP+ADB), aber `adb devices` liefert
-  leere Liste – vermutlich steht USB gerade auf MTP ohne Debugging,
-  weil Klaus den Abnahme-Druck/Zeitraffer-Export macht. ADB-Server
-  2x neu gestartet, kein Effekt. Install und Screenshot des
-  Filament-Bereichs mit "Als Profil speichern"-Knopf folgen, sobald
-  das Gerät wieder im Debugging-Modus angesteckt ist.
+- —
+
+### Nachtrag (nach Install via WLAN-ADB)
+
+- USB-ADB brach reproduzierbar mit `errno 71 (Protocol error)`
+  beim ersten CNXN-Paket ab (Kabel-/Port-Hardware), auch nach
+  Poco-Neustart. Umstieg auf WLAN-ADB:
+  `adb pair 192.168.0.15:40543` + `adb connect 192.168.0.15:42745`,
+  Install via `adb -s 192.168.0.15:42745 install -r -g`.
+- Install: `Success` (APK SHA
+  `0be21bbe485d7c9ebf152d7d3f9769371779f315a754d14d391eaf94b4e2f79c`).
+- Badge am Startbildschirm: `v0.1 · app 1bc94ad4d5 · cli 761249e97b`,
+  Build-Time `2026-10-26T14:37Z` – stimmt mit dem Repo-HEAD.
+  Screenshot: `docs/screenshots/4-4-nacharbeit-01-start-badge.png`.
+- Filament-Bereich: Caption lautet jetzt
+  "Filament-Einstellungen — erzeugt aus OrcaSlicer 2.4.2.",
+  "Als Profil speichern"-Button sichtbar rechts in der
+  Overrides-Count-Zeile, Picker-Zeile "Filament-Profil" mit
+  Chevron darueber. Screenshot:
+  `docs/screenshots/4-4-nacharbeit-02-filament-save-button.png`.
+- Vergleich Prozess-Bereich: Caption bleibt
+  "Prozess-Einstellungen — erzeugt aus OrcaSlicer 2.4.2.",
+  Save-Button ebenfalls vorhanden (ausgegraut mangels Overrides).
+  Screenshot:
+  `docs/screenshots/4-4-nacharbeit-03-prozess-vergleich.png`.
 
 ## 2026-10-26 09:30 UTC – Test E: `method 1047`-Shape-Probe (danielcherubini#432) → eindeutig 11× `1003`
 
