@@ -175,6 +175,46 @@ CC2 nutzt kein mDNS, nur den UDP-52700-Broadcast. Die App-seitige
 Discovery schreibt also einen UDP-Broadcast auf 255.255.255.255:52700
 und sammelt die Antworten.
 
+### Discovery in abgeschotteten Netzen: Broadcast schweigt, Unicast klappt
+
+In manchen Heim-LANs antwortet der CC2 **nicht** auf UDP-Broadcasts
+auf 52700 – weder auf `255.255.255.255` noch auf den Subnet-Broadcast
+(z. B. `192.168.0.255`). Direkter **Unicast** an die bekannte IP
+desselben Druckers (`<cc2-ip>:52700`) wird dagegen beantwortet.
+Reproduziert mehrfach am 2026-10-26 in dem einen Testnetz, dasselbe
+Verhalten wie beim `cc2_probe_delete.py`-Lauf aus der Vorphase.
+
+**App-Workaround (steht in `tools/cc2-history-fetch.py` und
+`~/upstream/run-cc2-probe.py` schon drin):** die Serial-Nummer
+einmalig per Unicast-Discovery holen bzw. aus `.env`
+(`CC2_SN=`) lesen und ab dann `--serial`/direkte IP nutzen. Die
+`cc2-control`-Firmware von Neme77 greift zusaetzlich auf einen
+Gateway-Ping-Weg zurueck.
+
+**Mutmassliche Ursache (nicht hart belegt fuer CC2):** Issue
+[danielcherubini#431](https://github.com/danielcherubini/elegoo-homeassistant/issues/431)
+beschreibt fuer den **CC1**, dass dieser vor der Discovery-Antwort
+einen Gateway-Ping laufen laesst; schlaegt der fehl (Router/VLAN
+blockt ICMP, Gast-/IoT-Netz-Isolation, Firewall-Regeln), antwortet
+der CC1 nicht. Ob der CC2 denselben Mechanismus hat, ist **nicht
+nachgewiesen** – der Code aus `elegoo-link` zeigt keinen Gateway-
+Ping, und ein eigener tcpdump-/strace-Nachweis am CC2 steht aus.
+Das #431-Verhalten ist hier nur **Verdacht**, keine Diagnose.
+
+Fuer die App bedeutet das praktisch:
+
+1. UI muss den Fall „Discovery hat niemanden gefunden" sauber
+   abfangen und erlauben, die IP manuell einzutragen (ist seit M4
+   drin, siehe Pair-Dialog).
+2. Nach erfolgreichem Pairing wird SN + IP persistent gespeichert;
+   folgende Verbindungen gehen direkt, keine Broadcast-Discovery
+   mehr. Ein wiederholter Broadcast-Fehlschlag im Alltag ist damit
+   kein Blocker.
+3. Falls Klaus / ein spaeterer Benutzer den Broadcast-Weg zurueck
+   haben will: Router auf Multicast/Broadcast-Weiterleitung,
+   Gast-/IoT-Netz-Isolation deaktivieren, oder im Zweifel den CC2
+   ins Haupt-WLAN hinzufuegen.
+
 ## CC1-Protokoll (SDCP, Topic-basiert)
 
 Zum Vollstaendigkeits-Halber dokumentiert, obwohl kein CC1 im Haus
