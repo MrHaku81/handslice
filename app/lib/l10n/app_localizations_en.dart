@@ -310,6 +310,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Saves your current overrides as an Orca-style preset with inherits onto the active base profile. Stored locally.';
 
   @override
+  String get settingsSaveFilamentDialogTitle => 'Save filament profile';
+
+  @override
+  String get settingsSaveFilamentDialogHint =>
+      'Saves the active tray\'s overrides as a filament preset with inherits onto the material base profile. When loading, the profile is offered to trays with the same material.';
+
+  @override
   String get settingsProfileName => 'Profile name';
 
   @override
@@ -321,6 +328,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String settingsProfileSaveFailed(String msg) {
     return 'Save failed: $msg';
   }
+
+  @override
+  String settingsSourceCaptionFilament(String version) {
+    return 'Filament settings — generated from OrcaSlicer $version.';
+  }
+
+  @override
+  String get settingsFilamentActiveProfile => 'Filament profile';
+
+  @override
+  String settingsFilamentPickTitle(int tray) {
+    return 'Filament profile for A$tray';
+  }
+
+  @override
+  String settingsFilamentPickDefault(String name) {
+    return 'Material base profile ($name)';
+  }
+
+  @override
+  String get settingsFilamentPickEmpty =>
+      'No filament profiles saved yet. Create one via \'Save as profile\' in the filament area.';
+
+  @override
+  String get settingsFilamentNoMatch =>
+      'No profiles with matching material for this tray.';
 
   @override
   String get focusHintDpad =>

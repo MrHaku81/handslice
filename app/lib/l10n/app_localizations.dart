@@ -620,6 +620,18 @@ abstract class AppLocalizations {
   /// **'Saves your current overrides as an Orca-style preset with inherits onto the active base profile. Stored locally.'**
   String get settingsSaveDialogHint;
 
+  /// No description provided for @settingsSaveFilamentDialogTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Save filament profile'**
+  String get settingsSaveFilamentDialogTitle;
+
+  /// No description provided for @settingsSaveFilamentDialogHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Saves the active tray\'s overrides as a filament preset with inherits onto the material base profile. When loading, the profile is offered to trays with the same material.'**
+  String get settingsSaveFilamentDialogHint;
+
   /// No description provided for @settingsProfileName.
   ///
   /// In en, this message translates to:
@@ -637,6 +649,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Save failed: {msg}'**
   String settingsProfileSaveFailed(String msg);
+
+  /// No description provided for @settingsSourceCaptionFilament.
+  ///
+  /// In en, this message translates to:
+  /// **'Filament settings — generated from OrcaSlicer {version}.'**
+  String settingsSourceCaptionFilament(String version);
+
+  /// No description provided for @settingsFilamentActiveProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Filament profile'**
+  String get settingsFilamentActiveProfile;
+
+  /// No description provided for @settingsFilamentPickTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Filament profile for A{tray}'**
+  String settingsFilamentPickTitle(int tray);
+
+  /// No description provided for @settingsFilamentPickDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Material base profile ({name})'**
+  String settingsFilamentPickDefault(String name);
+
+  /// No description provided for @settingsFilamentPickEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No filament profiles saved yet. Create one via \'Save as profile\' in the filament area.'**
+  String get settingsFilamentPickEmpty;
+
+  /// No description provided for @settingsFilamentNoMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'No profiles with matching material for this tray.'**
+  String get settingsFilamentNoMatch;
 
   /// No description provided for @focusHintDpad.
   ///

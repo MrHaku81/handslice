@@ -163,6 +163,7 @@ class _RootShellState extends State<RootShell> {
         overrides: widget.overrides,
         filamentOverrides: widget.filamentOverrides,
         printerState: widget.printerState,
+        projectState: widget.projectState,
       ),
     ];
 

@@ -48,7 +48,16 @@ class ProfileWriter {
     return target;
   }
 
-  static String _slugify(String s) {
+  static String _slugify(String s) => ProfileWriterSlug.of(s);
+}
+
+/// Oeffentlicher Zugriff auf die exakte Slugify-Regel von
+/// [ProfileWriter]. UI-Code (Picker, Vergleich mit persistiertem
+/// `active_profile_slug`) muss dieselbe Normalisierung nutzen, damit
+/// Round-Trip gespeichert → geladen funktioniert.
+class ProfileWriterSlug {
+  const ProfileWriterSlug._();
+  static String of(String s) {
     final down = s.toLowerCase();
     final out = StringBuffer();
     for (final cu in down.runes) {

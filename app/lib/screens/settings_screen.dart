@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../settings/filament_mapping.dart';
 import '../settings/filament_overrides.dart';
+import '../settings/profile_reader.dart';
 import '../settings/profile_writer.dart';
 import '../settings/settings_overrides.dart';
 import '../settings/settings_schema.dart';
 import '../state/printer_state.dart';
+import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
 import '../widgets/workshop_card.dart';
 
@@ -22,12 +24,17 @@ class SettingsScreen extends StatefulWidget {
     required this.overrides,
     required this.filamentOverrides,
     required this.printerState,
+    this.projectState,
   });
 
   final SettingsSchema schema;
   final SettingsOverrides overrides;
   final FilamentOverrides filamentOverrides;
   final PrinterState printerState;
+  /// Optional: speichert pro Fach den aktiven Filament-Profil-Slug.
+  /// In Widget-Tests darf null bleiben; Picker/Persistenz werden dann
+  /// unterdrueckt.
+  final ProjectState? projectState;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -78,18 +85,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ? widget.overrides
       : widget.filamentOverrides.forTray(_activeTray);
 
+  // Material-Basisprofil-Name (ohne .json) fuer das aktive Fach.
+  // null, wenn kein Slot bekannt ist – dann ist Save/Picker gesperrt.
+  String? _activeTrayBaseInherits() {
+    final slot = widget.printerState.slots
+        .where((s) => s.trayId == _activeTray)
+        .toList();
+    if (slot.isEmpty) return null;
+    final ref = const FilamentMapping().resolve(
+      filamentName: slot.first.filamentName,
+      filamentType: slot.first.filamentType,
+    );
+    return ref.assetName.replaceAll('.json', '');
+  }
+
   Future<void> _saveAsProfile() async {
     final l = AppLocalizations.of(context);
-    final nameCtrl = TextEditingController(text: 'My Process');
+    final isFilament = _area == _SettingsArea.filament;
+    final defaultName = isFilament ? 'My Filament' : 'My Process';
+    final title = isFilament
+        ? l.settingsSaveFilamentDialogTitle
+        : l.settingsSaveDialogTitle;
+    final hint = isFilament
+        ? l.settingsSaveFilamentDialogHint
+        : l.settingsSaveDialogHint;
+    final nameCtrl = TextEditingController(text: defaultName);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(l.settingsSaveDialogTitle),
+        title: Text(title),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(l.settingsSaveDialogHint,
-                style: Theme.of(ctx).textTheme.bodySmall),
+            Text(hint, style: Theme.of(ctx).textTheme.bodySmall),
             const SizedBox(height: 8),
             TextField(
               controller: nameCtrl,
@@ -110,13 +138,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     if (confirmed != true || !mounted) return;
     try {
-      // Phase 4.3 speichert nur Prozess-Profile; Filament-Overrides
-      // werden pro Fach direkt persistiert (siehe FilamentOverrides).
+      final String baseInherits;
+      final String type;
+      final Map<String, String> ov;
+      if (isFilament) {
+        final base = _activeTrayBaseInherits();
+        if (base == null) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text(l.settingsFilamentNoSlot)));
+          return;
+        }
+        baseInherits = base;
+        type = 'filament';
+        ov = widget.filamentOverrides.forTray(_activeTray).all;
+      } else {
+        baseInherits = '0.20mm Standard @Elegoo CC2 0.4 nozzle';
+        type = 'process';
+        ov = widget.overrides.all;
+      }
       final file = await const ProfileWriter().save(
         name: nameCtrl.text.trim(),
-        baseInherits: '0.20mm Standard @Elegoo CC2 0.4 nozzle',
-        type: 'process',
-        overrides: widget.overrides.all,
+        baseInherits: baseInherits,
+        type: type,
+        overrides: ov,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -125,6 +169,90 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(l.settingsProfileSaveFailed(e.toString()))));
+    }
+  }
+
+  Future<void> _openFilamentProfilePicker() async {
+    final projectState = widget.projectState;
+    if (projectState == null) return;
+    final l = AppLocalizations.of(context);
+    final base = _activeTrayBaseInherits();
+    if (base == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(l.settingsFilamentNoSlot)));
+      return;
+    }
+    final all = await const ProfileReader().list();
+    if (!mounted) return;
+    // Zuordnung an das Material: inherits == Basisprofil des Fachs.
+    final matches = all
+        .where((p) => p.type == 'filament' && p.baseInherits == base)
+        .toList();
+    final current = projectState.filamentActiveProfileSlug(_activeTray);
+    final chosen = await showDialog<_FilamentPickerResult>(
+      context: context,
+      builder: (ctx) {
+        return SimpleDialog(
+          title: Text(l.settingsFilamentPickTitle(_activeTray + 1)),
+          children: [
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx,
+                  const _FilamentPickerResult(reset: true)),
+              child: Row(
+                children: [
+                  Icon(current == null
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked, size: 16),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: Text(l.settingsFilamentPickDefault(base))),
+                ],
+              ),
+            ),
+            if (matches.isNotEmpty) const Divider(height: 0),
+            for (final p in matches)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(ctx,
+                    _FilamentPickerResult(profile: p)),
+                child: Row(
+                  children: [
+                    Icon(ProfileWriterSlug.of(p.name) == current
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(p.name)),
+                    Text('${p.overrides.length}',
+                        style: Theme.of(ctx).textTheme.bodySmall),
+                  ],
+                ),
+              ),
+            if (matches.isEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+                child: Text(
+                  all.where((p) => p.type == 'filament').isEmpty
+                      ? l.settingsFilamentPickEmpty
+                      : l.settingsFilamentNoMatch,
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+    if (chosen == null || !mounted) return;
+    final tray = _activeTray;
+    final ov = widget.filamentOverrides.forTray(tray);
+    if (chosen.reset) {
+      ov.clearAll();
+      await projectState.setFilamentActiveProfileSlug(tray, null);
+    } else if (chosen.profile != null) {
+      ov.clearAll();
+      for (final e in chosen.profile!.overrides.entries) {
+        ov.set(e.key, e.value);
+      }
+      await projectState.setFilamentActiveProfileSlug(
+          tray, ProfileWriterSlug.of(chosen.profile!.name));
     }
   }
 
@@ -144,7 +272,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Text(l.settingsHeading, style: theme.textTheme.headlineMedium),
           const SizedBox(height: 6),
           Text(
-            l.settingsSourceCaption(widget.schema.orcaVersion),
+            _area == _SettingsArea.filament
+                ? l.settingsSourceCaptionFilament(widget.schema.orcaVersion)
+                : l.settingsSourceCaption(widget.schema.orcaVersion),
             style: theme.textTheme.bodySmall
                 ?.copyWith(color: WorkshopTokens.textMuted),
           ),
@@ -167,6 +297,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               tray: _activeTray,
               slots: widget.printerState.slots,
             ),
+            if (widget.projectState != null) ...[
+              const SizedBox(height: 8),
+              _FilamentProfilePickerRow(
+                label: l.settingsFilamentActiveProfile,
+                slug: widget.projectState!
+                    .filamentActiveProfileSlug(_activeTray),
+                onTap: _openFilamentProfilePicker,
+              ),
+            ],
             const SizedBox(height: 10),
           ],
 
@@ -182,13 +321,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
-              if (_area == _SettingsArea.process)
-                TextButton.icon(
-                  onPressed:
-                      widget.overrides.isEmpty ? null : _saveAsProfile,
-                  icon: const Icon(Icons.save_outlined),
-                  label: Text(l.settingsSaveAsProfile),
-                ),
+              TextButton.icon(
+                onPressed:
+                    _activeOverrides.isEmpty ? null : _saveAsProfile,
+                icon: const Icon(Icons.save_outlined),
+                label: Text(l.settingsSaveAsProfile),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -998,4 +1136,54 @@ class _FilamentBaseHint extends StatelessWidget {
         style: theme.textTheme.bodySmall
             ?.copyWith(color: WorkshopTokens.textMuted));
   }
+}
+
+/// Zeile unter dem Material-Hinweis: zeigt den aktuell gewaehlten
+/// Filament-Profil-Slug fuer dieses Fach und oeffnet beim Antippen den
+/// Picker. Picker filtert nach `inherits == Material-Basisprofil`.
+class _FilamentProfilePickerRow extends StatelessWidget {
+  const _FilamentProfilePickerRow({
+    required this.label,
+    required this.slug,
+    required this.onTap,
+  });
+  final String label;
+  final String? slug;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: theme.textTheme.bodySmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    slug == null || slug!.isEmpty ? '—' : slug!,
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: WorkshopTokens.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FilamentPickerResult {
+  const _FilamentPickerResult({this.reset = false, this.profile});
+  final bool reset;
+  final SavedProfile? profile;
 }

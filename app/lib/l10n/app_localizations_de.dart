@@ -315,6 +315,13 @@ class AppLocalizationsDe extends AppLocalizations {
       'Speichert die aktuellen Überschreibungen als Orca-Preset mit inherits auf das aktive Basisprofil. Lokal auf dem Gerät.';
 
   @override
+  String get settingsSaveFilamentDialogTitle => 'Filament-Profil speichern';
+
+  @override
+  String get settingsSaveFilamentDialogHint =>
+      'Speichert die Überschreibungen des aktiven Fachs als Filament-Preset mit inherits auf das Basisprofil des Materials. Beim Laden wird das Profil Fächern mit demselben Material angeboten.';
+
+  @override
   String get settingsProfileName => 'Profilname';
 
   @override
@@ -326,6 +333,32 @@ class AppLocalizationsDe extends AppLocalizations {
   String settingsProfileSaveFailed(String msg) {
     return 'Speichern fehlgeschlagen: $msg';
   }
+
+  @override
+  String settingsSourceCaptionFilament(String version) {
+    return 'Filament-Einstellungen — erzeugt aus OrcaSlicer $version.';
+  }
+
+  @override
+  String get settingsFilamentActiveProfile => 'Filament-Profil';
+
+  @override
+  String settingsFilamentPickTitle(int tray) {
+    return 'Filament-Profil für A$tray';
+  }
+
+  @override
+  String settingsFilamentPickDefault(String name) {
+    return 'Material-Basisprofil ($name)';
+  }
+
+  @override
+  String get settingsFilamentPickEmpty =>
+      'Noch keine Filament-Profile gespeichert. Über »Als Profil speichern« im Filament-Bereich anlegen.';
+
+  @override
+  String get settingsFilamentNoMatch =>
+      'Keine Profile mit passendem Material zu diesem Fach.';
 
   @override
   String get focusHintDpad =>

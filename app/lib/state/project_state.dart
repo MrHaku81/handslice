@@ -31,6 +31,11 @@ class ProjectState extends ChangeNotifier {
   // Phase 5b-Nacharbeit: zuletzt geladenes User-Profil (slug) persistent.
   // null/leer = Orca-Standard.
   static const _kActiveProfile = 'project.active_profile_slug';
+  // Phase 4.4-Nacharbeit: pro Fach (A1..A4, Index 0..3) der slug des
+  // zuletzt gewaehlten Filament-Profils. null = Material-Basisprofil
+  // (keine zusaetzlichen Overrides aus einem User-Profil).
+  static String _kFilamentActiveProfile(int tray) =>
+      'project.filament_profile_slug.A${tray + 1}';
 
   // Projekt-Vorgabe: ±0.50 mm, Schritte 0.01 mm. Grenzen hier zentral,
   // damit UI und Tests dieselbe Quelle nutzen.
@@ -77,6 +82,23 @@ class ProjectState extends ChangeNotifier {
       await _prefs.remove(_kActiveProfile);
     } else {
       await _prefs.setString(_kActiveProfile, slug);
+    }
+    notifyListeners();
+  }
+
+  /// Pro Fach: slug des aktiven Filament-Profils (null = Basisprofil).
+  String? filamentActiveProfileSlug(int tray) {
+    assert(tray >= 0 && tray < 4);
+    return _prefs.getString(_kFilamentActiveProfile(tray));
+  }
+
+  Future<void> setFilamentActiveProfileSlug(int tray, String? slug) async {
+    assert(tray >= 0 && tray < 4);
+    final k = _kFilamentActiveProfile(tray);
+    if (slug == null || slug.isEmpty) {
+      await _prefs.remove(k);
+    } else {
+      await _prefs.setString(k, slug);
     }
     notifyListeners();
   }
