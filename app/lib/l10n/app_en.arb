@@ -149,6 +149,7 @@
   "printerDownloadStarted": "Downloading…",
   "printerDownloadDone": "Saved: {path}",
   "@printerDownloadDone": {"placeholders": {"path": {"type": "String"}}},
+  "printerDownloadDoneGallery": "Saved to Movies/Handslice (visible in Gallery)",
   "printerDownloadFailed": "Download failed: {msg}",
   "@printerDownloadFailed": {"placeholders": {"msg": {"type": "String"}}},
   "printerShareButton": "Share",

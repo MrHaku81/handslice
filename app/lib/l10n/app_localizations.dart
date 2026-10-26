@@ -794,6 +794,12 @@ abstract class AppLocalizations {
   /// **'Saved: {path}'**
   String printerDownloadDone(String path);
 
+  /// No description provided for @printerDownloadDoneGallery.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved to Movies/Handslice (visible in Gallery)'**
+  String get printerDownloadDoneGallery;
+
   /// No description provided for @printerDownloadFailed.
   ///
   /// In en, this message translates to:

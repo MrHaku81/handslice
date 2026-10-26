@@ -125,6 +125,7 @@
   "printerDownloadUnavailable": "Nicht mehr verfügbar (am Drucker gelöscht?)",
   "printerDownloadStarted": "Lädt…",
   "printerDownloadDone": "Gespeichert: {path}",
+  "printerDownloadDoneGallery": "In Movies/Handslice gespeichert (in der Galerie sichtbar)",
   "printerDownloadFailed": "Download fehlgeschlagen: {msg}",
   "printerShareButton": "Teilen",
 

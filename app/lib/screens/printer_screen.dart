@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -46,10 +47,15 @@ class _TaskUiState {
   bool downloading = false;
   double? downloadProgress; // 0..1
   String? downloadedPath;
+  String? galleryUri; // MediaStore-content-URI; null, wenn nicht abgelegt
   String? downloadError;
 }
 
 class _PrinterScreenState extends State<PrinterScreen> {
+  // Platform-Channel fuer Android-native-Hilfen (MediaStore, nativeLibraryDir).
+  static const MethodChannel _engineChannel =
+      MethodChannel('dev.handslice.handslice/engine');
+
   List<HistoryTask> _tasks = const [];
   bool _loading = false;
   String? _error;
@@ -158,18 +164,32 @@ class _PrinterScreenState extends State<PrinterScreen> {
               }
             },
           ));
-      // Datei ablegen: Downloads-Verzeichnis des Handys, Dateiname
-      // = Basename aus der URL. Fallback: App-Support-Dir, wenn
-      // Downloads-Dir nicht verfuegbar (Desktop/Tests).
+      // Datei zuerst in den app-eigenen Downloads-Pfad schreiben
+      // (fuer Share + Fallback), dann via MediaStore nach
+      // Movies/Handslice spiegeln (sichtbar in der Galerie,
+      // ueberlebt Deinstallation).
       final base = t.videoUrl.split('/').last;
       final dir = await _downloadDirectory();
       final file = File('${dir.path}/$base');
       await file.writeAsBytes(bytes, flush: true);
+      String? galleryUri;
+      if (Platform.isAndroid) {
+        try {
+          galleryUri = await _engineChannel.invokeMethod<String>(
+            'saveVideoToGallery',
+            {'srcPath': file.path, 'displayName': base, 'mime': 'video/mp4'},
+          );
+        } on PlatformException catch (e) {
+          // Kein Deal-Breaker: Datei liegt wenigstens app-lokal.
+          debugPrint('saveVideoToGallery failed: ${e.code} ${e.message}');
+        }
+      }
       if (!mounted) return;
       setState(() {
         ui.downloading = false;
         ui.downloadProgress = 1.0;
         ui.downloadedPath = file.path;
+        ui.galleryUri = galleryUri;
       });
     } catch (e) {
       if (!mounted) return;
@@ -503,7 +523,10 @@ class _PrinterScreenState extends State<PrinterScreen> {
           color: Theme.of(context).colorScheme.error));
     }
     if (ui.downloadedPath != null) {
-      buttons.add(_notePill(l.printerDownloadDone(ui.downloadedPath!),
+      final msg = ui.galleryUri != null
+          ? l.printerDownloadDoneGallery
+          : l.printerDownloadDone(ui.downloadedPath!);
+      buttons.add(_notePill(msg,
           color: Theme.of(context).colorScheme.outline));
     }
 

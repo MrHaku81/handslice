@@ -421,6 +421,10 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String get printerDownloadDoneGallery =>
+      'In Movies/Handslice gespeichert (in der Galerie sichtbar)';
+
+  @override
   String printerDownloadFailed(String msg) {
     return 'Download fehlgeschlagen: $msg';
   }
