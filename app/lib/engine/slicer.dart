@@ -119,33 +119,34 @@ class SlicerService {
   // supportDir/profiles und liefert supportDir (der Pfad, den die
   // CLI als --resources erwartet; das Unterverzeichnis 'profiles/'
   // wird vom Resource-Index selbststaendig gefunden).
+  //
+  // Phase 4.4-Nacharbeit: Statt einer Hand-Liste iterieren wir
+  // ueber das AssetManifest. Damit landen *alle* in pubspec.yaml
+  // deklarierten `assets/profiles/...`-JSONs im Datenverzeichnis –
+  // sonst scheitert der Slice fuer Materialien, deren Profil zwar
+  // in FilamentMapping steht, aber in der Hand-Liste vergessen
+  // wurde. Zusatz: wenn ein Asset neuer ist als die bereits
+  // extrahierte Datei (anderer Byte-Count), wird sie ueberschrieben,
+  // damit App-Updates mit frischeren Profilen wirksam werden.
   Future<String> _extractBundledProfiles() async {
     final supportDir = await getApplicationSupportDirectory();
-    // Manifest aus den AssetBundle-Deklarationen – muss zu pubspec.yaml
-    // passen. Alternative waere AssetManifest.json zur Laufzeit zu
-    // lesen; wir listen bewusst explizit, damit die Minimum-Menge
-    // sichtbar bleibt.
-    const assetFiles = <String>[
-      'assets/profiles/Elegoo/machine/fdm_machine_common.json',
-      'assets/profiles/Elegoo/machine/fdm_elegoo_3dp_001_common.json',
-      'assets/profiles/Elegoo/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json',
-      'assets/profiles/Elegoo/process/fdm_process_common.json',
-      'assets/profiles/Elegoo/process/fdm_process_elegoo_common.json',
-      'assets/profiles/Elegoo/process/fdm_process_elegoo_04020.json',
-      'assets/profiles/Elegoo/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json',
-      'assets/profiles/Elegoo/filament/fdm_filament_common.json',
-      'assets/profiles/Elegoo/filament/fdm_filament_pla.json',
-      'assets/profiles/Elegoo/filament/BASE/Elegoo PLA @base.json',
-      'assets/profiles/Elegoo/filament/ECC2/Elegoo PLA @ECC2.json',
-    ];
-    for (final asset in assetFiles) {
-      // Zielpfad spiegelt die 'profiles/'-Hierarchie 1:1.
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    final profileAssets = manifest
+        .listAssets()
+        .where((a) =>
+            a.startsWith('assets/profiles/') && a.endsWith('.json'))
+        .toList();
+    for (final asset in profileAssets) {
       final rel = asset.replaceFirst('assets/', '');
       final target = File('${supportDir.path}/$rel');
-      if (await target.exists()) continue;
-      await target.parent.create(recursive: true);
       final data = await rootBundle.load(asset);
-      await target.writeAsBytes(data.buffer.asUint8List());
+      final bytes = data.buffer.asUint8List();
+      if (await target.exists() &&
+          await target.length() == bytes.length) {
+        continue;
+      }
+      await target.parent.create(recursive: true);
+      await target.writeAsBytes(bytes);
     }
     return supportDir.path;
   }

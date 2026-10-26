@@ -99,6 +99,7 @@
   "settingsProfileSaveFailed": "Speichern fehlgeschlagen: {msg}",
   "settingsSourceCaptionFilament": "Filament-Einstellungen — erzeugt aus OrcaSlicer {version}.",
   "settingsFilamentActiveProfile": "Filament-Profil",
+  "settingsFilamentActiveProfileNone": "Standard (Basisprofil)",
   "settingsFilamentPickTitle": "Filament-Profil für A{tray}",
   "settingsFilamentPickDefault": "Material-Basisprofil ({name})",
   "settingsFilamentPickEmpty": "Noch keine Filament-Profile gespeichert. Über »Als Profil speichern« im Filament-Bereich anlegen.",

@@ -119,6 +119,7 @@
   "settingsSourceCaptionFilament": "Filament settings — generated from OrcaSlicer {version}.",
   "@settingsSourceCaptionFilament": {"placeholders": {"version": {"type": "String"}}},
   "settingsFilamentActiveProfile": "Filament profile",
+  "settingsFilamentActiveProfileNone": "Standard (base profile)",
   "settingsFilamentPickTitle": "Filament profile for A{tray}",
   "@settingsFilamentPickTitle": {"placeholders": {"tray": {"type": "int"}}},
   "settingsFilamentPickDefault": "Material base profile ({name})",

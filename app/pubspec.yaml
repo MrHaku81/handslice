@@ -30,21 +30,18 @@ flutter:
   generate: true
   assets:
     - assets/fonts/LICENSE
-    # Orca-Profile fuer CC2 0.4 + 0.20mm + Elegoo PLA. Minimum-Set
-    # (11 JSONs) aus den Vererbungs-Ketten; vom Slicer beim ersten
-    # App-Start aus dem Bundle in getApplicationSupportDirectory()/profiles
-    # extrahiert.
-    - assets/profiles/Elegoo/machine/fdm_machine_common.json
-    - assets/profiles/Elegoo/machine/fdm_elegoo_3dp_001_common.json
-    - assets/profiles/Elegoo/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json
-    - assets/profiles/Elegoo/process/fdm_process_common.json
-    - assets/profiles/Elegoo/process/fdm_process_elegoo_common.json
-    - assets/profiles/Elegoo/process/fdm_process_elegoo_04020.json
-    - assets/profiles/Elegoo/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json
-    - assets/profiles/Elegoo/filament/fdm_filament_common.json
-    - assets/profiles/Elegoo/filament/fdm_filament_pla.json
-    - assets/profiles/Elegoo/filament/BASE/Elegoo PLA @base.json
-    - assets/profiles/Elegoo/filament/ECC2/Elegoo PLA @ECC2.json
+    # Orca-Profile fuer CC2 0.4 + 0.20mm. Verzeichnisse werden
+    # komplett eingebunden – _extractBundledProfiles() iteriert
+    # beim ersten App-Start ueber das AssetManifest, damit neue
+    # Profile (z. B. weitere Filament-Varianten) automatisch
+    # mitwandern.
+    - assets/profiles/Elegoo/machine/
+    - assets/profiles/Elegoo/machine/ECC2/
+    - assets/profiles/Elegoo/process/
+    - assets/profiles/Elegoo/process/ECC2/
+    - assets/profiles/Elegoo/filament/
+    - assets/profiles/Elegoo/filament/BASE/
+    - assets/profiles/Elegoo/filament/ECC2/
     # Phase 4.1: aus Orca v2.4.2 mechanisch erzeugter Options-Baum
     # (engine/scripts/build_settings_schema.py). Enthaelt Reiter,
     # Gruppen, Stufen und Deutsch-Uebersetzungen.

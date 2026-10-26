@@ -343,6 +343,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get settingsFilamentActiveProfile => 'Filament-Profil';
 
   @override
+  String get settingsFilamentActiveProfileNone => 'Standard (Basisprofil)';
+
+  @override
   String settingsFilamentPickTitle(int tray) {
     return 'Filament-Profil für A$tray';
   }

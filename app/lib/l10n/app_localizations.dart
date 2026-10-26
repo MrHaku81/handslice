@@ -662,6 +662,12 @@ abstract class AppLocalizations {
   /// **'Filament profile'**
   String get settingsFilamentActiveProfile;
 
+  /// No description provided for @settingsFilamentActiveProfileNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Standard (base profile)'**
+  String get settingsFilamentActiveProfileNone;
+
   /// No description provided for @settingsFilamentPickTitle.
   ///
   /// In en, this message translates to:

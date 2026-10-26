@@ -303,6 +303,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 label: l.settingsFilamentActiveProfile,
                 slug: widget.projectState!
                     .filamentActiveProfileSlug(_activeTray),
+                noneLabel: l.settingsFilamentActiveProfileNone,
                 onTap: _openFilamentProfilePicker,
               ),
             ],
@@ -1145,15 +1146,19 @@ class _FilamentProfilePickerRow extends StatelessWidget {
   const _FilamentProfilePickerRow({
     required this.label,
     required this.slug,
+    required this.noneLabel,
     required this.onTap,
   });
   final String label;
   final String? slug;
+  final String noneLabel;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final display =
+        (slug == null || slug!.isEmpty) ? noneLabel : slug!;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
@@ -1167,10 +1172,7 @@ class _FilamentProfilePickerRow extends StatelessWidget {
                 children: [
                   Text(label, style: theme.textTheme.bodySmall),
                   const SizedBox(height: 2),
-                  Text(
-                    slug == null || slug!.isEmpty ? '—' : slug!,
-                    style: theme.textTheme.bodyMedium,
-                  ),
+                  Text(display, style: theme.textTheme.bodyMedium),
                 ],
               ),
             ),
