@@ -6,6 +6,1167 @@ größeren Schritt; Klaus liest hier tagsüber nach.
 Format: `## JJJJ-MM-TT HH:MM – <Kurztitel>` und dann drei bis fünf Zeilen:
 was gemacht, Ergebnis, offene Fragen.
 
+> **Zeitstempel-Korrektur 2026-10-26 08:45 UTC:** Die vorher gesetzten
+> Zeitstempel der heutigen Vormittag-Einträge waren systematisch ~4 h
+> zu hoch (z. B. 1038-Lauf als „12:35 UTC" statt real 08:35 UTC).
+> Ursache: Zeiten geschätzt statt aus `date -u` oder den Script-
+> Logs abgelesen; wahrscheinlich eine fehlerhafte Zone-Rechnung
+> auf dem Build-Rechner (CET=UTC+1, aber Verdoppelung durch
+> Schätzung → +4 h). Alle 13 heutigen Einträge sind jetzt auf
+> echte UTC-Zeit korrigiert und mit `UTC` markiert, Reihenfolge
+> „neueste oben" wiederhergestellt.
+
+---
+
+## 2026-10-26 08:35 UTC – Test D: `method 1038` loescht Historie, nicht MP4, nicht Display
+
+### Nachweislich
+
+- **Payload exakt nach cc2-control-Beleg**:
+  `{"method":1038,"id":1038,"params":{"list":["<task_id>"]}}`
+  (Fundstellen: `mqtt.c:277-287`, `mqtt.c:343-346`,
+  `history.h:123-142`).
+- **Response**: `{"id":1038,"method":1038,"result":{"error_code":0}}`
+  in **297 ms**. **Kein Status-12-Wechsel**; der Loeschvorgang
+  passiert daten-/datenbankseitig ohne Printer-State-Transition.
+- **1036 Pre vs. Post:**
+  - Pre: `sha256=e12d373a3ec5c57b`, 45 Tasks, `result.total=45`.
+  - Post: `sha256=4c9f1271e71c3a3d`, **44 Tasks**, `result.total=44`.
+  - **Target `e0b592f4-...` ist entfernt**; alle anderen Eintraege
+    byte-identisch (keine Nebenbeitraege mutiert, keine
+    `duration`- oder `video_status`-Verschiebungen).
+- **MP4 bleibt vollstaendig abrufbar.** Download-Probe nach 1038
+  liefert `HTTP 200`, 1 741 634 Byte, md5
+  `e2330f840b398f425172b32692437f7a` – **byte-identisch** zur
+  Baseline und zur Pre-Snapshot.
+- **Display zeigt den Eintrag weiter.** Klaus hat am Display
+  nachgeschaut: Zeitraffer-Liste zeigt den Eintrag noch, obwohl
+  er aus der 1036-Historie entfernt ist.
+- **Neues Feld `result.total` entdeckt** – ein Zaehler auf
+  `result`-Ebene (Pre 45 → Post 44). cc2-control nutzt es
+  nicht, aber die Firmware exponiert es. Fuer die App ein
+  zusaetzlicher Konsistenz-Check.
+
+### Zusammenfuehrung mit Display-Loeschen (Vormittag heute)
+
+Die beiden Loeschpfade sind **komplett getrennt**:
+
+| Loeschpfad | 1036-Historie | MP4 (`/opt/usr/video/`) | Display-Liste |
+|---|:-:|:-:|:-:|
+| **method 1038** (dieser Lauf) | **weg** | bleibt | bleibt |
+| **Display-Loeschen** (Vormittag) | bleibt (stale) | **weg** (Download → Timeout) | **weg** |
+
+Das heisst konkret: der Drucker fuehrt die MQTT-Historie und das
+Dateisystem/Display als zwei unabhaengige „Realitaeten". Es gibt
+im LAN-API-Namensraum **keinen Weg**, das MP4 oder die
+Display-Liste zu beeinflussen; umgekehrt entfernt Display-Loeschen
+nicht die MQTT-Historie.
+
+### Ungeprueft
+
+- Ob `method 1038` **mehrere Tasks** auf einmal loescht
+  (`list:["a","b","c"]`). cc2-control baut die Params genau so
+  – wir haben nur eine ID in diesem Lauf getestet.
+- Verhalten bei nicht-existierender `task_id`. Vermutlich
+  `error_code=0` ohne Mutation (konsistent zur 1047-Beobachtung
+  vom 25.10. – Firmware signalisiert Nicht-Existenz nicht).
+- Ob das `result.total`-Feld in **allen** 1036-Antworten
+  erscheint oder nur unter bestimmten Firmwares; die Vormittags-
+  Antworten hatten es offenbar auch, nur haben wir es nicht
+  explizit beachtet.
+- Was aus dem physischen MP4 wird, wenn `method 1038` seinen
+  History-Eintrag entfernt. Es ist dann im LAN nicht mehr
+  adressierbar (fehlt die `video_url`), liegt aber physisch auf
+  `/opt/usr/video/`. Vermutlich wird es durch den naechsten
+  Druck oder Speicher-Housekeeping entfernt – nicht in diesem
+  Test beobachtbar.
+
+### Geht nicht
+
+- **Speicher auf dem Drucker ueber `method 1038` freigeben.** Das
+  MP4 bleibt; der Platz in `/opt/usr/video/` wird nicht frei. Fuer
+  Speicher-Management braucht es das Drucker-Display.
+- Display-Liste ueber MQTT aufraeumen. Es gibt keinen beobachtbaren
+  MQTT-Pfad, der die Display-Liste synchronisiert.
+
+### App-Regel (Historien-Pflege)
+
+- `method 1038` ist **reine UI-Hygiene**. Die App darf damit die
+  eigene Historien-Ansicht aufraeumen (z. B. fehlgeschlagene oder
+  Status-0-Eintraege), aber:
+  - **Nicht als Speicher-Management verkaufen.**
+  - Beim Entfernen von Zeitraffer-Eintraegen in der UI klarstellen,
+    dass das Video auf dem Drucker verbleibt und am Display
+    separat geloescht werden muss, um Platz zu schaffen.
+- Nach `method 1038` die lokale Historie-Ansicht aus der neuen
+  1036-Antwort neu aufbauen (nicht nur optimistisch den Eintrag
+  streichen – der Zaehler `result.total` ist der
+  Konsistenz-Check).
+
+### Artefakte
+
+- `tools/cc2-delete-history.py` – sendet 1038 fuer eine Task-ID,
+  Idle-Check vorweg, keine Retries.
+- `logs/cc2-sniff-2026-10-26-093126.jsonl` – Mitschnitt
+  waehrend 1038 (git-ignoriert).
+- `docs/cc2-history-sample.json` – Post-1038-Snapshot (44 Tasks,
+  neue Hash `4c9f1271e71c3a3d`).
+
+Nichts committed, nichts gepusht.
+
+### Offener Punkt bleibt
+
+- Erfolgreicher 1051 (`3020→3021`) beim naechsten Zeitraffer-Druck,
+  direkt nach dem Druck, vor dem USB-Export (Script
+  `tools/cc2-render-timelapse.py` liegt bereit).
+
+---
+
+## 2026-10-26 08:30 UTC – Sende jetzt method 1038 (Delete-History) fuer heutigen Eintrag
+
+**Einziger Schreibbefehl**: `method 1038 params={"list":["<task_id>"]}`
+fuer `task_id=e0b592f4-bd51-4ece-97fc-2bfc8137d13e` (heutiger Lauf 2,
+`video_status=2`, MP4 1 741 634 B md5 `e2330f840b398f425172b32692437f7a`).
+Klaus hat zugestimmt, dass dieser Eintrag verloren gehen darf; MP4
+liegt auf USB-Stick und in `local-test/`.
+
+Payload-Beleg (nicht geraten):
+
+- `cc2-control/src/mqtt.c:343-346` –
+  `mqtt_delete_history(c, params)` ruft
+  `publish_request(c, 1038, params)`.
+- `cc2-control/src/mqtt.c:277-287` – `publish_request` baut
+  `{"method":<m>,"id":<m>,"params":<params>}`, d. h. id=1038.
+- `cc2-control/src/history.h:123-142` – Params-Aufbau:
+  `{"list":["<id1>",...]}` mit einem Element pro Task.
+
+Daraus **final:**
+
+```json
+{"method":1038,"id":1038,"params":{"list":["e0b592f4-bd51-4ece-97fc-2bfc8137d13e"]}}
+```
+
+Vor dem Senden:
+- 1036-Hash: `e12d373a3ec5c57b` (seit heute Vormittag unveraendert).
+- Target in Liste vorhanden (`video_status=2`, size=1 741 634,
+  duration=3, url=`video/<name>.mp4`).
+- Download-Probe erfolgreich: HTTP 200, md5 unveraendert.
+- Klaus hat vorher am Display geprueft, dass die Zeitraffer-Liste
+  genau diesen einen Eintrag zeigt.
+
+Mitschnitt laeuft parallel. Erwartung: eine von drei Aussagen –
+(a) Historie weg, MP4 bleibt / (b) Historie weg, MP4 weg /
+(c) `error_code != 0`, nichts geaendert.
+
+Antwortet 1038 mit `1003`: dokumentieren, kein zweiter Versuch.
+
+---
+
+## 2026-10-26 08:20 UTC – Test C: 1051 mit picture-URL → wieder `3022`; Rohframes gab's hier nie mehr
+
+### Nachweislich
+
+- URL-Herleitung aus
+  `video/handslice_1792947629010.gcode20261026143807.mp4` zu
+  `picture/handslice_1792947629010.gcode20261026143807`
+  wurde eindeutig aus den Quellen abgeleitet (siehe
+  `networking-cc2.md` Test-C-Abschnitt).
+- **Response:** `error_code=0`, Response-URL
+  `video/<basename>.mp4` (= der bestehende Pfad des Target-MP4),
+  Latenz **18 ms**.
+- **Status 12 Dauer: <1 ms** – alle drei api_status-Deltas tragen
+  denselben Zeitstempel `08:17:37.794`. Pfad `3020→3022→1`.
+- **1036 Vorher/Nachher: byte-identisch**
+  (`sha256(result)=e12d373a3ec5c57b` beide Male). Target
+  unveraendert, kein Nebenbeitrag mutiert, keine
+  `duration`-Mutation.
+- **Target-MP4 byte-identisch:** HTTP 200, 1 741 634 Byte,
+  md5 `e2330f840b398f425172b32692437f7a` – gleich zur Baseline
+  und zu allen vorigen Downloads. **1051 ueberschreibt das
+  vorhandene MP4 nicht**, auch mit exakter picture-URL-Form.
+
+### Erklaerung aus den Quellen
+
+Der Elegoo-Code loescht am Ende jedes erfolgreichen Composite
+die Rohframes:
+
+```cpp
+// elegoo/extras/ai_camera/module/util/time_lapse_control.cpp:119-125
+cmd = "rm -rf \'" + pic_dir + "\'";
+std::system(cmd.c_str());
+```
+
+Beim USB-Export heute frueh (06:50 UTC) ist der Composite durch
+diesen Pfad gelaufen; dabei wurde
+`/opt/usr/picture/handslice_1792947629010.gcode20261026143807/`
+vernichtet. Das Display listet den Eintrag weiter, weil es die
+Datenbank-Historie und das MP4 unter `/opt/usr/video/` sieht –
+aber die Rohframes existieren hier nicht mehr. 1051 mit der
+abgeleiteten picture-URL findet daher nichts → `3022`.
+
+**Konsequenz:** Jeder `video_status=2`-Eintrag auf dieser Firmware
+hat zum Zeitpunkt, zu dem er Status 2 erreicht, bereits keine
+Rohframes mehr. **1051 kann nicht ueber MQTT ein Status-2 nach
+Status-2 ueberfuehren** – das Composite wird strukturell beim
+Rendering-Vorgang (einmalig) erzeugt und frisst dabei seine Rohdaten.
+
+### Zusammengefuehrt – drei unabhaengige Beweise fuer `3022 = keine Rohframes`
+
+| Lauf | URL-Form | Rohframes | Dauer | Delta |
+|---|---|---|---:|---|
+| `fac849a1` Vormittag | `picture/<basename>` | am Display geloescht | 972 ms | `duration 0→4` |
+| Test B heute (Status 2) | `video/<basename>.mp4` | nach Composite weg | 1 ms | keiner |
+| **Test C heute (Status 2)** | `picture/<basename>` | nach Composite weg | <1 ms | keiner |
+
+In allen drei Faellen: `error_code=0`, Status 12 geht sofort auf
+`3022`, kein Composite. **`sub_status 3022` ist der einheitliche
+Marker fuer „keine Rohframes am erwarteten Pfad".**
+
+### Ungeprueft
+
+- **Erfolgreicher 1051 (`3020 → 3021`) ueber MQTT.** Das Verhalten
+  ist durch Code hinreichend belegt (`mqtt.c:362-372`); unser
+  realer Nachweis fehlt immer noch. Benoetigt frischen Druck mit
+  Zeitraffer, **direkt danach** 1051 – bevor Klaus den USB-Export
+  ausloest.
+- **Ob die Firmware ueberhaupt gleichzeitig Rohframes und MP4
+  behaelt**, oder ob der 1051-Composite dieselbe `rm -rf`-Logik
+  anwendet wie der USB-Pfad. Vermutlich ja (gemeinsame
+  Composite-Funktion); zu validieren.
+
+### Geht nicht
+
+- **1051-Rendering fuer ein `video_status=2`-Target.** Die
+  Firmware hat die Rohframes bereits beim ersten Composite
+  entfernt; ein zweites Composite ist strukturell nicht moeglich.
+  Fuer die App: 1051 nur auf **frischen** Status-1-Eintraegen
+  aufrufen, nicht auf Status 2.
+
+### App-Regel (final)
+
+- `video_status=1` + alter `end_time` → UI-Hinweis „evtl. keine
+  Rohframes mehr" (`3022` wahrscheinlich).
+- `video_status=1` + junger `end_time` → Button „Rendern"
+  anbieten, Erfolg per Head-Probe pruefen.
+- `video_status=2` → nie 1051. Direkt Download.
+- `video_status=3` → nicht renderbar (wahrscheinlich dauerhaft).
+- Nach jedem 1051: 1036 erneut lesen, Target-URL mit Head-Probe
+  pruefen. Nur HTTP 200 + Content-Length>0 ist Erfolg.
+
+### Offener Punkt bleibt
+
+**Erfolgreicher 1051 mit `picture/<basename>` beim naechsten
+Zeitraffer-Druck, direkt nach dem Druck, vor dem USB-Export.**
+Script `tools/cc2-render-timelapse.py` liegt bereit. Erwartung:
+`3020→3021→1` in Groessenordnung der 26 s vom USB-Export, danach
+`video_status 1→2` und MP4 abrufbar.
+
+### Artefakte
+
+- `logs/cc2-sniff-2026-10-26-091710.jsonl` – Mitschnitt Test C
+  (git-ignoriert).
+- `docs/cc2-history-sample.json` – nach-Test-C-Snapshot
+  (byte-identisch zu Vorher).
+
+Nichts committed, nichts gepusht.
+
+---
+
+## 2026-10-26 08:15 UTC – Sende jetzt 1051 mit **picture-URL** auf heutigem Eintrag
+
+Ableitung der URL aus dem heutigen `video_url`:
+
+- Heutige `video_url` aus 1036:
+  `video/handslice_1792947629010.gcode20261026143807.mp4`
+- Basename-Konvention aus `elegoo/.../time_lapse_control.h:61,65-66`:
+  `pic_dirname_ = /opt/usr/picture/<basename>` und
+  `video_path_ = /opt/usr/video/<basename>.mp4` teilen denselben
+  `<basename>`.
+- Download-Resolver `cc2-control/src/history.h:51-62`:
+  dokumentiert explizit `"picture/NAME" or "video/NAME.mp4" ->
+  "video/NAME.mp4"` als Umkehrkonvention.
+- Firmware-Verhalten aus Test B (vorige Runde): `params.url =
+  video/<basename>.mp4` → Response-URL = `video/<basename>.mp4.mp4`,
+  d. h. die Firmware nimmt den Anteil nach dem letzten `/` als
+  Basename und haengt `.mp4` an.
+- Daraus **eindeutig** abgeleitet:
+  `params.url = "picture/handslice_1792947629010.gcode20261026143807"`
+  → Rohframes gesucht unter
+  `/opt/usr/picture/handslice_1792947629010.gcode20261026143807/`
+  (Display zeigt den Eintrag noch, Rohframes sollten vorhanden
+  sein); Ziel-MP4
+  `video/handslice_1792947629010.gcode20261026143807.mp4`
+  (identisch zum bestehenden Pfad).
+
+**Risiko-Vorhersage:** Falls 1051 erfolgreich rendert, wird das
+vorhandene MP4 **ueberschrieben**. Baseline ist gesichert in
+`local-test/handslice_1792947629010.gcode20261026143807.mp4`
+(1 741 634 B, md5 `e2330f840b398f425172b32692437f7a`).
+
+Mitschnitt laeuft parallel. Erwartung:
+- (a) `3020→3021→1` in Groessenordnung des USB-Composings
+  (26 s fuer 100 Frames),
+- (b) `3020→3022→1` sofort, falls Rohframes trotz Display-
+  Anzeige nicht mehr auffindbar sind,
+- (c) `error_code != 0` als sofortige Ablehnung.
+
+Antwortet 1051 mit `1003` oder scheitert mit `3022`: dokumentieren,
+kein zweiter Versuch, keine Parameter-Variante.
+
+---
+
+## 2026-10-26 08:08 UTC – Zwei Tests: Parallelitaet (A) und 1051 auf Status-2-Eintrag (B)
+
+### Test A: haengender Request blockiert nicht
+
+#### Nachweislich
+
+- **Paralleler Head-Probe wird waehrend eines haengenden Downloads
+  normal bedient.** 20 ms `head_ms` auf dem heutigen (vorhandenen)
+  MP4, waehrend eine stale-URL noch 35 s lang offen schwieg. Baseline
+  (ohne Hang): 12–16 ms. **Keine spuerbare Serialisierung.**
+- `connect_ms` schwankt stark (14–420 ms) **unabhaengig vom Hang** –
+  wohl TCP-SYN-Retransmit / TIME_WAIT. **Fuer App-Fehler-Detect
+  nur `head_ms` nutzen**, nicht die Gesamtlatenz.
+- Nach Timeout des haengenden Requests bleibt alles normal.
+- Script: `tools/cc2-probe-parallel.py`.
+
+#### Ungeprueft
+
+- **Grenze der Parallelitaet.** cc2-control fuehrt einen
+  „two-transfer limit"-Kommentar in `history.h`; wir haben nur
+  2 parallele Verbindungen gleichzeitig getestet. Mit 3+ koennte
+  der Server reagieren – nicht Teil dieses Tests.
+
+#### Geht nicht
+
+- Nichts; der Test hat sauber ergeben, dass parallele Probes safe
+  sind.
+
+#### App-Regel
+
+- Probes und Downloads **duerfen parallel** laufen (bis ~2
+  gleichzeitig; nicht volle Spray).
+- **Head-Timeout 1–2 s** auf den Response-Head reicht; vorhandene
+  Dateien antworten in <30 ms, fehlende schweigen fuer immer.
+
+---
+
+### Test B: method 1051 gegen bereits gerenderten Status-2-Eintrag
+
+#### Nachweislich
+
+- 1051 wird akzeptiert (`error_code=0`), **auch wenn die URL schon
+  mit `.mp4` endet**. Response-URL ist `video/<name>.mp4.mp4` –
+  die Firmware haengt pauschal `.mp4` an. Daraus folgt: die
+  Firmware interpretiert `params.url` als **Basisname fuer das
+  Composite**, egal ob mit oder ohne Extension.
+- **Status 12 nur 1 Millisekunde**: `3020 → 3022` passiert
+  in derselben api_status-Nachricht. Noch kuerzer als beim
+  `fac849a1`-Lauf (972 ms); dort war der URL-Form-Fehler zwar
+  nicht vorhanden, aber Rohframes fehlten – effektiv dasselbe
+  Nicht-Composite.
+- **1036 Vorher/Nachher: byte-identisch**
+  (`sha256(result)=e12d373a3ec5c57b` beide Male). Weder Target
+  noch Nebenbeitraege veraendert. **Insbesondere die
+  `time_lapse_video_duration` 0→4-Mutation vom
+  `fac849a1`-Lauf tritt hier nicht auf** – vermutlich bindet die
+  Firmware diese Mutation an die Status-1-Form `picture/…` an.
+- **MP4-Datei unveraendert.** Nach dem 1051-Lauf nochmal geladen:
+  1 741 634 Byte, md5 `e2330f840b398f425172b32692437f7a` –
+  **byte-identisch** zur Baseline. 1051 ueberschreibt also
+  **nicht** das vorhandene MP4.
+- Die hypothetische `video/<name>.mp4.mp4`-Datei existiert
+  erwartungsgemaess nicht (Timeout, kein 404).
+
+#### Ungeprueft
+
+- **Erfolgreiches 1051 mit `picture/<name><ts>`-URL und frischen
+  Rohframes.** Das sauber reproduzierbare `3020→3021`-Verhalten
+  haben wir bis jetzt nur beim USB-Export beobachtet (26 s fuer
+  100 Frames). MQTT-Pfad noch offen; naechster Zeitraffer-Druck
+  ist der richtige Moment (siehe offener Punkt).
+- **Verhalten bei einem `video_status=2`-Eintrag mit tatsaechlich
+  vorhandenen Rohframes und 1051 mit `picture/<name><ts>`-URL**
+  (= hypothetisches Re-Rendern). Interessant, aber potentiell
+  destruktiv (Ueberschreibung?); nur mit Backup des bestehenden
+  MP4 zu testen.
+- Semantik von `sub_status 3022` jenseits der jetzt belegten
+  Vermutung „kein Composite stattgefunden" (unterschiedliche
+  Ursachen: Rohframes fehlen; URL-Form falsch).
+
+#### Geht nicht
+
+- **1051 mit `video/<name>.mp4`-URL erzeugt nichts.** Weder neue
+  Datei (siehe `.mp4.mp4`-Timeout) noch Mutation des bestehenden
+  MP4. Composite scheitert still in `3022`, History bleibt
+  unberuehrt. Fuer die App: `video/`-URLs sind fuer 1051 **nicht**
+  der richtige Input.
+
+#### App-Regel (praezisiert)
+
+- Fuer Rendering: **nur `picture/<name><ts>`-URLs** (aus
+  `video_status in {1, 3}`) an 1051 schicken. `video/…`-URLs
+  sind idempotent und folgenlos (ok), aber sinnlos.
+- Status 2 → direkt Head-Probe und Download. Nie 1051.
+- `sub_status 3022` generell als „kein Composite stattgefunden"
+  interpretieren; Erfolg immer per Head-Probe auf die neue URL
+  bestaetigen.
+- 1051 ist **idempotent-sicher** auf Status-2-Eintraegen; falls
+  die App versehentlich 1051 doppelt sendet oder auf einem schon
+  gerenderten Eintrag, passiert nichts Boeses – weder MP4 veraendert
+  noch History mutiert.
+
+### Offener Punkt bleibt
+
+**Realer 1051-Test mit `picture/<name><ts>`-URL** beim naechsten
+Zeitraffer-Druck, vor dem USB-Export. Script
+`tools/cc2-render-timelapse.py` bleibt bereit; nicht ausfuehren,
+bevor der Druck fertig ist und der Stick noch nicht gesteckt wurde.
+
+### Artefakte
+
+- `tools/cc2-probe-parallel.py` – Test A, Head-Probes
+  mit optionalem Hang.
+- `logs/cc2-sniff-2026-10-26-090500.jsonl` – Mitschnitt waehrend
+  Test B (SN + Rohpayloads, deshalb `logs/` ignoriert).
+- `docs/cc2-history-sample.json` – byte-identisch zur
+  Vormittags-Fassung; `.mp4.mp4`-Mutation gab es nicht.
+
+Nichts committed, nichts gepusht.
+
+---
+
+## 2026-10-26 08:03 UTC – Sende jetzt method 1051 fuer heutigen Lauf 2 (Erfolgsfall)
+
+Zielobjekt: der heutige Status-2-Eintrag, zu dem laut Display die
+**Rohframes noch vorhanden** sind:
+
+- `task_id = e0b592f4-bd51-4ece-97fc-2bfc8137d13e`
+- `begin_time = 2026-10-26T06:38:07Z`
+- `url = "video/handslice_1792947629010.gcode20261026143807.mp4"`
+- aktueller `video_status = 2`, `video_size = 1 741 634`
+- Baseline md5 des MP4: `e2330f840b398f425172b32692437f7a`
+
+Request-Payload nach cc2-control-Beleg
+(`cc2-control/src/mqtt.c:277-287` + `:362-372`):
+
+```json
+{"method":1051,"id":1051,"params":{"url":"video/handslice_1792947629010.gcode20261026143807.mp4"}}
+```
+
+Mitschnitt laeuft parallel. Erwartung ist eine der drei
+Varianten:
+
+- (a) Sofortige Ablehnung mit `error_code!=0` (MP4 schon da),
+- (b) erneutes Composite ueber die Rohframes mit `3020→3021→1`
+  und moeglicherweise neuem md5,
+- (c) kurzer Durchlauf wie bei `fac849a1` (`3020→3022`),
+  weil die Firmware „schon da" so signalisiert.
+
+Antwortet 1051 mit `1003`, wird nicht wiederholt.
+
+---
+
+## 2026-10-26 07:55 UTC – Gegentest „Historie ist stale" bestaetigt; 1051-Lauf war ungueltig
+
+Klaus hat heute frueh am Display alle alten Zeitraffer geloescht,
+bis auf den heutigen Lauf 2. Die Historie aus `method 1036` zeigt
+davon nichts – alle Eintraege stehen weiterhin drin. Daraus folgt
+retrospektiv, dass der 1051-Test an `fac849a1` ungueltig war
+(keine Rohframes mehr vorhanden); `3022` ist vermutlich
+**„nichts zum Rendern"**, nicht „Fehler".
+
+### Nachweislich
+
+- `method 1036` liefert **genau denselben Snapshot** wie heute
+  vormittag: 6 Tasks mit `video_status in {1, 2}`, davon vier
+  Status-2-URLs. Keine Mutation durch das Display-Loeschen.
+- **Alle drei alten Status-2-URLs geben Timeout** auf
+  `GET /download?X-Token=…&file_name=…`:
+  - `video/ECC2_0.4_Box…20261019110021.mp4` (nominell 9 912 573 B)
+  - `video/handslice_kerbenwuerfel_timelapse.gcode20261025164702.mp4` (nominell 1 813 428 B)
+  - `video/handslice_1792947629010.gcode20261026010053.mp4` (nominell 1 762 496 B)
+  Timeout tritt beim **Response-Head** auf (8 s unseres Clients
+  wurden abgewartet). Protokollisch: TCP-Handshake geht durch, der
+  Server beantwortet die Request-Zeile mit Schweigen – kein 404,
+  kein 403, kein Body, kein TCP-Reset.
+- **Gegenprobe heutiger Eintrag**:
+  `video/handslice_1792947629010.gcode20261026143807.mp4`,
+  HTTP **200** in **73.7 ms**, Content-Length **1 741 634**,
+  Transfer-Encoding chunked. Vollstaendig geladene Datei:
+  **md5 e2330f840b398f425172b32692437f7a**, byte-identisch zum
+  Vormittags-Download.
+- **Druckeruhr-Offset belegt**: realer Druckstart 2026-10-26T06:38:07Z
+  (= 07:38:07 MEZ); Display-Anzeige fuer denselben Druck
+  **14:38:07** (laut Klaus). Dateinamen-Zeitstempel aus 1036
+  `20261026143807` – deckungsgleich zur Display-Zeit. Druckeruhr
+  liegt also **+7 h gegen MEZ / +8 h gegen UTC** (entspricht
+  UTC+8). Zeitstempel im Dateinamen oder in `begin_time` sind
+  damit **nicht gegen Echtzeit abgleichbar**.
+- **1036 ist eine Datenbank-Historie, kein Verzeichnislisting.**
+  `video_status==2` sagt „wurde mal gerendert", nicht „ist jetzt
+  abrufbar". Einziger verlaesslicher Existenz-Nachweis bleibt
+  der HTTP-GET.
+- **Short-Read-Timeout reicht als App-Fehler-Detect** – antwortet
+  der Drucker nicht in ca. 1–2 s auf den Response-Head, ist die
+  Datei weg (bei einer vorhandenen Datei kam der Header in 74 ms).
+
+### Ungeprueft
+
+- Ob `method 1051` auf einem Task mit **tatsaechlich vorhandenen**
+  Rohframes den Status 1 → 2 bringt und ein abrufbares MP4
+  erzeugt. Dafuer braucht es den naechsten Zeitraffer-Druck,
+  bevor Klaus den USB-Export macht (siehe offener Punkt unten).
+- Semantik von `sub_status 3022` jenseits der Vermutung „keine
+  Frames vorhanden".
+- Semantik von `video_status 3` ohne URL (Nameplate-Nebenbefund
+  heute Vormittag). Mit dem jetzigen Wissen plausibel: 3 bedeutet
+  „schon mal versucht zu rendern, Rohframes gab es nicht" –
+  d. h. es ist die 1051-nach-Composite-Markierung fuer einen
+  Task ohne Rohframes.
+- Warum der Drucker auf fehlende Dateien **schweigt** statt eine
+  HTTP-Fehlermeldung zu senden. Code-Beleg
+  (`cc2-control/src/history.h:250-251`) sagt nur, dass er es
+  tut – nicht warum.
+
+### Geht nicht
+
+- **Historie am Drucker-Display und `method 1036` haengen nicht
+  zusammen.** Das Display-Loeschen des Zeitraffers aktualisiert
+  die 1036-Datenbank nicht. Vermutlich das pendant zum
+  2026-10-25-Befund, dass `method 1047` (DELETE_FILE) auf dieser
+  FW auch nichts aus der Dateiliste loescht. **Loeschen aus der
+  History geht ueber `method 1038`** (code-belegt, nicht hier
+  getestet). Zum Entfernen eines Zeitraffers am Display ohne
+  History-Mutation gibt es keinen beobachtbaren MQTT-Pfad –
+  die beiden sind separat.
+
+### App-Regeln (konkretisiert nach diesem Lauf)
+
+Ersetzt die M5-Regeln vom Vormittag:
+
+1. `method 1036` lesen + anzeigen. Zeitstempel aus `begin_time`,
+   `end_time` und dem Dateinamen-Suffix **nicht** gegen Echtzeit
+   abgleichen; nur als Ordnungs-Schluessel verwenden.
+2. **Download-Button an eine Head-Probe binden**, nicht an
+   `video_status==2`: GET auf `/download?...` mit 2 s Timeout auf
+   den Response-Head. Antwortet der Drucker, ist das MP4 da und
+   wird geladen; antwortet er nicht, als „nicht mehr verfuegbar"
+   anzeigen (ggf. Hinweis, dass es wahrscheinlich am Display
+   geloescht wurde).
+3. Nach `method 1051` nicht nur auf `error_code==0` schauen und
+   auch nicht nur auf `status==1 nach 12`. Stattdessen: Target-URL
+   per Head-Probe testen. Nur HTTP 200 + Content-Length>0 ist
+   Erfolg.
+4. `sub_status 3022` als „keine Frames" interpretieren
+   (nicht als Fehler). `sub_status 3021` als Erfolg der
+   Kopier-Phase (USB-Export) belassen.
+5. `video_status 3` ohne URL: UI-Hinweis „Rohdaten nicht mehr
+   verfuegbar". `video_status 1` oder `3` mit URL: Button
+   „Rendern" (= 1051) anbieten, aber den Erfolg per Head-Probe
+   bestaetigen.
+
+### Offener Punkt
+
+**Realer 1051-Test beim naechsten Zeitraffer-Druck.** Vor dem
+USB-Export, direkt nach dem Druckende (idle), gegen die frischen
+`video_status=1`-Rohframes. Erwartung: Composite-Dauer in der
+Groessenordnung des USB-Composings (26 s fuer 100 Frames beim
+heutigen Lauf 2), `sub_status 3020→3021→1`, danach
+`video_status=2` mit abrufbarem MP4.
+
+Script liegt bereit (`tools/cc2-render-timelapse.py`); bitte
+nicht ausfuehren, bevor der naechste Zeitraffer-Druck fertig und
+der Stick noch nicht gesteckt ist.
+
+### Artefakte
+
+- `tools/cc2-timelapse-probe.py` – Head-only-GET pro Status-2-URL
+  mit Timing (und optionalem Drain).
+- `docs/cc2-history-sample.json` – aktualisiert (byte-identisch
+  zur Vormittags-Fassung).
+
+Nichts committed, nichts gepusht.
+
+---
+
+## 2026-10-26 07:45 UTC – Realtest `method 1051`: akzeptiert, aber Composite scheiterte still
+
+Senden erfolgt um 07:42:19 UTC gegen Target `fac849a1` (2026-10-14-
+Druck, `video_status=1`, URL `picture/<name><ts>`). Reserve
+`e4d2dc70` nicht angefasst. Mitschnitt lief parallel.
+
+### Nachweislich
+
+- **1051 wird vom Stock-Broker akzeptiert.** Response in 233 ms,
+  `error_code=0`, Response-Payload enthaelt bereits die zukuenftige
+  URL (`video/<name><ts>.mp4`). Payload exakt nach
+  `cc2-control/src/mqtt.c:277-287` + `:362-372` (id = method = 1051).
+- **Status 12 wird sofort gesetzt**: 27 ms nach der Response wechselt
+  `machine_status.status` auf 12 und `sub_status` auf **3020**.
+  Insgesamt dauert der Zustand nur **972 ms**, dann zurueck auf
+  Status 1.
+- **Substate-Pfad weicht vom USB-Export ab:** heute frueh war die
+  Reihenfolge `3020→3021→1` (26 s), jetzt ist sie `3020→3022→1`
+  (<1 s). `3021` ist laut Display „Video wird kopiert", `3022` ist
+  in keiner uns bekannten Code-Doku aufgefuehrt und sieht nach
+  **Fehler-Substate** aus.
+- **MP4 ist NICHT entstanden.** Zwei Download-Versuche mit der
+  Response-URL (einmal `urlencode`-Variante, einmal
+  `percent_encode`-Variante): beide HTTP-Timeout. Das entspricht
+  genau dem von cc2-control dokumentierten Verhalten „wrong token
+  or name → silence" (`history.h:250-251`). Gegentest mit dem
+  heute-frueh-MP4 ergibt `HTTP 200 Content-Length: 1 741 634` –
+  der Pfad funktioniert, nur die Datei fehlt.
+- **History-Diff Vorher/Nachher** (hash `sha256(result)`):
+  `c07da2c56804...` → `e12d373a3ec5...`. Zwei geaenderte Tasks:
+  1. Target `fac849a1`: nur `time_lapse_video_duration` 0 → 4.
+     `status` bleibt 1, `url` bleibt `picture/<name><ts>`,
+     `size` bleibt 0. Zustand damit nicht fortgeschritten.
+  2. Nameplate `887e3325` (voellig unverwandter Task vom 23.09.):
+     `video_status` 0 → 3, bei weiterhin leerer URL und 0-Werten.
+     Nicht sauber kausal zum 1051 zuordenbar.
+- **Reserve `e4d2dc70` byte-identisch**. Keine Nebenwirkung auf
+  den anderen Status-1-Eintrag.
+- **Alle vorhandenen `video_status=2`-Eintraege byte-identisch**.
+  Keine Nebenwirkung auf bereits gerenderte Zeitraffer.
+- **Keine Fortschritts-Felder in api_status waehrend Status 12**.
+  Alle Felder im 1.5-s-Composing-Fenster: nur `status`, `sub_status`,
+  und die 1051-Antwort selbst (`error_code`, `url`). Kein
+  `progress`, `percent`, `frame_count` o.ae. Fuer die App bedeutet
+  das: Spinner statt Prozentanzeige.
+
+### Ungeprueft
+
+- **Erfolgreiches Composing via 1051.** Dieser Lauf hat keinen
+  erfolgreichen Zustand erreicht; den Zyklus 1→1051→12→**2**→
+  Download haben wir nur fuer die USB-Export-Variante (`3020→3021`)
+  real gesehen, nicht ueber MQTT 1051. Fuer die endgueltige
+  Bestaetigung braechte es einen frischen Druck mit Zeitraffer,
+  gefolgt direkt (ohne USB-Export) von einem 1051-Aufruf – dann
+  waeren die Rohframes garantiert noch da.
+- **Bedeutung von `sub_status 3022`.** Vermutung „Composite
+  fehlgeschlagen". Harten Beleg (Enum-Tabelle) haben wir nicht.
+- **Bedeutung von `video_status 3` ohne URL** (Nameplate-Fall).
+  Semantisch widerspruechlich zur cc2-control-Lesung („3 ist
+  renderbar wie 1"). Vermutung: FW-interne Markierung „existierte
+  mal, Rohframes weg". Nicht hart belegt.
+- **Ob `time_lapse_video_duration=4` am Target eine App-Semantik
+  hat** (geplante Dauer in Sekunden?). Dieser Eintrag wird in der
+  Community-UI nicht angezeigt; Zweck in diesem Zustand unklar.
+
+### Geht nicht
+
+- **Composing auf Stock 02.01.01.07, wenn die Rohframes bereits
+  intern geloescht sind.** Der Drucker signalisiert den Fehler
+  nicht ueber `error_code`, sondern nur ueber den Substate 3022.
+  Fuer die App bedeutet das: nach jedem 1051-Lauf einen zweiten
+  `method 1036`-Pull machen und auf `video_status==2 && size>0`
+  pruefen, nicht nur auf `error_code==0`.
+- **Rohframes-Erhalt ueber die Zeit garantieren.** Der Drucker
+  (vermutlich) raeumt die `picture/`-Verzeichnisse irgendwann
+  weg, aber die History behaelt `video_status=1` – das ist eine
+  stale-Markierung aus App-Sicht. Workaround: bei `status=1`
+  mit alten `end_time`-Werten in der UI darauf hinweisen, dass
+  das Rendering fehlschlagen koennte.
+
+### App-Konsequenz (M5 revidiert)
+
+Dreistufige UI-Logik, konkretisiert um die Realtest-Erkenntnisse:
+
+1. **Druckhistorie laden:** `method 1036`.
+2. **Pro Zeitraffer-Task:**
+   - `video_status==0` → „kein Zeitraffer".
+   - `video_status==2 && size>0` → Download-Button → `GET /download?X-Token=&file_name=<url>`.
+   - `video_status==1` oder `3` **mit** URL beginnend mit `picture/`
+     → Button „Rendern" → `method 1051 params.url=<url>`;
+     Spinner anhand `machine_status.status==12`.
+   - `video_status==3` **ohne** URL → UI zeigt „Zeitraffer-
+     Rohdaten nicht mehr vorhanden" (nicht renderbar).
+3. **Nach dem Composing (Zurueck zu Idle):** erneut `method 1036`.
+   - Wenn Target jetzt `video_status==2 && size>0`: Download.
+   - Sonst: Fehlerhinweis „Composite fehlgeschlagen – Rohframes
+     evtl. nicht mehr verfuegbar". Nicht automatisch
+     wiederholen (kein zweiter 1051-Aufruf).
+
+### Artefakte
+
+- `tools/cc2-render-timelapse.py` – idempotent gegen Reserve
+  (nimmt URL als Argument, sendet 1051 genau einmal).
+- `logs/cc2-sniff-2026-10-26-084103.jsonl` – Sniff der
+  Composing-Phase (SN + Rohpayloads, deshalb `logs/` ignoriert).
+- `docs/cc2-history-sample.json` – nach-1051-Snapshot
+  (SN-anonymisiert). Vorher-Snapshot liegt nur temporaer in
+  `/tmp/cc2-history-vorher.json`.
+- `docs/upstream/elegoo-homeassistant-timelapse-download-draft.md`
+  – aktualisiert um die 1051-Beobachtung (siehe Abschnitt
+  „Realtest observations").
+
+Nichts committed, nichts gepusht.
+
+---
+
+## 2026-10-26 07:40 UTC – Sende jetzt method 1051 (einziger Schreibbefehl heute)
+
+Zielobjekt: aelterer der beiden `video_status=1`-Eintraege aus
+`docs/cc2-history-sample.json`:
+
+- `task_id = fac849a1-c028-4ba9-b7e5-c41a9981159a`
+- `begin_time = 2026-10-14T03:50:32Z`
+- `url = "picture/ECC2_0.4_Sealed+lid_Elegoo PLA Matte _0.12_2h39m.gcode20261014115032"`
+
+Der neuere `video_status=1`-Eintrag (`e4d2dc70-...`) **bleibt
+unangetastet** als Reserve.
+
+Request-Payload nach cc2-control-Beleg
+(`cc2-control/src/mqtt.c:277-287` fuer `publish_request` plus
+`:362-372` fuer `mqtt_generate_timelapse`):
+
+```json
+{"method":1051,"id":1051,"params":{"url":"<url>"}}
+```
+
+Topic: `elegoo/<cc2-sn>/<client_id>/api_request`.
+
+Passiver Mitschnitt laeuft seit 2026-10-26 07:41 UTC
+(`logs/cc2-sniff-2026-10-26-084103.jsonl`), damit Status-12-Verlauf
+mit Zeitstempel protokolliert wird. Idle vor dem Senden wird vom
+1051-Script selbst geprueft.
+
+Erwartung: `error_code=0` → Status 1→12→1 mit Substates 3020→3021.
+Antwortet 1051 mit `1003`, wird nicht wiederholt und keine
+Parameter-Variante probiert.
+
+---
+
+## 2026-10-26 07:35 UTC – Realtest: Zeitraffer-Abruf ueber LAN bewiesen
+
+Zwei Schritte lesend (plus Register-Handshake fuer 1036):
+`tools/cc2-history-fetch.py` fuer `method 1036`,
+`tools/cc2-timelapse-download.py` fuer HTTP-GET. **Kein `method 1051`
+gebraucht**, weil der 06:38-Zeitraffer-Druck bereits `video_status=2`
+hatte (Klaus' USB-Export heute frueh hat das Composite gemacht).
+
+### Nachweislich
+
+- **`method 1036` funktioniert auf Stock 02.01.01.07.** Antwort in
+  < 1 s, 13 661 Byte, 45 History-Eintraege, `error_code=0`. Felder
+  deckungsgleich zu dem, was wir aus `cc2-control/src/history.h` und
+  `plugin.ts` abgeleitet haben.
+- **Spiegelung der heutigen Testdrucke stimmt exakt:**
+  - Lauf 1 (06:25 UTC, ohne Timelapse): `video_status=0`,
+    `video_url=""`, `video_size=0`. Kein Frame aufgezeichnet.
+  - Lauf 2 (06:38 UTC, mit Timelapse): `video_status=2`,
+    `video_url='video/handslice_1792947629010.gcode20261026143807.mp4'`,
+    `video_size=1 741 634`. **Klaus' USB-Export um 06:50:54 UTC
+    hat das Composite ausgeloest; danach ist der Status von
+    (vermutlich zuvor) 1 auf 2 gewechselt.**
+- **Enum `time_lapse_video_status` empirisch belegt** (Verteilung in
+  45 Tasks):
+  0 = kein Zeitraffer (`url=""`), 1 = Rohframes vorhanden
+  (`picture/<name><ts>`), 2 = MP4 bereit (`video/<name><ts>.mp4`),
+  3 = nicht beobachtet. Interpretation identisch zur
+  Community-Code-Lesung.
+- **HTTP-GET `/download?X-Token=<access>&file_name=<url>` liefert
+  das MP4 vom LAN aus** (nicht nur Loopback). Response:
+  `HTTP 200`, `Content-Length: 1 741 634` (= `video_size`),
+  `Transfer-Encoding: chunked`, `Content-Disposition: attachment;
+  filename="video/<name>.mp4"`. **Beide Rahmungen (Length + chunked)
+  gleichzeitig** – vgl. cc2-control-Warnung in
+  `history.h:269-273`.
+- **ffprobe-Pruefung** (`local-test/handslice_1792947629010.gcode20261026143807.mp4`,
+  md5 `e2330f840b398f425172b32692437f7a`):
+  H.264, 640×360, 30 fps, **100 Frames**, 3.30 s, 4.22 Mbit/s –
+  der 100-Layer-Druck ergibt genau 1 Frame pro Layer, was zur
+  Elegoo-Code-Logik passt.
+- **Idle-Prerequisites eingehalten.** Vor dem 1036-Request 10 s
+  passiv geprueft; `machine_status.status` kein Delta in dem
+  Zeitfenster (= keine Transition weg vom Idle), danach erst
+  Register + 1036.
+- **Clock-Drift bestaetigt und erklaert.** Dateinamens-Zeitstempel
+  `20261026143807` beim 06:38:07-UTC-Druckstart = Druckeruhr
+  ~8:00 h vor UTC in diesem Lauf (im 25.10.-Lauf war es
+  `20261026010053` fuer einen 18:05-MEZ-Druck). Die
+  `localtime_r`-Nutzung im Elegoo-Code
+  (`time_lapse_control.cpp:166-172`) sieht einfach die aktuelle
+  Druckeruhr; dass diese die MESZ→MEZ-Umstellung oder
+  Zeitzonenwechsel nicht sauber mitfuehrt, ist das darunter
+  liegende Problem. **Fuer die App bleibt: Dateinamens-ts als
+  opaker Ordnungsschluessel.**
+
+### Ungeprueft
+
+- **Verhalten bei `video_status=1`** (Rohframes, nicht gerendert).
+  In diesem Sample waren zwei Tasks mit Status 1 (vom 14.10.),
+  aber wir haben `method 1051` **nicht** gesendet (nicht noetig).
+  Der volle Zyklus 1 → 1051 → Status 12 → 2 → Download bleibt
+  damit **nur in Teilen** validiert: wir haben Status 12 heute
+  frueh im Mitschnitt gesehen und das daraus resultierende MP4
+  jetzt heruntergeladen; der direkte Trigger via `method 1051`
+  ist weiter nur code-belegt, nicht am Geraet verifiziert.
+- **Verhalten bei `video_status=3`** – im Sample nicht aufgetaucht.
+- **Semantik von `task_status`** – 1 (38×) oder 2 (7×) im Sample.
+  Keine 3 gesehen. Deutung „1 = normal, 2 = abgebrochen" ist
+  plausibel, aber nicht hart belegt.
+- **Content-Length-vs-chunked-Konflikt** in anderen Clients.
+  `urllib` in Python hat beides sauber gelesen; wie Dart's
+  `http`-Package reagiert, bleibt zu testen.
+
+### Geht nicht
+
+- Nichts, was fuer diesen Auftrag relevant waere, hat gefehlt.
+  Alle drei geforderten Schritte 1-2-3 waren durch die ersten
+  zwei abgedeckt; Schritt 3 (`method 1051`) ist bewusst nicht
+  gesendet, weil Schritt 2 bereits erfolgreich war.
+
+### App-Konsequenz (konkret, M5-Erweiterung)
+
+Dreistufige UI-Logik, in dieser Reihenfolge:
+
+1. **Druckhistorie laden:** `method 1036` → `history_task_list[]`.
+   Pro Eintrag die drei Zeitraffer-Felder lesen.
+2. **Pro Zeitraffer-Task entscheiden:**
+   - `video_status==0` → UI zeigt „kein Zeitraffer".
+   - `video_status==2` → UI zeigt „Zeitraffer bereit" mit
+     Download-Button → GET `/download?X-Token=…&file_name=<url>`.
+   - `video_status==1` oder `3` → UI zeigt „noch nicht gerendert"
+     mit Button „Rendern" → `method 1051 params.url=<url>`;
+     waehrend Status 12 ein Fortschritts-Spinner; nach
+     Zurueck-auf-Idle `method 1036` neu lesen und zu Schritt 2.
+3. **Loeschen** (Phase 2+): `method 1038 params={"list":[task_id]}`
+   entfernt **nur den Historien-Eintrag** aus 1036. **Weder das
+   MP4 noch die Display-Zeitraffer-Liste werden beruehrt** – siehe
+   Test D (08:35 UTC Eintrag). Fuer Speicher-Freigabe muss am
+   Drucker-Display geloescht werden; die MQTT-API hat dafuer
+   keinen Pfad.
+
+Zusatz fuer die App-Doku: `method 1047` nicht fuer Zeitraffer
+nutzen (die Firmware ignoriert es sowieso).
+
+### Entwurf fuer upstream `danielcherubini/elegoo-homeassistant`
+
+`docs/upstream/elegoo-homeassistant-timelapse-download-draft.md`.
+Englisch, keine SN/Access-Code/IP, keine Code-Kopien aus
+`cc2-control` oder `elegoo-link`. Vorschlag darin: Doku-PR fuer
+`docs/CC2_PROTOCOL.md` (1036/1051/1038 + `/download`-Semantik) +
+Feature-PR fuer `cc2/client.py` (Timelapse-Download). Noch nicht
+eingereicht – Klaus entscheidet.
+
+### Artefakte
+
+- `tools/cc2-history-fetch.py` – 1036 + Idle-Check + SN-Scrub.
+- `tools/cc2-timelapse-download.py` – HTTP-GET /download.
+- `docs/cc2-history-sample.json` – 1036-Antwort anonymisiert (SN
+  raus, Access-Code war nicht in der Antwort). Enthaelt
+  Dateinamen echter frueherer Drucke – nicht sensibel, aber in
+  Repo-Kontext zu bedenken.
+- `local-test/handslice_1792947629010.gcode20261026143807.mp4` –
+  gezogener Zeitraffer (git-ignoriert, bleibt lokal).
+- `docs/upstream/elegoo-homeassistant-timelapse-download-draft.md`
+  – Draft fuer upstream.
+
+Nichts committed, nichts gepusht.
+
+---
+
+## 2026-10-26 07:30 UTC – Klaerung: 1036/1038/1051 sind Stock, nicht Community
+
+Vor dem Realtest die berechtigte Rueckfrage aufgeloest, ob die
+Methoden-Nummern aus `cc2-control` evtl. nur in der Community-
+Firmware funktionieren.
+
+**Nachweislich Stock-Protokoll:**
+
+- `cc2-control` **bringt keinen eigenen MQTT-Broker mit.** Der
+  einzige Treffer fuer „mosquitto" im Repo ist in
+  `cc2-control/tests/sim_printer.py:15-18` – dort wird mosquitto
+  per Docker als Mock-Broker fuer die Testsuite gestartet, nicht
+  auf dem Drucker.
+- `cc2-control` connectet gegen den **lokalen** Broker auf
+  `127.0.0.1:1883` (`cc2-control/src/mqtt.c:382`:
+  `a.sin_addr.s_addr = htonl(INADDR_LOOPBACK)`). Dieser Broker
+  ist Teil der **Stock-Firmware** – der Dienst, den wir seit
+  2026-10-25 auch von unserem Mitschnitt-PC aus unter
+  `<cc2-ip>:1883` ansprechen.
+- `cc2-control` wartet beim Start mit `pidof elegoo_printer`
+  (`cc2-control/scripts/launch.sh:28`) auf den **vendor-eigenen
+  Hauptprozess**; alle Publishes gehen auf die vendor-eigenen
+  Topics `elegoo/<sn>/...` (`cc2-control/src/mqtt.c:71, 92, 146,
+  157, 282, 298, 324`), identisch zu dem, was wir im passiven
+  Mitschnitt heute frueh gesehen haben.
+- Die Methoden-Nummern selbst sind **nicht Community-Erfindung**.
+  Der Lizenzhinweis in `cc2-control/web-src/src/lib/machine.ts:3-4`
+  lautet woertlich: „Codes and meanings below come from ELEGOO's
+  elegoo-link SDK (Apache-2.0), CC2 LAN adapter
+  elegoo_fdm_cc2_message_adapter.cpp".
+- Zusaetzlicher indirekter Beleg: Die sub_status-Codes, die unser
+  passiver Stock-FW-Mitschnitt heute frueh gezeigt hat (2075,
+  2077, 2401, 2501, 2502, 2801, 2802, 1045, 1405), sind in der
+  Community-Tabelle (`machine.ts:11-57`) deckungsgleich belegt.
+  Die Community-Semantik passt also faktisch zum Stock-Verhalten.
+
+**Vorsicht:** Dieser Beleg zeigt, dass die Nummern aus Elegoos
+eigenem SDK stammen und `cc2-control` nur Client ist. Er zeigt
+**nicht**, dass die Stock-Firmware 02.01.01.07 jede dieser
+Methoden freischaltet. Methoden `1045 GET_FILE_THUMBNAIL` und
+`1047 DELETE_FILE` existieren im SDK, antworten auf dieser Stock-FW
+aber mit `error_code 1003` (unser Nachweislauf 2026-10-25). Ob
+`1036/1051` ebenso „im SDK, aber in dieser FW abgewiesen" sind,
+klaert erst der folgende Realtest.
+
+---
+
+## 2026-10-26 07:15 UTC – Quellenrecherche Zeitraffer-Ablage (lesend, keine Firmware geladen)
+
+Neuer Abschnitt in `docs/networking-cc2.md` eingefuegt:
+„Zeitraffer-Ablage: Quellenrecherche 2026-10-26" (umfangreich,
+revidiert die 2026-10-25-Aussage „keine LAN-API fuer
+Zeitraffer-Download").
+
+Quellen: `elegooofficial/CentauriCarbon2` (GPL-3) und
+`Neme77/centauri-carbon-2-community` (shallow nach
+`/tmp/handslice-research/`, nichts gebaut) sowie
+`docs.opencentauri.cc`. Keine `.zip.sig`/`.swu.sig` angefasst, kein
+Decrypt-Tool benutzt, keinen Befehl an den Drucker.
+
+### Nachweislich (Belegstellen in networking-cc2.md verlinkt)
+
+- **Rohframe-Pfad:** `/opt/usr/picture/<gcode><YYYYMMDDHHMMSS>/`
+  (temporaer `.temp/`, bei Abschluss umbenannt). Pro Frame
+  `0001.jpeg`, `0002.jpeg`, …
+  (`time_lapse_photo.h:17`, `time_lapse_control.cpp:28-78`).
+- **MP4-Pfad:** `/opt/usr/video/<name>.mp4` (`time_lapse_photo.h:18`).
+- **Dateinamen-Logik:** Druckdateiname + `strftime("%Y%m%d%H%M%S")`
+  aus **lokaler Druckeruhr** (`time_lapse_control.cpp:161-186`).
+  Begruendet die 2026-10-25-Beobachtung „Zeitstempel im Dateinamen
+  weicht ab".
+- **Encoder:** `cpulimit -l 80 ffmpeg … libx264 -preset ultrafast`
+  gebuendelte Binaries unter `elegoo/lib/ffmpeg/ffmpeg`
+  (`time_lapse_control.cpp:280-293`); aktiver Pfad nutzt den
+  eingebetteten `ImageToVideoEncoder` (`.cpp:110-114`).
+- **Vollstaendige MQTT-Methodenliste:** 1002, 1019, 1020, 1029,
+  1036, 1038, 1051, 2004, 2005 – mit Code-Beleg
+  (`cc2-control/web-src/src/lib/machine.ts:88-98`,
+  `cc2-control/src/mqtt.c:290-372`).
+- **Zeitraffer-Flaggen-Pfade sauber getrennt:**
+  - `method 1019 params.config.delay_video=true` (vor dem Druck,
+    `mqtt.c:290-313`, der sauberere cc2-control-Weg).
+  - `method 1020 params.config.delay_video=true` (beim Druckstart,
+    der elegoo-link-Weg; von Klaus am 25.10. so verwendet, wirkt).
+- **Zeitraffer-Status pro Druck** steckt in `method 1036`
+  `history_task_list[]`, Feld `time_lapse_video_status`:
+  0/1/2/3-Enum (1 oder 3 = renderbar, 2 = MP4 bereit),
+  `time_lapse_video_url` nennt den Pfad (`history.h:22-62`,
+  `history.h:160-178`, `plugin.ts:792`).
+- **Zeitraffer-Rendering starten:**
+  `method 1051 params.url="<history_task.time_lapse_video_url>"`;
+  Fortschritt via `machine_status.status=12`, Timeout 600 s
+  (`mqtt.c:362-372`, `mqtt.c:895`).
+- **LAN-Download fuer das fertige MP4 (NEU, widerlegt
+  2026-10-25-Aussage):**
+  `GET http://<cc2-ip>/download?X-Token=<access>&file_name=video/<name>.mp4`
+  – belegt in `cc2-control/src/history.h:307-336`. Derselbe
+  Endpunkt wie fuer G-Code, nur `file_name`-Prefix anders.
+- **Loeschen:** `method 1038 params.list=[task_id]` entfernt den
+  History-Eintrag; dies ist der dokumentierte Weg, Zeitraffer-
+  Rohframes und Videos sauber zu entsorgen. `method 1047`
+  (DELETE_FILE auf `local`) ist dafuer NICHT der richtige Pfad
+  (passt zu unserem 2026-10-25-Nachweislauf, in dem 1047 immer
+  `1003` zurueckgab).
+- **sub_status-Tabelle fuer Status 2** komplett belegt
+  (`machine.ts:11-57`), inkl. der von uns heute frueh gesehenen
+  Codes 1045, 1066, 1405, 2075, 2077, 2401, 2501, 2502, 2801,
+  2802. **Codes 1066 und 2802 fehlen in der Community-Tabelle**;
+  Vermutung: 1066 = Bed-Mesh-Zwischenschritt, 2802 = Homing-
+  Zwischenschritt (die Nachbar-Codes sind so belegt).
+- **Prozess-Topologie:** vendor `elegoo_printer` (binary, nicht
+  im Repo) + `ai_camera` (binary, Quelle im Elegoo-Repo).
+  `/opt/inst/` = read-only Installation, `/opt/usr/` = persistente
+  Partition. Community startet `cc2-control` erst, wenn
+  `pidof elegoo_printer` antwortet
+  (`cc2-control/scripts/launch.sh:28`).
+- **A/B-Partitionen** via `swupdate`, RootFS SquashFS, Paket
+  `.zip.sig → .swu.sig + .json.sig`
+  (OpenCentauri `software/updates-cc2/`).
+
+### Ungeprueft (konkrete Experimente stehen aus)
+
+- **LAN-Download des MP4 mit `X-Token=<access-code>` am echten CC2.**
+  Der Pfad ist code-belegt (cc2-control nutzt ihn ueber Loopback);
+  ob der Drucker denselben GET auch extern von einem anderen Host
+  akzeptiert, muss gezielt getestet werden. Erst dann ist Punkt 6
+  des revidierten Flusses wirklich bewiesen.
+- **Verhaelt sich Status 12 beim USB-Export anders als bei
+  `method 1051`?** Vermutung: identischer Composite-Code, nur mit
+  anschliessendem Dateikopieren auf USB. Trennbar durch zwei
+  Vergleichs-Composites (1× ueber MQTT, 1× ueber Display).
+- **Was passiert mit dem Picture-Verzeichnis nach Composite?** Der
+  Code sagt `rm -rf <pic_dir>` (`time_lapse_control.cpp:123` und
+  `ai_camera.cpp:437`), Klaus beobachtete „Frames bleiben, beliebig
+  oft exportierbar". Deutung: Was bleibt, ist das **MP4** in
+  `/opt/usr/video/` – ein zweiter USB-Export laeuft dann nur noch
+  als Kopiervorgang (ggf. ohne Phase 3020). Konkreter Test: zweiter
+  Export derselben Zeitraffer-Datei; Erwartung: deutlich kuerzer
+  als 26 s und evtl. nur sub_status 3021.
+- **Codes 1066/2802** (im Mitschnitt gesehen, in der Community-
+  Tabelle nicht) – Belegung aus elegoo-link checken oder weiter
+  mitschneiden.
+
+### Geht nicht ohne weiteren Zugang
+
+- Die genauen Signale **innerhalb des `elegoo_printer`-Prozesses**,
+  die Status 12 setzen und 1051 bedienen, sind in diesen Repos
+  nicht enthalten – `elegoo_printer` ist Closed-Source-Binary. Fuer
+  die App-Entwicklung ist das aber **nicht noetig**: Der
+  beobachtbare Vertrag (MQTT-Methoden, Status-Felder, HTTP-
+  Download-Pfad) ist aus `ai_camera`-Quellen und
+  `cc2-control`-Code vollstaendig rekonstruierbar.
+- Zur sauberen Verifikation der Dateinamen im Filesystem
+  (`/opt/usr/picture/<name><ts>/0001.jpeg` …) braeuchte es
+  Root-Zugang per SSH; den gibt es laut OpenCentauri auf Firmware
+  **ab 02.00.02.00 nicht mehr** (SSH-Prozess entfernt, Downgrade-
+  Sperre). Fuer Phase 2 der App **nicht erforderlich** – die
+  Datenstruktur wird ueber `method 1036` indirekt sichtbar.
+- Firmware-Entpackung (`.zip.sig → .swu.sig → SquashFS`) ist
+  **nicht noetig** fuer unser Zeitraffer-Problem; alle relevanten
+  Pfade und Methoden sind oben belegt. Wenn Elegoo in einer
+  spaeteren FW neue Methoden/Flags einfuehrt, waere Entpackung ein
+  Weg; bis dahin verzichten wir.
+- Private Signaturschluessel sind in keinem der Repos und werden
+  auch nicht gesucht.
+
+### Fazit: Reicht die Recherche?
+
+**Ja fuer die App-Seite.** Der komplette User-Fluss „Zeitraffer
+einschalten, filmen lassen, MP4 ueber LAN herunterladen, Historie
+pflegen" ist aus den oben verlinkten Datei:Zeile-Belegen
+rekonstruierbar. Konkret ergaenzend eingebaut werden kann:
+
+- `method 1019`-Preamble vor `method 1020` (statt oder zusaetzlich
+  zu `config.delay_video` in 1020).
+- `method 1036` als History-Quelle inkl. Zeitraffer-Status-Enum.
+- `method 1051` zum Rendern + Status-12-Progress-Anzeige.
+- HTTP-GET `/download?X-Token=…&file_name=video/<name>.mp4` zum
+  Download. Status 12 / substate 3020/3021 interpretieren als
+  „Rendering" / „Kopieren".
+- `method 1038` zum Loeschen eines Druck-/Zeitraffer-Tasks.
+
+**Firmware-Paket wird aktuell nicht benoetigt.** Es waere nur
+dann naechster Schritt, wenn der LAN-Download-Pfad gegen den echten
+CC2 **nicht** funktioniert (dann koennte das Entpacken Aufschluss
+geben, welchen Pfad der HTTP-Dienst beim Drucker tatsaechlich
+registriert). Dasselbe gilt fuer Root-Zugang: wuerde nur gebraucht,
+falls `method 1036`+`1051`+`/download` beim Realtest widersprechen.
+
+**Konkret ausstehender Test (ein naechster Lauf, lesend):**
+
+1. Druckhistorie via `method 1036` abfragen – `history_task_list`
+   fuer die beiden heutigen Drucke pruefen.
+2. `time_lapse_video_url` fuer den Zeitraffer-Druck lesen.
+3. HTTP-GET auf `http://<cc2-ip>/download?X-Token=<access>&file_name=<url>`
+   starten; bei HTTP 200 + Content-Type `video/mp4` ist der
+   LAN-Download-Pfad bewiesen.
+4. Falls Verweigerung: Firmware-Paket als naechsten Schritt
+   erwaegen; vorher aber elegoo-link `elegoo_fdm_cc2_http_transfer.cpp`
+   genauer lesen, ob dort ein anderer Pfad fuer Video versteckt ist.
+
+Nichts committed, nichts gepusht. Clones unter `/tmp/handslice-research/`
+(nicht im Repo).
+
+---
+
+## 2026-10-26 06:55 UTC – Passiver MQTT-Mitschnitt, zwei Drucke + USB-Export ausgewertet
+
+Mitschnitt: `logs/cc2-sniff-2026-10-26.jsonl`, 1691 MQTT-Nachrichten
+in 28 min 51 s (06:23:25 → 06:52:16 UTC). Nur Subscribe `#`, kein
+PUBLISH im JSONL (nachweisbar: nur `meta: start/connect/subscribe/
+disconnect`-Records vom Script, keine Register- oder Command-Records).
+
+Auswertung: `tools/sniff-analyze.py`.
+
+### Nachweislich funktioniert
+
+- **Zwei Druckläufe sauber erkannt** (gleiche Datei
+  `handslice_1792947629010.gcode`, neue `uuid` pro Lauf):
+  - Lauf 1 (ohne Zeitraffer): 06:25:11 → 06:37:43 UTC, 12 min 32 s.
+  - Lauf 2 (mit Zeitraffer):  06:38:07 → 06:50:38 UTC, 12 min 31 s.
+- **Identische sub_status-Sequenz in beiden Läufen**: 1405 (Pre-Heat)
+  → 1066 (Bed-Mesh) → 2801/2802 → 1045/1066 → 2075 (Printing). Je
+  drei kurze Pause/Resume-Fenster waehrend des Drucks (2501→2502→
+  2401→2402). Druckende 2077. Timing praktisch deckungsgleich.
+- **Status 12 (VIDEO_COMPOSING) erstmals im Mitschnitt beobachtet** –
+  und zwar NICHT am Druckende, sondern bei Klaus' USB-Export-Aktion:
+  ```
+  06:50:38  Druck 2 fertig           machine_status.status 2→1, state 'complete'
+  06:50:49  USB-Stick erkannt        external_device.u_disk = true
+  06:50:54  Composing beginnt        status 1→12,  sub_status 0→3020
+  06:51:20  Phase 2                  sub_status 3020→3021
+  06:51:20  Composing fertig         status 12→1,  sub_status 3021→0
+  06:52:03  USB-Stick entfernt       u_disk = false
+  ```
+  Gesamt-Composing-Dauer: 26 Sekunden. Zeitlicher Abstand Composing-
+  Start zu USB-Erkennung: 5 Sekunden; zu Druckende: 16 Sekunden.
+- **Unterschiede Lauf 1 vs. Lauf 2** im passiven Mitschnitt: **keine**.
+  Der komplette Status-Push-Strom ist in beiden Läufen bis auf
+  Zeitstempel und uuid identisch. Insbesondere keine Spur von
+  `delay_video`, `camera`, `chassis_camera`, `time_lapse`, `video` –
+  weder als Payload-Schluessel noch als Wert, in keinem der 1691
+  Datensaetze (grep-Resultat: 0 Hits).
+- `exception_status[0]=1243` erschien in beiden Laeufen jeweils einmal
+  (06:28:46 Lauf 1, 06:41:41 Lauf 2), jeweils im Pause-Fenster. In
+  beiden Laeufen identisch, also **kein Zeitraffer-Signal**.
+- Script veraendert den Drucker nicht: Prozess-exit sauber, Drucker
+  blieb Idle, keine Nebeneffekte.
+
+### Ungeprueft
+
+- Ob Status 12 **auch** direkt am Druckende (ohne USB-Export) kurz
+  gepusht wird. Im heutigen Mitschnitt lag der Delta-Takt bei ~1 s
+  und waere nicht leicht zu uebersehen – wir haben keinen 1→12 im
+  Zeitraum 06:50:38…06:50:49 gesehen, aber ein zusaetzlicher
+  Zeitraffer-Druck ohne USB-Export-Followup wuerde das sauber
+  festnageln.
+- Bedeutung von `sub_status=1243` (exception) und der kurzen
+  Pause/Resume-Zyklen 2501/2502/2401/2402 waehrend des Drucks.
+- Welchen Trigger Composing hat: eine aktive Aufnahme (`delay_video=
+  true`) oder jede USB-Stick-Erkennung nach einem Druck. Zum
+  Trennen braeuchte es einen Druck **ohne** Zeitraffer + USB-Export
+  danach als Kontrollprobe.
+
+### Geht nicht / nicht beobachtbar
+
+- **Zeitraffer-Status aus passivem `api_status` ablesbar: nein.**
+  Weder `delay_video` noch `chassis_camera.configured` noch
+  irgendein Kamera-Capability-Feld werden vom CC2 in diesem Pfad
+  gepusht. Die bisher in `docs/networking-cc2.md` dokumentierte
+  Erwartung (`external_device.chassis_camera.configured`) hat sich
+  im Mitschnitt **nicht bestaetigt** – wir sehen nur
+  `external_device.u_disk`.
+- **Topic-Diversitaet via Passiv-Sniff: nein.** Alle 1691 Nachrichten
+  liegen auf dem einen Topic `elegoo/<sn>/api_status`. Register-
+  Response, api_response, Camera-Topics erschienen nicht – fuer die
+  braeuchte es eigene Register-/Request-Pakete, die wir hier
+  bewusst nicht gesendet haben.
+
+### Konsequenz fuer die App (M5 Punkt 3)
+
+Der aktuelle Workaround („Capability-Feld fehlt → als unterstuetzt
+betrachten, nur `configured=0` sperrt") bleibt richtig – im passiven
+Pfad existiert fuer diesen CC2 kein Capability-Feld, auf das wir
+positiv pruefen koennten. Die neue Erkenntnis ist: Status 12 ist
+**primaer der USB-Composing-Zustand**, nicht der Aufnahme-Zustand.
+Falls die App Zeitraffer-Fortschritt anzeigen will, muss sie Status
+12 als „Composing fuer USB-Export" interpretieren, nicht als
+„Zeitraffer wird aufgenommen".
+
+### Artefakte
+
+- `tools/mqtt-sniff.py` – passiver Subscriber mit JSONL-Output.
+- `tools/sniff-analyze.py` – Topic/Feld/Transition/Keyword-Report.
+- `logs/cc2-sniff-2026-10-26.jsonl` – Rohmitschnitt (SN im Klartext,
+  deshalb `logs/` jetzt in `.gitignore`).
+
 ---
 
 ## 2026-10-25 16:40 – Erster echter Druck aus der App (Commit 2b4fc1a)

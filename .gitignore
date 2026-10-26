@@ -42,6 +42,7 @@ __pycache__/
 /tmp/
 /scratch/
 /server/jobs/
+/logs/
 /engine/test/out-*/
 /engine/test/*.log
 /engine/build-logs/
