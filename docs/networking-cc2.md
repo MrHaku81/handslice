@@ -1730,6 +1730,116 @@ Index aus dem Hauptprozess aufgerufen wird.
   Ihre Verhalten weicht angenehm von `method 1045/1047` ab, die
   auf dieser FW nur `error_code 1003` liefern.
 
+## Test E 2026-10-26: method 1047 Parameter-Shape-Probe (danielcherubini#432)
+
+Lesender Beitrag zu Issue #432 des HA-Integration-Repos
+`danielcherubini/elegoo-homeassistant`. Repo-Tag `v2.16.0-beta.2`,
+Skript `scripts/cc2_probe_delete.py`. Repo liegt unter
+`~/upstream/elegoo-homeassistant/` (nicht im Handslice-Repo).
+
+Credential-Uebergabe via Wrapper `~/upstream/run-cc2-probe.py`:
+Access-Code wird direkt an `probe()` als Python-Objekt uebergeben,
+nie in `argv`/`environ`/Shell-History. Scrub-Skript
+`~/upstream/scrub-cc2-probe.py` ersetzt IP/SN/Access-Code durch
+Platzhalter; `grep`-Verifikation beider Capture-Artefakte: **0
+Treffer**.
+
+### Hypothesen-Matrix: 11 Varianten
+
+Jede Variante lud eine eigene Probe-Datei hoch
+(`cc2_probe_<slug>_<8-hex>.gcode`, 8 244 B, hand-generierter G-Code),
+schickte **genau einmal** `method 1047` mit abweichendem Params-
+Shape und prueft via 1044-Nachlisting, ob die Datei entfernt wurde.
+
+### Ergebnis: **11/11 identisch `error_code=1003`, 11/11 `still_listed=True`**
+
+| # | Params | error_code | still_listed |
+|---|---|---:|:-:|
+| 1 | `{"storage_media":"local","filename":<name>}` ← aktuelles delete_file-Format | 1003 | True |
+| 2 | `{"storage_media":"local","file_name":<name>}` ← **die #432-Hypothese** | 1003 | True |
+| 3 | `{"storage_media":"local","filename":<name>,"path":"/"}` | 1003 | True |
+| 4 | `{"storage_media":"local","file_name":<name>,"path":"/"}` | 1003 | True |
+| 5 | `{"filename":<name>}` | 1003 | True |
+| 6 | `{}` (Control, nennt keine Datei) | 1003 | True |
+| 7 | `{"storage_media":"sdcard","filename":<name>}` | 1003 | True |
+| 8 | `{"storage_media":"sdcard","file_name":<name>}` | 1003 | True |
+| 9 | `{"storage_media":"udisk","filename":<name>}` | 1003 | True |
+| 10 | `{"storage_media":"sd-card","filename":<name>}` | 1003 | True |
+| 11 | `{"storage_media":"u-disk","filename":<name>}` | 1003 | True |
+
+Response-Latenz pro Variante: 9.5–20 ms. Firmware aus `method 1001
+software_version.ota_version`: `02.01.01.07`. Modell:
+Centauri Carbon 2. MCU/SOC-Versionen leer wie bisher.
+
+### Conclusion aus dem Probe-Report
+
+Zitat (anonymisiert, aus `scripts/cc2_probe_20261026_092850.json`):
+
+> EVERY VARIANT ANSWERED IDENTICALLY (error_code 1003) and none of
+> them removed its own file (all 11 confirming 1044 read(s) saw the
+> variant's own file still listed). That is a real finding. What it
+> means: on this firmware 1003 is not about the parameter key at all
+> — 1047 is simply not served, or 1003 is its generic 'not
+> available / not handled' answer. The key-name hypothesis is not
+> supported by this capture.
+
+**Konsequenz fuer die App:** `method 1047` auf dieser Firmware fuer
+nichts verwenden. Zum Entfernen von Zeitraffer-/G-Code-Dateien
+bleibt der Display-Pfad die einzige Option; History-Entries werden
+ueber `method 1038` entfernt (siehe Test D) – ohne Datei-Loeschung.
+
+### Leftovers am Drucker nach dem Lauf
+
+Nachpruefung via `method 1044 params.storage_media="local"`:
+**12 Probe-Dateien** liegen auf dem Drucker (1 Preflight aus dem
+Trockenlauf + 11 Varianten aus `--run`), je 8 244 B:
+
+```
+cc2_probe_preflight_4c7873f1.gcode
+cc2_probe_bare_filename_4b2c6afa.gcode
+cc2_probe_control_empty_f37ccc43.gcode
+cc2_probe_local_file_name_c91794d7.gcode
+cc2_probe_local_file_name_path_8b21691e.gcode
+cc2_probe_local_filename_a11642c5.gcode
+cc2_probe_local_filename_path_e4bce5b0.gcode
+cc2_probe_sd_card_filename_72c2db59.gcode
+cc2_probe_sdcard_file_name_5bcbe9ce.gcode
+cc2_probe_sdcard_filename_186d7bb2.gcode
+cc2_probe_u_disk_filename_123c452e.gcode
+cc2_probe_udisk_filename_f2783b77.gcode
+```
+
+Klaus entfernt sie am Drucker-Display. ~96 KB belegt (von 488 MB).
+
+### Noch offen fuer upstream
+
+Die alternative Lesung von 1003 („generische 'not available / not
+handled'-Antwort") ist durch diesen Lauf **nicht widerlegt** –
+genauso wie die Key-Name-Hypothese **nicht gestuetzt** wird. Der
+Capture ist eine klare Negativ-Antwort fuer die Key-Name-Hypothese
+und ein guter Anlass, in #432 die Diskussion vom „welcher Key?"-
+Pfad abzuhaengen.
+
+Capture- und Report-Artefakte (anonymisiert) liegen unter:
+
+- `~/upstream/elegoo-homeassistant/scripts/cc2_probe_20261026_092850.json.scrubbed`
+- `/tmp/cc2-run-stdout.txt.scrubbed`
+
+Diese sind das Paste-Material fuer den Issue-Kommentar auf #432.
+Noch nicht gepostet – Klaus entscheidet.
+
+### Discovery-Hinweis fuer das Script
+
+Im Heim-LAN hat die Broadcast-Discovery (255.255.255.255 **und**
+Subnet-Broadcast 192.168.0.255) nicht funktioniert; direkter
+Unicast an `<printer-ip>:52700` antwortet jedoch. Workaround im
+Wrapper: SN explizit setzen (`--serial`), Discovery wird vom
+Script dann uebersprungen. Fuer upstream wert, als „discovery over
+broadcast is unreliable; prefer unicast or an explicit serial" zu
+melden.
+
+---
+
 ## Historie ist stale: 1036 kennt geloeschte Zeitraffer nicht (2026-10-26)
 
 Entscheidender Befund **nach** dem 1051-Test weiter unten, der den

@@ -18,6 +18,96 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-26 09:30 UTC – Test E: `method 1047`-Shape-Probe (danielcherubini#432) → eindeutig 11× `1003`
+
+Lesender Beitrag zum HA-Integration-Issue #432. Repo-Clone
+`v2.16.0-beta.2` unter `~/upstream/elegoo-homeassistant/` (nicht
+im Handslice-Repo). Wrapper `~/upstream/run-cc2-probe.py` baut
+`argparse.Namespace` und ruft `probe()` als Coroutine auf –
+Access-Code bleibt im Python-Speicher, nie in argv/environ/
+Shell-History.
+
+### Nachweislich
+
+- `scripts/cc2_probe_delete.py` mit `--run`:
+  **11/11 Varianten** antworteten **identisch mit `error_code=1003`**.
+  **Alle 11 Dateien weiterhin im 1044-Listing** (`still_listed=True`).
+  Response-Latenzen 9.5–20 ms.
+- Firmware aus `method 1001 software_version.ota_version`:
+  `02.01.01.07`. Modell: Centauri Carbon 2. MCU/SOC-Versionen leer.
+- **Scrub + grep-Verifikation**: `~/upstream/scrub-cc2-probe.py`
+  → 0 Treffer fuer IP, SN, Access-Code in beiden Capture-Artefakten
+  (JSON + Paste-Block).
+- Probe-Report-Conclusion (woertlich):
+  *„on this firmware 1003 is not about the parameter key at all —
+  1047 is simply not served, or 1003 is its generic 'not available
+  / not handled' answer. The key-name hypothesis is not supported
+  by this capture."*
+- **12 Probe-Dateien liegen am Drucker** (1 Preflight aus dem
+  Trockenlauf + 11 aus `--run`, je 8 244 B). Volle Liste via
+  `method 1044 storage_media=local`:
+  ```
+  cc2_probe_preflight_4c7873f1.gcode
+  cc2_probe_bare_filename_4b2c6afa.gcode
+  cc2_probe_control_empty_f37ccc43.gcode
+  cc2_probe_local_file_name_c91794d7.gcode
+  cc2_probe_local_file_name_path_8b21691e.gcode
+  cc2_probe_local_filename_a11642c5.gcode
+  cc2_probe_local_filename_path_e4bce5b0.gcode
+  cc2_probe_sd_card_filename_72c2db59.gcode
+  cc2_probe_sdcard_file_name_5bcbe9ce.gcode
+  cc2_probe_sdcard_filename_186d7bb2.gcode
+  cc2_probe_u_disk_filename_123c452e.gcode
+  cc2_probe_udisk_filename_f2783b77.gcode
+  ```
+  Klaus loescht sie am Display. ~96 KB belegt.
+
+### Ungeprueft
+
+- Die alternative Lesung „1003 ist generische 'not-available /
+  not-handled'-Antwort auf dieser FW" bleibt nicht widerlegt und
+  nicht bestaetigt. Zur Unterscheidung von „1047 schlicht nicht
+  serviert" braechte es einen anderen Pfad (z. B. Firmware-Unpack,
+  Dekompilierung) – ausserhalb dieses Auftrags.
+- Discovery-Verhalten im Script: Broadcast an 255.255.255.255 **und**
+  Subnet-Broadcast 192.168.0.255 blieben in diesem LAN ohne
+  Antwort; direkter Unicast an `<cc2-ip>:52700` klappt (seit
+  2026-10-25 bekannt). Workaround im Wrapper: SN statisch
+  (`--serial <cc2-sn>`).
+
+### Geht nicht
+
+- **`method 1047` entfernt auf FW 02.01.01.07 keine Datei**,
+  unabhaengig von jedem der 11 getesteten Params-Shapes.
+  Fuer App-Pfade: Datei-Loeschung nicht ueber MQTT abbilden; nur
+  Display-Pfad existiert.
+
+### App-Konsequenz (M5 Ergaenzung)
+
+- `method 1047` **in der App gar nicht erst aufrufen**. Zu
+  entfernende G-Code- oder Zeitraffer-Dateien bleiben Display-
+  only.
+- `method 1038` entfernt Historie-Eintraege (Test D), nicht die
+  Datei – dieser Pfad bleibt der UI-Hygiene-Mechanismus.
+- Issue-#432-Draft (`docs/upstream/`) kann um den Hinweis
+  „#432 ist durch den Shape-Probe entschieden: Hypothese
+  nicht gestuetzt" ergaenzt werden.
+
+### Artefakte
+
+- `~/upstream/run-cc2-probe.py` – Wrapper mit sauberem
+  Credential-Pfad.
+- `~/upstream/scrub-cc2-probe.py` – Scrub + grep-Verifikation.
+- `~/upstream/elegoo-homeassistant/scripts/cc2_probe_20261026_092850.json.scrubbed`
+  – vollstaendige Capture, anonymisiert.
+- `/tmp/cc2-run-stdout.txt.scrubbed` – Paste-Block, anonymisiert.
+  Beide bleiben lokal (nicht im Handslice-Repo).
+
+Nichts committed, nichts gepusht (dieser Abschnitt wird gleich
+mitgenommen).
+
+---
+
 ## 2026-10-26 08:35 UTC – Test D: `method 1038` loescht Historie, nicht MP4, nicht Display
 
 ### Nachweislich
