@@ -155,13 +155,21 @@ aufbauen; MQTT war in Folge auch nicht erreichbar.
   verhindern eine Wiederholung: Dart-Test bricht bei Code-Change,
   Build-Verify bricht beim APK-Bau.
 
-### Artefakt
+### Artefakte
 
-- APK aktuell (`2e09f75` ohne Fix-Commit): SHA256
-  `fb6ed867a4d2b6b3361812ab7d1b699a71a03eb8854a3ee1d07b186743e30c5e`
-  mit INTERNET. Nach dem anstehenden Fix-Commit folgt ein zweiter
-  Build mit passendem Hash im Badge; den installiere ich und
-  dokumentiere den Device-SHA256 + Verbindungs-Screenshot.
+- APK mit Fix-Commit `1b74028`:
+  SHA256 `1cca86eaa3c64e769cd67224c1653d99f39ad2145e91adf175617a08f3e781b2`
+  (31.8 MB).
+- Auf Poco installiert, SHA256 der Device-APK **byte-identisch**
+  zum lokalen Build.
+- `dumpsys package dev.handslice.handslice` listet jetzt
+  `android.permission.INTERNET` unter „requested permissions".
+- Badge am Geraet: `v0.1 · app 1b74028313` + `cli ee4da3d7b5`
+  + `2026-10-26T10:43Z` (`local-test/phase5-after-permission-fix.png`).
+- „Verbinden & Faecher laden" → keine Fehler-SnackBar mehr
+  (vorher sofort „Netz-/Discovery-Fehler: Netzwerk: Failed to
+  create datagram socket"). Finale Pair-/Connect-Verifikation
+  gegen den echten CC2 macht Klaus beim naechsten Druck-Test.
 
 ---
 
