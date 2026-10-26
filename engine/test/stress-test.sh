@@ -38,6 +38,7 @@ SKIP_ARM=0
 BED=A
 DOWNLOAD=""
 LIST=0
+SCALE=""   # leer = kein --scale; wird fuer --download aus stress-models.json gesetzt
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --out)             OUT_DIR="$2"; shift 2 ;;
@@ -46,6 +47,7 @@ while [[ $# -gt 0 ]]; do
         --bed)             BED="$2";     shift 2 ;;
         --download)        DOWNLOAD="$2"; shift 2 ;;
         --list-downloads)  LIST=1;       shift ;;
+        --scale)           SCALE="$2";   shift 2 ;;
         -h|--help)         usage ;;
         -*)                echo "unknown flag: $1" >&2; usage ;;
         *)                 MODEL="${MODEL:-$1}"; shift ;;
@@ -78,6 +80,11 @@ if [[ -n "${DOWNLOAD}" ]]; then
     expected_sha=$(python3 -c "import json;print(json.loads(r'''${entry}''').get('sha256_zip') or '')")
     extract=$(python3 -c "import json;print(json.loads(r'''${entry}''').get('extract_name') or '')")
     license=$(python3 -c "import json;print(json.loads(r'''${entry}''')['license'])")
+    # Falls kein --scale von der Kommandozeile kam: aus dem Katalog lesen.
+    # scale_factor im Katalog ist optional (default 1.0 => kein --scale).
+    if [[ -z "${SCALE}" ]]; then
+        SCALE=$(python3 -c "import json;s=json.loads(r'''${entry}''').get('scale_factor');print('' if s in (None,1.0,1) else s)")
+    fi
     attrib=$(python3 -c "import json;print(json.loads(r'''${entry}''')['attribution'])")
     src=$(python3 -c "import json;print(json.loads(r'''${entry}''')['source_url'])")
 
@@ -192,6 +199,7 @@ run_x86() {
     # abhaengig.
     "${X86_CLI}" --machine "${MACHINE}" --process "${PROCESS}" --filament "${FILAMENT}" \
         --resources "${RESOURCES}" --output "${out_gcode}" --bed-type "${BED}" --quiet \
+        ${SCALE:+--scale "${SCALE}"} \
         "${MODEL}" > "${stats}" 2> "${out_log}" &
     local pid=$!
     local poll_peak=0
@@ -258,6 +266,7 @@ run_arm() {
         --process '${REMOTE}/resources/profiles/Elegoo/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json' \
         --filament '${REMOTE}/resources/profiles/Elegoo/filament/ECC2/Elegoo PLA @ECC2.json' \
         --resources '${REMOTE}/resources' --output '${REMOTE}/out.gcode' --bed-type ${BED} --quiet \
+        ${SCALE:+--scale ${SCALE}} \
         '${REMOTE}/model.stl' > ${REMOTE}/stats.json 2> ${REMOTE}/err.txt &
 PID=\$!
 while kill -0 \$PID 2>/dev/null; do

@@ -84,6 +84,13 @@ struct Args {
     // gesetzt (fuer den Diff-Test M4c).
     double z_offset = 0.0;
     bool z_offset_set = false;
+    // --scale <factor>, uniforme Skalierung des eingelesenen Modells
+    // VOR Zentrierung/Slice. Nutzt Orcas eigene Routine
+    // ModelObject::scale(Vec3d) aus libslic3r/Model.hpp:495/Model.cpp:1778
+    // (gleiche Implementierung, die die Orca-GUI unter "Scale" aufruft).
+    // 1.0 = unveraendert. Werte <=0 werden als Fehler abgelehnt.
+    double scale_factor = 1.0;
+    bool scale_set = false;
     // --overrides '<json>' oder --overrides @path/to/overrides.json
     // Map opt_key -> serialisierter Wert, wird nach der Profil-Chain
     // und nach --bed-type / --z-offset angewendet (letzte Instanz hat
@@ -117,7 +124,12 @@ void usage(std::ostream& os) {
         "--bed-type <A|B>  Druckbettseite. A/textured => btPTE (Textured PEI);\n"
         "             B/smooth/hot => btPEI (High Temp Plate). Ohne --bed-type\n"
         "             greift der default_bed_type aus dem Druckerprofil bzw.\n"
-        "             Fallback btPEI.\n";
+        "             Fallback btPEI.\n"
+        "\n"
+        "--scale <f>  Uniforme Skalierung des Modells vor der Zentrierung.\n"
+        "             f > 0, 1.0 = unveraendert. Nutzt ModelObject::scale(Vec3d)\n"
+        "             aus libslic3r/Model.hpp:495, dieselbe Routine, die auch\n"
+        "             Orcas GUI unter \"Scale\" aufruft.\n";
 }
 
 Args parse_args(int argc, char** argv) {
@@ -155,6 +167,18 @@ Args parse_args(int argc, char** argv) {
             } catch (const std::exception&) {
                 die("--z-offset needs a float, got: " + v);
             }
+        }
+        else if (arg == "--scale") {
+            const std::string v = need_val("--scale");
+            try {
+                a.scale_factor = std::stod(v);
+            } catch (const std::exception&) {
+                die("--scale needs a positive float, got: " + v);
+            }
+            if (!(a.scale_factor > 0.0)) {
+                die("--scale must be > 0, got: " + v);
+            }
+            a.scale_set = true;
         }
         else if (arg == "--help" || arg == "-h") { usage(std::cout); std::exit(0); }
         else if (arg == "--version") {
@@ -679,6 +703,26 @@ static int run(int argc, char** argv) {
             die("failed to load 3mf: " + args.input_path);
     } else {
         die("unsupported input extension: " + ext + " (nur .stl/.3mf)");
+    }
+
+    // 4b. Optional: uniforme Skalierung ueber Orcas eigene
+    //     ModelObject::scale(Vec3d) aus
+    //     libslic3r/Model.hpp:495, Model.cpp:1778. Transformiert sowohl
+    //     Instance- als auch Volume-Transformation (siehe Model.cpp
+    //     1778-1815), damit der Preflight/libslic3r die skalierte
+    //     Geometrie sieht und nicht nur eine Instance-Metadata.
+    //     Wird VOR der Zentrierung angewendet, weil die anschliessende
+    //     center_around_origin()-/-min_z-Logik sich dann auf die
+    //     tatsaechlich zu slicenden Dreiecks-Koordinaten bezieht.
+    if (args.scale_set && args.scale_factor != 1.0) {
+        const Vec3d sf(args.scale_factor, args.scale_factor, args.scale_factor);
+        for (ModelObject* mo : model.objects) {
+            mo->scale(sf);
+        }
+        if (!args.quiet) {
+            std::cerr << "handslice-cli: --scale " << args.scale_factor
+                      << " applied via ModelObject::scale(Vec3d).\n";
+        }
     }
 
     // 5. Modell positionieren.

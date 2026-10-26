@@ -10,6 +10,8 @@
       "extract_name": "neptuneRaw.stl",
       "triangles": 1556886,
       "format": "stl",
+      "scale_factor": 0.015,
+      "scale_rationale": "Rohscan ist in Scanner-Units (bbox-Spannen 3970 x 15475 x 5828). Faktor 0.015 skaliert den laengsten Span auf ~232 mm und bringt das Modell damit unter die 256-mm-CC2-Bed-Kante, bevor libslic3rs Preflight-check Alarm schlaegt. Faktor ist nicht Teil der Geometrie-Lizenz; aendert nichts an Herkunft/Attribution.",
       "license": "Three D Scans beschreibt sich selbst als 'Free 3D scan archive'. Am Download sind weder Copyright-Vermerk noch CC-Siegel angebracht; die Website nennt die Projekt-Trägerschaft (Lafayette Anticipation, Secession Vienna, u. a.) und die Herkunftsinstitutionen der Vorlagen (Louvre, Musee Guimet, KHM Wien, ...). Fuer private Reproduzierbarkeit des Stresstests verwendet. Keine CC0-/CC-BY-Zertifizierung – wer das Modell weiterverteilen will, pruefe die Lizenz selbst (contact@threedscans.com).",
       "download_notes": "Zip-Archiv mit Haupt-STL + __MACOSX-Metadaten. Script entpackt nur die eigentliche .stl."
     },

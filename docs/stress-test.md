@@ -112,14 +112,22 @@ also gitignored.
   genannt. **Nicht CC0/CC-BY zertifiziert** – wer Neptune
   weiterverteilen will, prüfe die Lizenz-Lage selbst
   (contact@threedscans.com).
-- **Scaling-Hinweis:** Neptune liegt in Scanner-Rohscale
+- **Scaling (seit 2026-10-26):** Neptune liegt in Scanner-Rohscale
   (X span 3970 mm, Y span 15 475 mm, Z span 5 828 mm) – weit über dem
-  CC2-Druckbereich. Der Slice-Lauf triggert libslic3rs
-  `SlicingErrors`-Preflight („Objekt ausserhalb des Druckbetts");
-  das ist für den Stresstest OK (Dauer + RAM werden gemessen,
-  Grenztest schlägt wie erwartet an). Für einen echten Slice-Lauf
-  müsste das Modell skaliert und zentriert werden (z. B. mit einem
-  3MF-Export aus Blender/MeshLab).
+  CC2-Druckbereich. `stress-models.json` hat deshalb jetzt
+  `scale_factor: 0.015`; `stress-test.sh --download neptune` reicht
+  den Wert als `--scale 0.015` an die handslice-cli weiter, die ihn
+  über Orcas eigene `ModelObject::scale(Vec3d)`
+  (`libslic3r/Model.hpp:495`, `Model.cpp:1778`) anwendet. Ergebnis
+  im Nachweis-Lauf 2026-10-26 (x86, bed B):
+  - `max_z_height: 87.40 mm` (= 5828.30 × 0.015, exakt).
+  - Slice-Dauer 8 519 ms, Peak-RSS 701 484 kB (685 MB) per
+    getrusage.
+  - G-Code 14.5 MB geschrieben, kein `SlicingErrors`-Preflight-
+    Abbruch mehr.
+  - Vertragstest `engine/test/scale-contract.sh` grün: `--scale 2.0`
+    verdoppelt `max_z_height` im G-Code-Header; `--scale 0` wird
+    abgelehnt.
 
 ### Smithsonian Open Access (CC0) – nicht automatisiert
 
