@@ -116,5 +116,51 @@
   "@settingsProfileSaveFailed": {"placeholders": {"msg": {"type": "String"}}},
 
   "focusHintDpad": "Use D-pad / Tab to move focus, Enter / Space to activate.",
-  "sampleBannerPlaceholder": "Milestone 1 scaffold with sample data — nothing is wired yet."
+  "sampleBannerPlaceholder": "Milestone 1 scaffold with sample data — nothing is wired yet.",
+
+  "tabPrinter": "Printer",
+  "printerHistoryHeading": "Print history",
+  "printerHistoryEmpty": "No prints yet.",
+  "printerHistoryRefresh": "Refresh",
+  "printerHistoryClock": "Timestamps are the printer's own clock (currently UTC+8), used only as an ordering key.",
+  "printerTaskStatusCompleted": "Completed",
+  "printerTaskStatusCancelled": "Cancelled",
+  "printerTaskStatusFailed": "Failed",
+  "printerTaskStatusUnknown": "Unknown ({code})",
+  "@printerTaskStatusUnknown": {"placeholders": {"code": {"type": "int"}}},
+  "printerVideoNone": "No time-lapse",
+  "printerVideoRenderable": "Time-lapse frames available",
+  "printerVideoReady": "Time-lapse video ready",
+  "printerVideoNotRenderable": "Time-lapse not renderable",
+  "printerVideoDurationBytes": "{seconds}s · {kib} KiB",
+  "@printerVideoDurationBytes": {"placeholders": {"seconds": {"type": "int"}, "kib": {"type": "int"}}},
+  "printerDurationShort": "{minutes}m",
+  "@printerDurationShort": {"placeholders": {"minutes": {"type": "int"}}},
+
+  "printerDownloadCheck": "Checking availability…",
+  "printerDownloadButton": "Download",
+  "printerDownloadUnavailable": "No longer available (deleted on the printer?)",
+  "printerDownloadStarted": "Downloading…",
+  "printerDownloadDone": "Saved: {path}",
+  "@printerDownloadDone": {"placeholders": {"path": {"type": "String"}}},
+  "printerDownloadFailed": "Download failed: {msg}",
+  "@printerDownloadFailed": {"placeholders": {"msg": {"type": "String"}}},
+  "printerShareButton": "Share",
+
+  "printerRenderButton": "Create video",
+  "printerRenderStarted": "Rendering…",
+  "printerRenderNoFrames": "No raw frames available for this print.",
+  "printerRenderFailed": "Render failed: {msg}",
+  "@printerRenderFailed": {"placeholders": {"msg": {"type": "String"}}},
+  "printerRenderNotPossible": "Not renderable (no raw frames on the printer)",
+
+  "printStatusVideoComposing": "Creating/exporting time-lapse",
+  "printStatusException1243": "Filament feed error — check PTFE tubes",
+  "substatePausing": "Pausing",
+  "substatePaused": "Paused",
+  "substateResuming": "Resuming",
+  "substateResumed": "Resumed",
+
+  "printerNotConnected": "Printer not connected.",
+  "printerConnectHint": "Pair and connect from the Project tab."
 }

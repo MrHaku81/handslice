@@ -334,4 +334,125 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get sampleBannerPlaceholder =>
       'Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet.';
+
+  @override
+  String get tabPrinter => 'Drucker';
+
+  @override
+  String get printerHistoryHeading => 'Druckhistorie';
+
+  @override
+  String get printerHistoryEmpty => 'Noch keine Drucke.';
+
+  @override
+  String get printerHistoryRefresh => 'Aktualisieren';
+
+  @override
+  String get printerHistoryClock =>
+      'Zeitstempel stammen aus der Druckeruhr (aktuell UTC+8) und werden nur als Reihenfolge genutzt.';
+
+  @override
+  String get printerTaskStatusCompleted => 'Fertig';
+
+  @override
+  String get printerTaskStatusCancelled => 'Abgebrochen';
+
+  @override
+  String get printerTaskStatusFailed => 'Fehlgeschlagen';
+
+  @override
+  String printerTaskStatusUnknown(int code) {
+    return 'Unbekannt ($code)';
+  }
+
+  @override
+  String get printerVideoNone => 'Kein Zeitraffer';
+
+  @override
+  String get printerVideoRenderable => 'Zeitraffer-Rohdaten vorhanden';
+
+  @override
+  String get printerVideoReady => 'Zeitraffer-Video verfügbar';
+
+  @override
+  String get printerVideoNotRenderable => 'Zeitraffer nicht erzeugbar';
+
+  @override
+  String printerVideoDurationBytes(int seconds, int kib) {
+    return '${seconds}s · $kib KiB';
+  }
+
+  @override
+  String printerDurationShort(int minutes) {
+    return '${minutes}m';
+  }
+
+  @override
+  String get printerDownloadCheck => 'Prüfe Verfügbarkeit…';
+
+  @override
+  String get printerDownloadButton => 'Herunterladen';
+
+  @override
+  String get printerDownloadUnavailable =>
+      'Nicht mehr verfügbar (am Drucker gelöscht?)';
+
+  @override
+  String get printerDownloadStarted => 'Lädt…';
+
+  @override
+  String printerDownloadDone(String path) {
+    return 'Gespeichert: $path';
+  }
+
+  @override
+  String printerDownloadFailed(String msg) {
+    return 'Download fehlgeschlagen: $msg';
+  }
+
+  @override
+  String get printerShareButton => 'Teilen';
+
+  @override
+  String get printerRenderButton => 'Video erzeugen';
+
+  @override
+  String get printerRenderStarted => 'Erzeugt Video…';
+
+  @override
+  String get printerRenderNoFrames => 'Keine Rohdaten mehr vorhanden.';
+
+  @override
+  String printerRenderFailed(String msg) {
+    return 'Erzeugung fehlgeschlagen: $msg';
+  }
+
+  @override
+  String get printerRenderNotPossible =>
+      'Nicht erzeugbar (keine Rohdaten am Drucker)';
+
+  @override
+  String get printStatusVideoComposing => 'Zeitraffer wird erzeugt/exportiert';
+
+  @override
+  String get printStatusException1243 =>
+      'Filamentzufuhr-Fehler – PTFE-Schläuche prüfen';
+
+  @override
+  String get substatePausing => 'Pausiert gerade';
+
+  @override
+  String get substatePaused => 'Pausiert';
+
+  @override
+  String get substateResuming => 'Setzt fort';
+
+  @override
+  String get substateResumed => 'Fortgesetzt';
+
+  @override
+  String get printerNotConnected => 'Drucker nicht verbunden.';
+
+  @override
+  String get printerConnectHint => 'Im Projekt-Reiter koppeln und verbinden.';
 }

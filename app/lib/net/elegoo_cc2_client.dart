@@ -69,6 +69,78 @@ class RemoteFile {
   final int sizeBytes;
 }
 
+// Phase 5a: ein Eintrag aus `method 1036` (`history_task_list[]`).
+// Enum-Interpretation von `videoStatus` steht in docs/networking-cc2.md
+// unter "Test E (Verteilung der 45 Tasks)":
+//   0 = kein Zeitraffer (`url=""`)
+//   1 = Rohframes vorhanden (`url=picture/<name><ts>`)
+//   2 = MP4 gerendert (`url=video/<name><ts>.mp4`, size > 0)
+//   3 = schon mal versucht; Rohframes fehlen → nicht renderbar
+class HistoryTask {
+  const HistoryTask({
+    required this.taskId,
+    required this.taskName,
+    required this.beginTime,
+    required this.endTime,
+    required this.taskStatus,
+    required this.videoStatus,
+    required this.videoUrl,
+    required this.videoSize,
+    required this.videoDuration,
+  });
+
+  final String taskId;
+  final String taskName;
+  // Druckeruhr-Sekunden; **nicht als UTC-Zeit interpretieren** – nur
+  // als Reihenfolge-Schluessel verwenden (Druckeruhr steht auf UTC+8,
+  // siehe docs/networking-cc2.md Druckeruhr-Offset).
+  final int beginTime;
+  final int endTime;
+  final int taskStatus;
+  // 0..3; siehe Enum-Kommentar oben.
+  final int videoStatus;
+  // Entweder "" (status 0), "picture/<basename>" (status 1 oder 3) oder
+  // "video/<basename>.mp4" (status 2).
+  final String videoUrl;
+  final int videoSize;
+  final int videoDuration;
+
+  bool get hasVideo => videoStatus == 2 && videoSize > 0 && videoUrl.isNotEmpty;
+  bool get isRenderable => (videoStatus == 1 || videoStatus == 3) &&
+      videoUrl.startsWith('picture/');
+
+  // Dauer in Sekunden (Druckeruhr, aber Zeitspanne ist relativ und daher
+  // belastbar).
+  int get durationSeconds => (endTime - beginTime).clamp(0, 1 << 31);
+
+  static HistoryTask fromJson(Map<String, dynamic> j) => HistoryTask(
+        taskId: (j['task_id'] ?? '') as String,
+        taskName: (j['task_name'] ?? '') as String,
+        beginTime: ((j['begin_time'] ?? 0) as num).toInt(),
+        endTime: ((j['end_time'] ?? 0) as num).toInt(),
+        taskStatus: ((j['task_status'] ?? -1) as num).toInt(),
+        videoStatus: ((j['time_lapse_video_status'] ?? 0) as num).toInt(),
+        videoUrl: (j['time_lapse_video_url'] ?? '') as String,
+        videoSize: ((j['time_lapse_video_size'] ?? 0) as num).toInt(),
+        videoDuration: ((j['time_lapse_video_duration'] ?? 0) as num).toInt(),
+      );
+}
+
+// Phase 5a: Head-Probe-Antwort auf GET /download. `ok=true` bedeutet
+// HTTP 200 + Content-Length>0 innerhalb des Timeouts.
+class TimelapseProbe {
+  const TimelapseProbe({
+    required this.ok,
+    required this.contentLength,
+    required this.elapsed,
+  });
+  final bool ok;
+  final int? contentLength;
+  final Duration elapsed;
+}
+
+typedef DownloadProgress = void Function(int received, int? total);
+
 // Ein Eintrag im slot_map-Array von method 1020. Form eins-zu-eins
 // aus elegoo-link cpp:85-96:
 //   { "t": <tool-index>, "canvas_id": <int>, "tray_id": <int> }
@@ -405,6 +477,150 @@ class ElegooCc2Client {
     } finally {
       client.close(force: true);
     }
+  }
+
+  // ---------- Phase 5: Historie, Rendering, Download ----------
+
+  // method 1036: komplette Druckhistorie. Keine Pagination laut
+  // cc2-control-Kommentar + docs/networking-cc2.md Test E.
+  Future<List<HistoryTask>> getHistory({
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final r = await _request(1036, const <String, dynamic>{}, timeout: timeout);
+    final result = (r['result'] ?? const <String, dynamic>{}) as Map;
+    final list = (result['history_task_list'] ?? const []) as List;
+    return list
+        .whereType<Map>()
+        .map((e) => HistoryTask.fromJson(Map<String, dynamic>.from(e)))
+        .toList();
+  }
+
+  // method 1051: Rendering starten. `pictureUrl` muss die Form
+  // `picture/<basename>` haben; die Firmware strippt den Prefix und
+  // haengt `.mp4` an die Zieldatei (siehe docs Test B/C).
+  // Response ist `{"error_code":0,"url":"video/<basename>.mp4"}` –
+  // aber ERFOLG wird NICHT durch `error_code=0` belegt, sondern durch
+  // einen anschliessenden erfolgreichen Head-Probe. 3022 heisst
+  // "keine Rohframes am erwarteten Pfad".
+  Future<Map<String, dynamic>> renderTimelapse(
+    String pictureUrl, {
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final r = await _request(1051, {'url': pictureUrl}, timeout: timeout);
+    return (r['result'] ?? const <String, dynamic>{}) as Map<String, dynamic>;
+  }
+
+  // Head-Probe: GET /download?... mit kurzem Response-Header-Timeout.
+  // ok=true nur wenn HTTP 200 UND Content-Length>0 vor Timeout.
+  // Timeout OR Nicht-200 OR Content-Length=0 => ok=false (die Datei
+  // ist nicht abrufbar). Deckt sich mit docs Test A: head_ms<30ms
+  // bei vorhandener Datei, Schweigen bei fehlender.
+  Future<TimelapseProbe> probeTimelapse(
+    String fileName, {
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    final stopwatch = Stopwatch()..start();
+    final client = HttpClient()
+      ..connectionTimeout = timeout
+      ..idleTimeout = timeout;
+    try {
+      final req = await client
+          .getUrl(_downloadUri(fileName))
+          .timeout(timeout);
+      req.headers.set('Connection', 'close');
+      final resp = await req.close().timeout(timeout);
+      stopwatch.stop();
+      // Dart's HttpClient liefert -1 fuer unbekannte Content-Length
+      // (reine Transfer-Encoding: chunked ohne Length). Unser CC2
+      // setzt beides; wir werten "ok" positiv wenn status==200 UND
+      // (cl>0 ODER status==200 reicht alleine fuer chunked).
+      final cl = resp.contentLength;
+      final ok = resp.statusCode == 200 && (cl > 0 || cl == -1);
+      // Body nicht lesen; Connection schliessen.
+      await resp.drain<void>();
+      return TimelapseProbe(
+          ok: ok, contentLength: cl, elapsed: stopwatch.elapsed);
+    } on TimeoutException {
+      stopwatch.stop();
+      return TimelapseProbe(
+          ok: false, contentLength: null, elapsed: stopwatch.elapsed);
+    } on SocketException {
+      stopwatch.stop();
+      return TimelapseProbe(
+          ok: false, contentLength: null, elapsed: stopwatch.elapsed);
+    } on HttpException {
+      // Firmware schliesst die TCP-Verbindung ohne Response, wenn die
+      // Datei nicht existiert oder der Token falsch ist – HttpClient
+      // werft das als „Connection closed before full header was
+      // received". Fuer die App ist das identisch zu „nicht abrufbar".
+      stopwatch.stop();
+      return TimelapseProbe(
+          ok: false, contentLength: null, elapsed: stopwatch.elapsed);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  // GET /download → bytes-Stream mit Fortschritt. Nutzt denselben
+  // Endpunkt wie G-Code-Download (siehe docs). `fileName` ist der
+  // komplette path aus `history.time_lapse_video_url`
+  // (z. B. `video/<basename>.mp4`).
+  //
+  // Dart's HttpClient toleriert die Doppel-Rahmung (Content-Length +
+  // Transfer-Encoding: chunked), die der echte CC2 setzt: HttpClient
+  // bevorzugt chunked, wenn beides da ist, und liest den Body sauber
+  // bis zum Terminator. `expectedBytes` kommt aus der History
+  // (`videoSize`) – nicht die Antwort-Header, weil die inkonsistent
+  // sind.
+  Future<List<int>> downloadTimelapse(
+    String fileName, {
+    int? expectedBytes,
+    DownloadProgress? onProgress,
+    Duration headTimeout = const Duration(seconds: 3),
+    Duration overallTimeout = const Duration(seconds: 120),
+  }) async {
+    final deadline = DateTime.now().add(overallTimeout);
+    final client = HttpClient()..connectionTimeout = headTimeout;
+    try {
+      final req = await client
+          .getUrl(_downloadUri(fileName))
+          .timeout(headTimeout);
+      req.headers.set('Connection', 'close');
+      final resp = await req.close().timeout(headTimeout);
+      if (resp.statusCode != 200) {
+        throw ElegooNetworkException('HTTP ${resp.statusCode}');
+      }
+      final out = <int>[];
+      await for (final chunk in resp) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw TimeoutException('download timeout');
+        }
+        out.addAll(chunk);
+        onProgress?.call(out.length, expectedBytes);
+      }
+      return out;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Uri _downloadUri(String fileName) {
+    final ip = _ip!;
+    final code = _accessCode!;
+    final query = Uri(queryParameters: {
+      'X-Token': code,
+      'file_name': fileName,
+    }).query;
+    return Uri.parse('http://$ip:$httpPort/download?$query');
+  }
+
+  // method 1038: Historie-Eintrag loeschen. Phase 5 nutzt diese
+  // Methode NICHT in der UI (siehe Auftragstext), aber die
+  // Infrastruktur ist belegt (Test D). Hilft bei Tests.
+  Future<Map<String, dynamic>> deleteHistoryEntries(List<String> taskIds,
+      {Duration timeout = const Duration(seconds: 10)}) async {
+    final r = await _request(1038, {'list': taskIds}, timeout: timeout);
+    return (r['result'] ?? const <String, dynamic>{}) as Map<String, dynamic>;
   }
 
   // ---------- intern ----------

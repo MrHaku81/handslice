@@ -117,6 +117,17 @@ class MockCC2:
         self.sn = args.sn
         # Upload-Zustand – pro Datei kumulierter Offset
         self.uploads: dict[str, bytearray] = {}
+        # Phase 5: history_task_list[] + optional vorhandene MP4-Bytes.
+        # Jedes Element ist eine Task-Dict (task_id, task_name, …,
+        # time_lapse_video_status, time_lapse_video_url, …).
+        self.history: list[dict] = []
+        # Fertige Video-Dateien unter /opt/usr/video (file_name →
+        # Bytes). Bei fehlendem Eintrag antwortet /download mit Schweigen
+        # – wie die echte CC2-Firmware auf nicht-existente Dateien.
+        self.videos: dict[str, bytes] = {}
+        # machine_status.status – Phase 5 nutzt 12 beim Rendering.
+        self.machine_status: int = 1
+        self.machine_substatus: int = 0
         self.mqtt_proc: Optional[subprocess.Popen] = None
         self.mqtt_cfg_dir: Optional[Path] = None
         self.mqtt_client: Optional[mqtt.Client] = None
@@ -244,11 +255,150 @@ log_type warning
             # Druckstart akzeptieren – aber NICHT weiter als Druck simulieren;
             # fuer M3 brauchen wir diesen Pfad nicht, nur die Response.
             result = {'error_code': 0}
+        elif method == 1036:
+            # Phase 5a: Historie. Form eins-zu-eins vom echten CC2
+            # (docs/networking-cc2.md "Test E"-Beobachtungen).
+            result = {
+                'error_code': 0,
+                'total': len(self.history),
+                'history_task_list': list(self.history),
+            }
+        elif method == 1051:
+            # Phase 5b: Rendering. params.url = picture/<basename> ODER
+            # video/<basename>.mp4. Firmware haengt an die URL ".mp4"
+            # und sucht Rohframes unter dem Basename.
+            url = (payload.get('params') or {}).get('url', '')
+            basename = url.rsplit('/', 1)[-1]
+            if basename.endswith('.mp4'):
+                basename = basename[:-4]
+            # Fuer die Mock-Zwecke: wenn ein History-Eintrag mit URL
+            # picture/<basename> existiert → "Rohframes vorhanden" →
+            # Status-12-Fluss 3020→3021 → Erfolg: Eintrag auf 2 setzen,
+            # Video-Bytes erzeugen. Sonst → 3020→3022 → kein Erfolg.
+            target_entry = None
+            for t in self.history:
+                if t.get('time_lapse_video_url') == f'picture/{basename}' \
+                        and t.get('time_lapse_video_status') == 1:
+                    target_entry = t
+                    break
+            # Antwort unmittelbar; Status-Deltas folgen async
+            response_url = f'video/{basename}.mp4'
+            result = {'error_code': 0, 'url': response_url}
+            # Status-12-Sequenz anschieben. MQTT-Callback laeuft in
+            # einem paho-Thread, nicht in der asyncio-Loop – daher
+            # threadsafe schedulen.
+            asyncio.run_coroutine_threadsafe(
+                self._simulate_render(basename, bool(target_entry)),
+                self.loop,
+            )
+        elif method == 1038:
+            # Phase 5b: nicht geplant; der Mock kennt den Befehl aber,
+            # weil das Protokoll ihn vorsieht. Loeschung nur in Historie.
+            ids = (payload.get('params') or {}).get('list') or []
+            before = len(self.history)
+            self.history = [t for t in self.history if t['task_id'] not in ids]
+            result = {'error_code': 0 if len(self.history) < before else 1003}
         else:
             result = {'error_code': 1003}
         c.publish(resp_topic,
                   json.dumps({'id': rid, 'method': method, 'result': result}),
                   qos=0)
+
+    # ---------- Phase 5: Rendering + Download ----------
+
+    async def _simulate_render(self, basename: str, has_frames: bool) -> None:
+        """Nachbildet den beobachteten Status-12-Fluss.
+
+        has_frames=True: 3020 → 3021 → 1 (Erfolg); setzt den
+        passenden History-Eintrag auf video_status=2 und erzeugt
+        kleine Video-Bytes.
+        has_frames=False: 3020 → 3022 → 1 (nichts zu rendern), ohne
+        History-Mutation. Deckt sich mit Test B+C aus
+        docs/networking-cc2.md.
+        """
+        c = self.mqtt_client
+        status_topic = f'elegoo/{self.sn}/api_status'
+
+        def push(status: int, substatus: int) -> None:
+            payload = {
+                'id': 0, 'method': 6000,
+                'result': {
+                    'machine_status': {
+                        'status': status, 'sub_status': substatus,
+                    },
+                },
+            }
+            c.publish(status_topic, json.dumps(payload), qos=0)
+
+        # Phase 1: generieren
+        self.machine_status = 12
+        self.machine_substatus = 3020
+        push(12, 3020)
+        await asyncio.sleep(0.05)
+        if has_frames:
+            # kurz Phase 2 (kopieren)
+            self.machine_substatus = 3021
+            push(12, 3021)
+            await asyncio.sleep(0.05)
+            # History-Eintrag auf 2 setzen + Video-Bytes anlegen
+            for t in self.history:
+                if t.get('time_lapse_video_url') == f'picture/{basename}':
+                    t['time_lapse_video_url'] = f'video/{basename}.mp4'
+                    t['time_lapse_video_status'] = 2
+                    t['time_lapse_video_size'] = 2048
+                    t['time_lapse_video_duration'] = 3
+                    break
+            self.videos[f'video/{basename}.mp4'] = (
+                b'\x00\x00\x00\x18ftypmp42mock\x00' + b'MOCK_MP4_PAYLOAD_' * 128
+            )
+        else:
+            # Fehlerzweig: 3022
+            self.machine_substatus = 3022
+            push(12, 3022)
+            await asyncio.sleep(0.05)
+        self.machine_status = 1
+        self.machine_substatus = 0
+        push(1, 0)
+
+    async def _handle_download(self, path: str, writer: asyncio.StreamWriter) -> None:
+        """Pfad: /download?X-Token=...&file_name=video/<name>.mp4
+
+        Schweigt (writer schliessen ohne Response) bei fehlender Datei
+        oder falschem Token – exakt wie der echte CC2 laut cc2-control-
+        history.h-Kommentar und unserem Test E.
+        """
+        import urllib.parse
+        qs = urllib.parse.parse_qs(path.split('?', 1)[1])
+        token = (qs.get('X-Token') or [''])[0]
+        file_name = (qs.get('file_name') or [''])[0]
+        if self.access_code is not None and token != self.access_code:
+            # Schweigen: Writer schliessen
+            writer.close()
+            try: await writer.wait_closed()
+            except Exception: pass
+            return
+        data = self.videos.get(file_name)
+        if data is None:
+            # Datei existiert nicht → schweigen
+            writer.close()
+            try: await writer.wait_closed()
+            except Exception: pass
+            return
+        # Erfolg: HTTP 200 mit Content-Length UND chunked Transfer-Encoding
+        # (echtes CC2-Verhalten, siehe docs Test A).
+        headers = (
+            f'HTTP/1.1 200 OK\r\n'
+            f'Content-Length: {len(data)}\r\n'
+            f'Content-Type: video/mp4\r\n'
+            f'Transfer-Encoding: chunked\r\n'
+            f'Content-Disposition: attachment; filename="{file_name}"\r\n'
+            f'\r\n'
+        )
+        writer.write(headers.encode('ascii'))
+        # chunked framing
+        chunk_hex = f'{len(data):x}\r\n'.encode('ascii')
+        writer.write(chunk_hex + data + b'\r\n0\r\n\r\n')
+        await writer.drain()
 
     # ---------- UDP (Discovery 52700) ----------
 
@@ -300,6 +450,10 @@ log_type warning
                     break
                 k, _, v = h.decode('iso-8859-1').partition(':')
                 headers[k.strip().lower()] = v.strip()
+            # Phase 5: GET /download fuer Zeitraffer-MP4
+            if method == 'GET' and path.startswith('/download?'):
+                await self._handle_download(path, writer)
+                return
             if method != 'PUT' or not path.startswith('/upload'):
                 writer.write(b'HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n')
                 await writer.drain()
@@ -347,6 +501,7 @@ log_type warning
     # ---------- Lifecycle ----------
 
     async def run(self) -> None:
+        self.loop = asyncio.get_event_loop()
         self._start_mosquitto()
         self._start_mqtt_adapter()
         print(f'[mock-cc2] SN={self.sn}', flush=True)
@@ -399,10 +554,26 @@ def main() -> int:
                         'zufaellig generiert und auf stdout gedruckt')
     p.add_argument('--reject-auth', action='store_true',
                    help='MQTT lehnt jeden CONNECT ab (Simuliert falscher Code)')
+    p.add_argument('--seed-history', type=str, default=None,
+                   help='Pfad zu JSON mit history_task_list[]-Fixture '
+                        '(je ein Element, time_lapse_video_url + status)')
     p.add_argument('--interrupt-upload-at', type=int, default=0,
                    help='HTTP schliesst Verbindung nach N byte Upload')
     args = p.parse_args()
     mock = MockCC2(args)
+    if args.seed_history:
+        with open(args.seed_history, encoding='utf-8') as fh:
+            seeded = json.load(fh)
+        for entry in seeded:
+            mock.history.append(entry)
+            # Fertige MP4-Bytes anlegen fuer status=2-Eintraege
+            if entry.get('time_lapse_video_status') == 2:
+                url = entry.get('time_lapse_video_url')
+                size = entry.get('time_lapse_video_size') or 2048
+                mock.videos[url] = (
+                    b'\x00\x00\x00\x18ftypmp42seed\x00'
+                    + b'MOCK_MP4_SEED_PAYLOAD_' * (max(size, 128) // 22)
+                )[: max(size, 2048)]
     # Access-Code **nur** einmalig auf stdout wenn er auto-generiert war
     # und der Test ihn braucht; einmal ausgegeben: in CI-Logs potenziell
     # sichtbar. Fuer M3-Tests besser via MOCK_ACCESS_CODE setzen.

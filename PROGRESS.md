@@ -108,6 +108,133 @@ mitgenommen).
 
 ---
 
+## 2026-10-26 11:15 UTC – Phase 5 (Zeitraffer in der App): 5a + 5b + 5c steht
+
+Neuer Reiter „Drucker" (vierter Tab) + Netzwerk-Pfade fuer 1036 / 1051
+/ Head-Probe / Download + Lokalisierung. Vor dem echten Druck-Test
+mit Klaus.
+
+### Nachweislich
+
+- **CC2-Mock erweitert** (`engine/test/mock-cc2/mock_cc2.py`): method
+  1036 liefert eine seedbare `history_task_list`; method 1051
+  simuliert den beobachteten Zustand `3020→3021→1` bei vorhandenen
+  Rohframes bzw. `3020→3022→1` bei fehlenden; `GET /download`
+  antwortet mit HTTP 200 + chunked + Content-Length-Doppelrahmung
+  (echt-CC2-Verhalten) oder **schweigt**, wenn die Datei nicht
+  existiert. Neuer CLI-Flag `--seed-history <path>` fuer Fixtures.
+- **ElegooCc2Client** (`app/lib/net/elegoo_cc2_client.dart`): neue
+  Typen `HistoryTask`, `TimelapseProbe` + Methoden
+  `getHistory()`, `renderTimelapse()`, `probeTimelapse()`,
+  `downloadTimelapse()`, `deleteHistoryEntries()`. Download-URL
+  baut Access-Code als `X-Token`-Query-Param (nie in Logs). Probe
+  faengt `TimeoutException`, `SocketException`, **`HttpException`**
+  (letzteres fuer das reproduzierte „Firmware schliesst Connection
+  ohne Response"-Signal).
+- **Reiter „Drucker"** (`app/lib/screens/printer_screen.dart`):
+  Liste aus 1036, nach `begin_time` absteigend sortiert
+  (Reihenfolge, nicht als Datum). Pro Eintrag:
+  - `video_status=0` → „kein Zeitraffer".
+  - `video_status=1` → Button „Video erzeugen" → 1051 → Spinner
+    bei `machine_status.status==12` → zweite 1036 + Head-Probe;
+    bei `3022` oder Status bleibt 1 → „keine Rohdaten mehr
+    vorhanden". Kein automatischer zweiter Versuch.
+  - `video_status=2` → **Head-Probe mit 2 s Timeout**; nur bei
+    HTTP 200 kommt der Download-Button, sonst „nicht mehr
+    verfuegbar (am Drucker geloescht?)".
+  - `video_status=3` ohne URL → „nicht erzeugbar".
+  - **Hoechstens 2 parallele /download-Verbindungen** per
+    einfachen Semaphor (`_DownloadLimiter`), passend zu cc2-controls
+    „two-transfer limit".
+  - Download speichert nach `getExternalStorageDirectory() +
+    /handslice-timelapses/` (Fallback: ApplicationSupport);
+    Teilen ueber Android-Share-Intent via `share_plus 13.x`.
+- **Druckeruhr-Hinweis** als Bodentext (einmal pro Historie):
+  „Zeitstempel stammen aus der Druckeruhr (aktuell UTC+8) und
+  werden nur als Reihenfolge genutzt." Begin/End werden nie als
+  absolute Zeit gerendert.
+- **Lokalisierung** (ARB-Dateien): Reiter-Label `Drucker`,
+  Historien-Texte, Download-/Render-Buttons + Fehler-Texte in
+  DE/EN. Status 12 = „Zeitraffer wird erzeugt/exportiert",
+  `exception_status 1243` = „Filamentzufuhr-Fehler – PTFE-
+  Schlaeuche pruefen", sub_status 2501/2502/2401/2402 als
+  Pausiert/Setzt fort.
+- **Tests gegen Python-Mock** (`app/test/elegoo_mock_test.dart`):
+  drei neue Phase-5-Tests – 1036+Head-Probe+Download (ok UND
+  Schweigen bei fehlender Datei), 1051-Erfolgsfall
+  (`3020→3021`, status 1→2), 1051 ohne Rohframes (`3020→3022`,
+  Status bleibt 1). **8/8 Tests gruen**:
+  ```
+  00:00 +0: Mock: Discovery + Register + Canvas (richtiger Code)
+  00:02 +1: Mock: falscher Code → ElegooAuthException
+  00:04 +2: Mock: Upload funktioniert + Datei erscheint in FILE_LIST
+  00:06 +3: Mock: method 1020 startPrint liefert error_code=0 vom Mock
+  00:08 +4: Mock Phase5: 1036 + Head-Probe + Download (status 2)
+  00:10 +5: Mock Phase5: 1051 Erfolgsfall (3020→3021), video_status 1→2
+  00:13 +6: Mock Phase5: 1051 ohne Rohframes → 3022, video_status bleibt
+  00:15 +7: Mock: Upload-Abbruch nach N byte → ElegooUploadException
+  00:18 +8: All tests passed!
+  ```
+- **Widget-Tests** (`app/test/printer_screen_test.dart`): nicht-
+  verbunden-Fall + Header/Refresh-Button. 2/2 gruen.
+- **APK gebaut** (`arm64, release, 16.0 MB`), auf Poco X3 Pro
+  installiert. **Smoke-Nachweis** `local-test/phase5-printer-tab.png`:
+  Reiter „Drucker" aktiv, Header „Druckhistorie", Refresh-Button,
+  Hinweis-Panel „Drucker nicht verbunden. Im Projekt-Reiter koppeln
+  und verbinden." (als erwarteter Pfad, weil kein Pairing in dieser
+  Session gemacht wurde).
+
+### Ungeprueft
+
+- **Echter Druck-Test gegen den CC2** (Klaus startet): kurzer
+  Wuerfel-Druck mit Zeitraffer aus der App → danach in der App
+  „Video erzeugen" (= der offene 1051-Erfolgsfall VOR dem
+  USB-Stick) → Download aufs Handy. Mitschnitt (tools/mqtt-sniff.py)
+  wird mitlaufen. **STOP vor diesem Test** – Klaus entscheidet.
+- Dart's HttpClient-Verhalten bei der realen Length-vs-chunked-
+  Doppelrahmung ist bei probeTimelapse getestet (via Mock, der die
+  Doppelrahmung setzt), aber Download selbst nicht gegen echte CC2-
+  Firmware; cc2-control-Code warnt vor dem Konflikt. Der Lesemodus
+  (`await for in resp`) ist RFC-9112-konform.
+- Download-Ordner auf Android: `getExternalStorageDirectory` ergibt
+  App-eigene Downloads unter `/storage/emulated/0/Android/data/
+  dev.handslice.handslice/files/handslice-timelapses/` – fuer die
+  Galerie nicht sichtbar, aber ueber Share teilbar. Falls Klaus das
+  oeffentliche Downloads-Verzeichnis bevorzugt, braecht's
+  `MANAGE_EXTERNAL_STORAGE` oder `WRITE_EXTERNAL_STORAGE` (API ≤29).
+  Fuer M5 reicht Share.
+
+### Geht nicht
+
+- `method 1038` (Delete-History) **bewusst nicht in der UI** – wie
+  im Auftrag spezifiziert (Test D hat gezeigt: 1038 loescht nur
+  die Historie, nicht die Datei; UI-Verwirrung soll vermieden
+  werden).
+
+### App-Konsequenz (Echttest-Checkliste)
+
+Vor dem echten Druck-Test:
+
+1. Drucker Idle, „Nur LAN"-Modus aktiv.
+2. Home Assistant / sonstige Integration getrennt (einer der
+   Register-Slots muss frei sein).
+3. `tools/mqtt-sniff.py` starten, damit Status-12-Deltas und
+   api_status gesichert sind.
+4. In der App: Projekt-Reiter → verbinden → Zeitraffer-Switch an
+   → kleiner Wuerfel-Druck senden.
+5. Nach Druckende, VOR dem USB-Stick: Drucker-Reiter → „Video
+   erzeugen" am frischen Status-1-Eintrag → Spinner bis Status
+   zurueck auf Idle → Download.
+
+### Artefakte (nicht committed in diesem Lauf)
+
+- `local-test/phase5-printer-tab.png` – Smoke-Screenshot.
+- APK unter `app/build/app/outputs/flutter-apk/app-release.apk`.
+
+Dieser Eintrag selbst wird gleich committed.
+
+---
+
 ## 2026-10-26 08:35 UTC – Test D: `method 1038` loescht Historie, nicht MP4, nicht Display
 
 ### Nachweislich

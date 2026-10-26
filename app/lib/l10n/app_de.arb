@@ -97,5 +97,45 @@
   "settingsProfileSaveFailed": "Speichern fehlgeschlagen: {msg}",
 
   "focusHintDpad": "D-Pad / Tab bewegen den Fokus, Enter / Leertaste aktivieren.",
-  "sampleBannerPlaceholder": "Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet."
+  "sampleBannerPlaceholder": "Meilenstein 1 – Grundgerüst mit Beispieldaten, nichts ist verdrahtet.",
+
+  "tabPrinter": "Drucker",
+  "printerHistoryHeading": "Druckhistorie",
+  "printerHistoryEmpty": "Noch keine Drucke.",
+  "printerHistoryRefresh": "Aktualisieren",
+  "printerHistoryClock": "Zeitstempel stammen aus der Druckeruhr (aktuell UTC+8) und werden nur als Reihenfolge genutzt.",
+  "printerTaskStatusCompleted": "Fertig",
+  "printerTaskStatusCancelled": "Abgebrochen",
+  "printerTaskStatusFailed": "Fehlgeschlagen",
+  "printerTaskStatusUnknown": "Unbekannt ({code})",
+  "printerVideoNone": "Kein Zeitraffer",
+  "printerVideoRenderable": "Zeitraffer-Rohdaten vorhanden",
+  "printerVideoReady": "Zeitraffer-Video verfügbar",
+  "printerVideoNotRenderable": "Zeitraffer nicht erzeugbar",
+  "printerVideoDurationBytes": "{seconds}s · {kib} KiB",
+  "printerDurationShort": "{minutes}m",
+
+  "printerDownloadCheck": "Prüfe Verfügbarkeit…",
+  "printerDownloadButton": "Herunterladen",
+  "printerDownloadUnavailable": "Nicht mehr verfügbar (am Drucker gelöscht?)",
+  "printerDownloadStarted": "Lädt…",
+  "printerDownloadDone": "Gespeichert: {path}",
+  "printerDownloadFailed": "Download fehlgeschlagen: {msg}",
+  "printerShareButton": "Teilen",
+
+  "printerRenderButton": "Video erzeugen",
+  "printerRenderStarted": "Erzeugt Video…",
+  "printerRenderNoFrames": "Keine Rohdaten mehr vorhanden.",
+  "printerRenderFailed": "Erzeugung fehlgeschlagen: {msg}",
+  "printerRenderNotPossible": "Nicht erzeugbar (keine Rohdaten am Drucker)",
+
+  "printStatusVideoComposing": "Zeitraffer wird erzeugt/exportiert",
+  "printStatusException1243": "Filamentzufuhr-Fehler – PTFE-Schläuche prüfen",
+  "substatePausing": "Pausiert gerade",
+  "substatePaused": "Pausiert",
+  "substateResuming": "Setzt fort",
+  "substateResumed": "Fortgesetzt",
+
+  "printerNotConnected": "Drucker nicht verbunden.",
+  "printerConnectHint": "Im Projekt-Reiter koppeln und verbinden."
 }

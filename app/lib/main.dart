@@ -7,6 +7,7 @@ import 'engine/slicer.dart';
 import 'l10n/app_localizations.dart';
 import 'screens/project_screen.dart';
 import 'screens/print_screen.dart';
+import 'screens/printer_screen.dart';
 import 'screens/settings_screen.dart';
 import 'settings/settings_overrides.dart';
 import 'settings/settings_schema.dart';
@@ -134,6 +135,7 @@ class _RootShellState extends State<RootShell> {
         projectState: widget.projectState,
         printerState: widget.printerState,
       ),
+      PrinterScreen(printerState: widget.printerState),
       SettingsScreen(
         schema: widget.settingsSchema,
         overrides: widget.overrides,
@@ -157,6 +159,11 @@ class _RootShellState extends State<RootShell> {
               icon: const Icon(Icons.print_outlined),
               selectedIcon: const Icon(Icons.print),
               label: l.tabPrint,
+            ),
+            NavigationDestination(
+              icon: const Icon(Icons.history_outlined),
+              selectedIcon: const Icon(Icons.history),
+              label: l.tabPrinter,
             ),
             NavigationDestination(
               icon: const Icon(Icons.tune_outlined),

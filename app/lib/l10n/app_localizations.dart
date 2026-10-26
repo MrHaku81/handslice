@@ -649,6 +649,216 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Milestone 1 scaffold with sample data — nothing is wired yet.'**
   String get sampleBannerPlaceholder;
+
+  /// No description provided for @tabPrinter.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer'**
+  String get tabPrinter;
+
+  /// No description provided for @printerHistoryHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Print history'**
+  String get printerHistoryHeading;
+
+  /// No description provided for @printerHistoryEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No prints yet.'**
+  String get printerHistoryEmpty;
+
+  /// No description provided for @printerHistoryRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get printerHistoryRefresh;
+
+  /// No description provided for @printerHistoryClock.
+  ///
+  /// In en, this message translates to:
+  /// **'Timestamps are the printer\'s own clock (currently UTC+8), used only as an ordering key.'**
+  String get printerHistoryClock;
+
+  /// No description provided for @printerTaskStatusCompleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Completed'**
+  String get printerTaskStatusCompleted;
+
+  /// No description provided for @printerTaskStatusCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get printerTaskStatusCancelled;
+
+  /// No description provided for @printerTaskStatusFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get printerTaskStatusFailed;
+
+  /// No description provided for @printerTaskStatusUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown ({code})'**
+  String printerTaskStatusUnknown(int code);
+
+  /// No description provided for @printerVideoNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No time-lapse'**
+  String get printerVideoNone;
+
+  /// No description provided for @printerVideoRenderable.
+  ///
+  /// In en, this message translates to:
+  /// **'Time-lapse frames available'**
+  String get printerVideoRenderable;
+
+  /// No description provided for @printerVideoReady.
+  ///
+  /// In en, this message translates to:
+  /// **'Time-lapse video ready'**
+  String get printerVideoReady;
+
+  /// No description provided for @printerVideoNotRenderable.
+  ///
+  /// In en, this message translates to:
+  /// **'Time-lapse not renderable'**
+  String get printerVideoNotRenderable;
+
+  /// No description provided for @printerVideoDurationBytes.
+  ///
+  /// In en, this message translates to:
+  /// **'{seconds}s · {kib} KiB'**
+  String printerVideoDurationBytes(int seconds, int kib);
+
+  /// No description provided for @printerDurationShort.
+  ///
+  /// In en, this message translates to:
+  /// **'{minutes}m'**
+  String printerDurationShort(int minutes);
+
+  /// No description provided for @printerDownloadCheck.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking availability…'**
+  String get printerDownloadCheck;
+
+  /// No description provided for @printerDownloadButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get printerDownloadButton;
+
+  /// No description provided for @printerDownloadUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'No longer available (deleted on the printer?)'**
+  String get printerDownloadUnavailable;
+
+  /// No description provided for @printerDownloadStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading…'**
+  String get printerDownloadStarted;
+
+  /// No description provided for @printerDownloadDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved: {path}'**
+  String printerDownloadDone(String path);
+
+  /// No description provided for @printerDownloadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Download failed: {msg}'**
+  String printerDownloadFailed(String msg);
+
+  /// No description provided for @printerShareButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get printerShareButton;
+
+  /// No description provided for @printerRenderButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Create video'**
+  String get printerRenderButton;
+
+  /// No description provided for @printerRenderStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'Rendering…'**
+  String get printerRenderStarted;
+
+  /// No description provided for @printerRenderNoFrames.
+  ///
+  /// In en, this message translates to:
+  /// **'No raw frames available for this print.'**
+  String get printerRenderNoFrames;
+
+  /// No description provided for @printerRenderFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Render failed: {msg}'**
+  String printerRenderFailed(String msg);
+
+  /// No description provided for @printerRenderNotPossible.
+  ///
+  /// In en, this message translates to:
+  /// **'Not renderable (no raw frames on the printer)'**
+  String get printerRenderNotPossible;
+
+  /// No description provided for @printStatusVideoComposing.
+  ///
+  /// In en, this message translates to:
+  /// **'Creating/exporting time-lapse'**
+  String get printStatusVideoComposing;
+
+  /// No description provided for @printStatusException1243.
+  ///
+  /// In en, this message translates to:
+  /// **'Filament feed error — check PTFE tubes'**
+  String get printStatusException1243;
+
+  /// No description provided for @substatePausing.
+  ///
+  /// In en, this message translates to:
+  /// **'Pausing'**
+  String get substatePausing;
+
+  /// No description provided for @substatePaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused'**
+  String get substatePaused;
+
+  /// No description provided for @substateResuming.
+  ///
+  /// In en, this message translates to:
+  /// **'Resuming'**
+  String get substateResuming;
+
+  /// No description provided for @substateResumed.
+  ///
+  /// In en, this message translates to:
+  /// **'Resumed'**
+  String get substateResumed;
+
+  /// No description provided for @printerNotConnected.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer not connected.'**
+  String get printerNotConnected;
+
+  /// No description provided for @printerConnectHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Pair and connect from the Project tab.'**
+  String get printerConnectHint;
 }
 
 class _AppLocalizationsDelegate

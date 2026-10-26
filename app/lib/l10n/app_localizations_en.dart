@@ -329,4 +329,125 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get sampleBannerPlaceholder =>
       'Milestone 1 scaffold with sample data — nothing is wired yet.';
+
+  @override
+  String get tabPrinter => 'Printer';
+
+  @override
+  String get printerHistoryHeading => 'Print history';
+
+  @override
+  String get printerHistoryEmpty => 'No prints yet.';
+
+  @override
+  String get printerHistoryRefresh => 'Refresh';
+
+  @override
+  String get printerHistoryClock =>
+      'Timestamps are the printer\'s own clock (currently UTC+8), used only as an ordering key.';
+
+  @override
+  String get printerTaskStatusCompleted => 'Completed';
+
+  @override
+  String get printerTaskStatusCancelled => 'Cancelled';
+
+  @override
+  String get printerTaskStatusFailed => 'Failed';
+
+  @override
+  String printerTaskStatusUnknown(int code) {
+    return 'Unknown ($code)';
+  }
+
+  @override
+  String get printerVideoNone => 'No time-lapse';
+
+  @override
+  String get printerVideoRenderable => 'Time-lapse frames available';
+
+  @override
+  String get printerVideoReady => 'Time-lapse video ready';
+
+  @override
+  String get printerVideoNotRenderable => 'Time-lapse not renderable';
+
+  @override
+  String printerVideoDurationBytes(int seconds, int kib) {
+    return '${seconds}s · $kib KiB';
+  }
+
+  @override
+  String printerDurationShort(int minutes) {
+    return '${minutes}m';
+  }
+
+  @override
+  String get printerDownloadCheck => 'Checking availability…';
+
+  @override
+  String get printerDownloadButton => 'Download';
+
+  @override
+  String get printerDownloadUnavailable =>
+      'No longer available (deleted on the printer?)';
+
+  @override
+  String get printerDownloadStarted => 'Downloading…';
+
+  @override
+  String printerDownloadDone(String path) {
+    return 'Saved: $path';
+  }
+
+  @override
+  String printerDownloadFailed(String msg) {
+    return 'Download failed: $msg';
+  }
+
+  @override
+  String get printerShareButton => 'Share';
+
+  @override
+  String get printerRenderButton => 'Create video';
+
+  @override
+  String get printerRenderStarted => 'Rendering…';
+
+  @override
+  String get printerRenderNoFrames => 'No raw frames available for this print.';
+
+  @override
+  String printerRenderFailed(String msg) {
+    return 'Render failed: $msg';
+  }
+
+  @override
+  String get printerRenderNotPossible =>
+      'Not renderable (no raw frames on the printer)';
+
+  @override
+  String get printStatusVideoComposing => 'Creating/exporting time-lapse';
+
+  @override
+  String get printStatusException1243 =>
+      'Filament feed error — check PTFE tubes';
+
+  @override
+  String get substatePausing => 'Pausing';
+
+  @override
+  String get substatePaused => 'Paused';
+
+  @override
+  String get substateResuming => 'Resuming';
+
+  @override
+  String get substateResumed => 'Resumed';
+
+  @override
+  String get printerNotConnected => 'Printer not connected.';
+
+  @override
+  String get printerConnectHint => 'Pair and connect from the Project tab.';
 }

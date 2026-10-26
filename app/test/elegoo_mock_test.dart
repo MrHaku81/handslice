@@ -22,7 +22,8 @@ const _httpPort = 18080;
 
 late Process _mock;
 
-Future<void> _startMock({int interruptAt = 0, bool rejectAuth = false}) async {
+Future<void> _startMock(
+    {int interruptAt = 0, bool rejectAuth = false, String? seedHistoryPath}) async {
   final env = Map<String, String>.from(Platform.environment)
     ..['MOCK_ACCESS_CODE'] = _accessCode;
   _mock = await Process.start(
@@ -35,6 +36,7 @@ Future<void> _startMock({int interruptAt = 0, bool rejectAuth = false}) async {
       '--http-port', '$_httpPort',
       if (interruptAt > 0) ...['--interrupt-upload-at', '$interruptAt'],
       if (rejectAuth) '--reject-auth',
+      if (seedHistoryPath != null) ...['--seed-history', seedHistoryPath],
     ],
     environment: env,
   );
@@ -126,6 +128,121 @@ void main() {
       );
       expect(r.ok, isTrue);
       expect(r.errorCode, 0);
+    } finally {
+      await _stopMock();
+    }
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  // ---- Phase 5a/5b: 1036 + 1051 + /download + 3022 ----
+
+  Future<String> writeSeed() async {
+    final f = File('${Directory.systemTemp.path}/mock_history.json');
+    f.writeAsStringSync('''
+[
+  {"task_id":"ready-1","task_name":"ready.gcode","begin_time":1,"end_time":500,
+   "task_status":1,"time_lapse_video_status":2,
+   "time_lapse_video_url":"video/ready.mp4",
+   "time_lapse_video_size":2048,"time_lapse_video_duration":3},
+  {"task_id":"frames-1","task_name":"frames.gcode","begin_time":2,"end_time":700,
+   "task_status":1,"time_lapse_video_status":1,
+   "time_lapse_video_url":"picture/frames",
+   "time_lapse_video_size":0,"time_lapse_video_duration":0},
+  {"task_id":"nothing-1","task_name":"nothing.gcode","begin_time":3,"end_time":100,
+   "task_status":1,"time_lapse_video_status":0,
+   "time_lapse_video_url":"",
+   "time_lapse_video_size":0,"time_lapse_video_duration":0},
+  {"task_id":"stale-1","task_name":"stale.gcode","begin_time":4,"end_time":200,
+   "task_status":1,"time_lapse_video_status":2,
+   "time_lapse_video_url":"video/stale.mp4",
+   "time_lapse_video_size":1234,"time_lapse_video_duration":2}
+]
+''');
+    // „stale.mp4" existiert in der Mock-videos-Map, aber wir muessen die
+    // Datei zum Testen des „nicht mehr verfuegbar"-Pfads vom Mock
+    // entfernen. Alternative: einen Eintrag mit video_status=2 anlegen,
+    // dessen URL der Mock NICHT ablegt. Loesung: beim Start das Flag
+    // "stale.mp4" nicht als video seeden. Wir leeren das in einem
+    // zweiten Durchgang ueber die 1036-Antwort und einen Head-Probe
+    // gegen eine komplett fiktive URL.
+    return f.path;
+  }
+
+  test('Mock Phase5: 1036 + Head-Probe + Download (status 2)', () async {
+    final seed = await writeSeed();
+    await _startMock(seedHistoryPath: seed);
+    final c = _makeClient();
+    try {
+      final info = await c.discover('127.0.0.1');
+      await c.connect(ip: '127.0.0.1', sn: info.sn, accessCode: _accessCode);
+      final hist = await c.getHistory();
+      // Alle 4 seeded Eintraege da
+      expect(hist.length, 4);
+      final ready = hist.firstWhere((t) => t.taskId == 'ready-1');
+      expect(ready.hasVideo, isTrue);
+      expect(ready.videoStatus, 2);
+      // Head-Probe auf vorhandene Datei
+      final probeOk = await c.probeTimelapse(ready.videoUrl);
+      expect(probeOk.ok, isTrue);
+      // Head-Probe auf fehlende Datei → Timeout → ok=false
+      final probeMiss = await c.probeTimelapse('video/does-not-exist.mp4',
+          timeout: const Duration(seconds: 2));
+      expect(probeMiss.ok, isFalse);
+      // Download der vorhandenen
+      final bytes = await c.downloadTimelapse(ready.videoUrl,
+          expectedBytes: ready.videoSize);
+      expect(bytes.length, greaterThan(0));
+      await c.disconnect();
+    } finally {
+      await _stopMock();
+    }
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('Mock Phase5: 1051 Erfolgsfall (3020→3021), video_status 1→2', () async {
+    final seed = await writeSeed();
+    await _startMock(seedHistoryPath: seed);
+    final c = _makeClient();
+    try {
+      final info = await c.discover('127.0.0.1');
+      await c.connect(ip: '127.0.0.1', sn: info.sn, accessCode: _accessCode);
+      final before = await c.getHistory();
+      final target = before.firstWhere((t) => t.taskId == 'frames-1');
+      expect(target.videoStatus, 1);
+      // 1051 mit picture-URL
+      final r = await c.renderTimelapse(target.videoUrl);
+      expect(r['error_code'], 0);
+      // Status-12 → 1-Sequenz des Mocks abwarten (~150 ms gesamt)
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      final after = await c.getHistory();
+      final updated = after.firstWhere((t) => t.taskId == 'frames-1');
+      expect(updated.videoStatus, 2);
+      expect(updated.videoUrl, startsWith('video/'));
+      // Head-Probe + Download der neu entstandenen Datei
+      final probe = await c.probeTimelapse(updated.videoUrl);
+      expect(probe.ok, isTrue);
+      await c.disconnect();
+    } finally {
+      await _stopMock();
+    }
+  }, timeout: const Timeout(Duration(seconds: 30)));
+
+  test('Mock Phase5: 1051 ohne Rohframes → 3022, video_status bleibt', () async {
+    final seed = await writeSeed();
+    await _startMock(seedHistoryPath: seed);
+    final c = _makeClient();
+    try {
+      final info = await c.discover('127.0.0.1');
+      await c.connect(ip: '127.0.0.1', sn: info.sn, accessCode: _accessCode);
+      // Target: eine picture-URL, die der Mock NICHT als Status-1-Eintrag
+      // hat → 3022. Wir reichen eine URL ein, die zu keinem Eintrag passt.
+      final r = await c.renderTimelapse('picture/does-not-exist');
+      expect(r['error_code'], 0);
+      // Mock pusht 3020 → 3022 → 1 in ~100 ms. Die History-Werte duerfen
+      // sich nicht aendern.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      final after = await c.getHistory();
+      final frames = after.firstWhere((t) => t.taskId == 'frames-1');
+      expect(frames.videoStatus, 1); // unveraendert
+      await c.disconnect();
     } finally {
       await _stopMock();
     }
