@@ -116,6 +116,10 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
   int? _vramEstimateBytes;
   RendererMode _mode = RendererMode.flutterScene;
   bool _sceneReady = false;
+  // Non-null when flutter_scene init, scene-build, or SceneView
+  // construction throws. We keep the mode toggle enabled so the
+  // Canvas fallback is still reachable for comparison.
+  String? _sceneError;
   final fscene.Scene _scene = fscene.Scene();
   double _yaw = 0.0;
   double _pitch = -0.6;   // slightly down-tilted baseline
@@ -147,8 +151,25 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
   }
 
   Future<void> _initScene() async {
-    await fscene.Scene.initializeStaticResources();
-    if (mounted) setState(() { _sceneReady = true; });
+    try {
+      await fscene.Scene.initializeStaticResources();
+      if (mounted) setState(() { _sceneReady = true; });
+    } catch (e, st) {
+      if (!mounted) return;
+      setState(() {
+        _sceneError = _shortError(e);
+        _mode = RendererMode.canvasVertices;
+      });
+      debugPrint('flutter_scene init failed: $e\n$st');
+    }
+  }
+
+  String _shortError(Object e) {
+    final s = e.toString();
+    // Keep it to the first sentence / line — SceneView errors are
+    // multi-paragraph and would overflow the status card.
+    final cut = s.indexOf('\n');
+    return cut < 0 ? s : s.substring(0, cut);
   }
 
   void _probeBackend() {
@@ -225,7 +246,21 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
   }
 
   Future<void> _rebuildScene(HspmFile mesh) async {
-    // Clear old nodes.
+    if (_mode != RendererMode.flutterScene) return;
+    if (_sceneError != null) return;
+    try {
+      _rebuildSceneUnsafe(mesh);
+    } catch (e, st) {
+      if (!mounted) return;
+      setState(() {
+        _sceneError = _shortError(e);
+        _mode = RendererMode.canvasVertices;
+      });
+      debugPrint('flutter_scene rebuild failed: $e\n$st');
+    }
+  }
+
+  void _rebuildSceneUnsafe(HspmFile mesh) {
     _scene.root.children.clear();
     if (_mode == RendererMode.flutterScene) {
       for (final vol in mesh.volumes) {
@@ -382,17 +417,23 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
     }
     switch (_mode) {
       case RendererMode.flutterScene:
+        if (_sceneError != null) return _sceneErrorCard();
         if (!_sceneReady) {
           return const Center(child: CircularProgressIndicator());
         }
-        return fscene.SceneView(
-          _scene,
-          camera: fscene.PerspectiveCamera(
-            position: _cameraPos(),
-            target: vm.Vector3(_pan.dx, 0, _pan.dy),
-            fovRadiansY: math.pi / 4,
-          ),
-        );
+        try {
+          return fscene.SceneView(
+            _scene,
+            camera: fscene.PerspectiveCamera(
+              position: _cameraPos(),
+              target: vm.Vector3(_pan.dx, 0, _pan.dy),
+              fovRadiansY: math.pi / 4,
+            ),
+          );
+        } catch (e) {
+          _sceneError = _shortError(e);
+          return _sceneErrorCard();
+        }
       case RendererMode.canvasVertices:
         return CustomPaint(
           size: Size.infinite,
@@ -405,6 +446,44 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
           ),
         );
     }
+  }
+
+  Widget _sceneErrorCard() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+            const SizedBox(height: 12),
+            const Text('flutter_scene could not start',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(_sceneError ?? '(unknown)',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
+            const SizedBox(height: 16),
+            const Text(
+              'Tip: on Android, flutter_scene needs the\n'
+              'io.flutter.embedding.android.EnableFlutterGPU\n'
+              'manifest key set to true (debug manifest only, for now).\n'
+              'The Canvas fallback below works regardless.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              icon: const Icon(Icons.swap_horiz),
+              label: const Text('Switch to Canvas.drawVertices'),
+              onPressed: () => setState(() {
+                _mode = RendererMode.canvasVertices;
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   vm.Vector3 _cameraPos() {

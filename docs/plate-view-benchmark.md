@@ -49,6 +49,38 @@ constant per run.
 6. Switch to **Canvas.drawVertices** with the segmented control and
    repeat the 10-second rotate.
 
+### Android: Flutter GPU opt-in
+
+Flutter GPU (which `flutter_scene` is built on) is still gated
+behind a manifest opt-in on Android as of Flutter 3.35. Without it
+the first `Scene.initializeStaticResources()` call throws:
+
+```
+Flutter GPU must be enabled via the Flutter GPU manifest setting …
+io.flutter.embedding.android.EnableFlutterGPU metadata key to true
+in the AndroidManifest.xml
+```
+
+For the benchmark we set the key **only in the debug manifest**
+(`app/android/app/src/debug/AndroidManifest.xml`):
+
+```xml
+<application>
+    <meta-data
+        android:name="io.flutter.embedding.android.EnableFlutterGPU"
+        android:value="true" />
+</application>
+```
+
+Release builds stay untouched; whether we flip the switch in the
+main manifest is a decision we make after this benchmark lands.
+
+If the key is missing at runtime (or Flutter GPU rejects the device
+for some other reason), the benchmark screen catches the exception,
+pins the mode to `Canvas.drawVertices`, and shows a short error
+card with a one-tap switch — so the Canvas numbers can still be
+collected.
+
 ### Backend detection
 
 Flutter GPU does not expose the backend name as a public API in

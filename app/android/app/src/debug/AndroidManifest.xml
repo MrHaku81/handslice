@@ -4,4 +4,15 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Debug-only opt-in for Flutter GPU (used by flutter_scene). Needed
+         for the hidden plate-view benchmark screen in Settings. Kept out
+         of the release manifest intentionally: whether Flutter GPU goes
+         into production is still open and depends on the benchmark
+         results. See docs/plate-view-benchmark.md. -->
+    <application>
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableFlutterGPU"
+            android:value="true" />
+    </application>
 </manifest>
