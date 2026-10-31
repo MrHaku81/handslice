@@ -50,6 +50,7 @@
 #include "libslic3r/Config.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Model.hpp"
+#include "thumbnail_renderer.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/Format/STL.hpp"
 #include "libslic3r/Format/3mf.hpp"
@@ -97,6 +98,12 @@ struct Args {
     // Prioritaet). Ungueltige Keys/Werte → saubere Fehlermeldung mit
     // opt_key + Grund (keine Stille).
     std::string overrides_json;
+    // --simplify <N>  target triangle count for the thumbnail
+    // renderer only. 0 = no simplification (thumbnail renders
+    // the full mesh). The slicing path uses the ORIGINAL mesh
+    // unconditionally; this flag never touches the Print.
+    uint32_t simplify_target = 0;
+    bool simplify_set = false;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -135,7 +142,12 @@ void usage(std::ostream& os) {
         "             Map opt_key -> Wert. Wert darf Zahl, Bool oder String sein\n"
         "             (werden intern zum serialisierten String konvertiert, so wie\n"
         "             Orcas Preset ihn speichert). JSON-Arrays werden mit klarer\n"
-        "             Fehlermeldung abgelehnt – statt [\"250\"] gib \"250\" uebergeben.\n";
+        "             Fehlermeldung abgelehnt – statt [\"250\"] gib \"250\" uebergeben.\n"
+        "\n"
+        "--simplify <N>  Dreiecks-Zielanzahl fuer den Thumbnail-Renderer\n"
+        "             (its_quadric_edge_collapse). Nur fuer Vorschau/Anzeige;\n"
+        "             der Slice-Pfad nutzt immer das Original-Mesh. 0 oder\n"
+        "             weggelassen = keine Vereinfachung.\n";
 }
 
 Args parse_args(int argc, char** argv) {
@@ -165,6 +177,17 @@ Args parse_args(int argc, char** argv) {
         else if (arg == "--bed-type") a.bed_type = need_val("--bed-type");
         else if (arg == "--dump-schema") a.dump_schema = true;
         else if (arg == "--overrides") a.overrides_json = need_val("--overrides");
+        else if (arg == "--simplify") {
+            const std::string v = need_val("--simplify");
+            try {
+                const long long n = std::stoll(v);
+                if (n < 0) die("--simplify must be >= 0, got: " + v);
+                a.simplify_target = uint32_t(n);
+                a.simplify_set = true;
+            } catch (const std::exception&) {
+                die("--simplify needs a non-negative integer, got: " + v);
+            }
+        }
         else if (arg == "--z-offset") {
             const std::string v = need_val("--z-offset");
             try {
@@ -788,9 +811,30 @@ static int run(int argc, char** argv) {
     print.apply(model, cfg);
     print.process();
 
+    // 6b. Thumbnail-Vorbereitung.
+    //
+    // Variante C (siehe docs/preview-research.md "Follow-up …"):
+    // handslice-cli zeichnet selbst, mit einem winzigen Software-
+    // Rasterizer, der die Thumbnail-Callback-Signatur von Orca
+    // bedient. Dadurch schreibt Orcas eigener Exporter den
+    // THUMBNAIL_BLOCK – gleiche Formatierung wie der GUI-Export,
+    // keine eigene Splice-Logik, keine Abhaengigkeit zur App.
+    //
+    // Simplifizierung passiert HIER, auf einer Modellkopie, nicht
+    // auf dem Slice-Pfad. Der Print.apply(model, cfg) hat die
+    // ORIGINAL-Meshes bereits uebernommen; ein Preview-Vereinfachen
+    // kann nicht mehr nachtraeglich die G-Code-Bahnen verdrehen.
+    const auto preview_meshes = handslice::build_preview_meshes(
+        model, cfg, args.simplify_target);
+    auto thumbnail_cb =
+        [&model, &cfg, &preview_meshes](const Slic3r::ThumbnailsParams& p) {
+            return handslice::render_handslice_thumbnails(
+                model, cfg, p, preview_meshes);
+        };
+
     // 7. G-Code exportieren.
     GCodeProcessorResult gcr;
-    const std::string written_path = print.export_gcode(args.output_path, &gcr, nullptr);
+    const std::string written_path = print.export_gcode(args.output_path, &gcr, thumbnail_cb);
     if (written_path.empty())
         die("export_gcode returned empty path – nothing written");
 

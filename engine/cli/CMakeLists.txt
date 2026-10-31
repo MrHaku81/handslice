@@ -30,6 +30,7 @@ endif ()
 add_executable(handslice-cli
     handslice-cli.cpp
     nanosvg_impl.cpp
+    thumbnail_renderer.cpp
 )
 
 # HANDSLICE_CLI_COMMIT: Repo-HEAD-Kurz-Hash, in die Binary einkompiliert.

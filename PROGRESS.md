@@ -18,6 +18,76 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 22:00 UTC – Pflicht 6: G-code thumbnail (Variant C, CLI software rasterizer)
+
+Implemented the "CLI draws its own thumbnail" plan from
+`docs/preview-research.md` follow-up: `handslice-cli` now ships a
+~400 LoC flat-shaded software rasterizer, hands the result to
+Orca's own `export_thumbnails_to_file` through `thumbnail_cb`,
+and emits the `; THUMBNAIL_BLOCK` into the G-code — same format
+as the GUI export. No GPU, no WebView, no splice logic in Dart.
+
+### Verified
+
+- `--simplify <N>` CLI flag added. Runs
+  `its_quadric_edge_collapse` on a per-volume copy that lives
+  only in the thumbnail renderer; the slicing path keeps the
+  original mesh. `0` or absent = no simplification.
+- Software rasterizer in `engine/cli/thumbnail_renderer.{hpp,cpp}`:
+  Z-buffer, flat shading, one directional light + fixed ambient,
+  orthographic projection, 8 % margin. Camera angled from
+  front-upper-right (dir `(0.6, -1.0, 0.75)`), neutral light
+  grey background `#F2F2F2`.
+- Per-volume colour from `filament_colour[extruder_idx]` in the
+  active print config — so the Pflicht-9-slot-colour override
+  (`filament_colour: "#FFFFFF"`) renders as white in the
+  thumbnail, matching what will show up at the printer.
+- Thumbnail size + format come from `print.config()`'s
+  `thumbnails` option (CC2 profile: `"144x144"`, format PNG).
+  Not hardcoded.
+- `print.export_gcode(output, &result, thumbnail_cb)` wiring in
+  `handslice-cli.cpp` — unchanged slicing path otherwise.
+- `engine/test/run-reference-test.sh` still **PASSES**:
+  `EXECUTABLE_BLOCK` sha256 =
+  `92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`,
+  8479 lines, byte-identical to the GUI reference. The new
+  thumbnail block sits before the executable section and does
+  not change motion planning.
+- New smoke test `engine/test/run-thumbnail-test.sh`:
+  1. Slice the test cube with handslice-cli-x86.
+  2. Assert `; THUMBNAIL_BLOCK_START` / `_END` present.
+  3. Assert header `; thumbnail begin 144x144 <size>`.
+  4. Decode base64 payload, verify PNG signature + IHDR
+     dimensions (144×144), reject suspiciously-uniform output.
+  5. Side-by-side artefacts in `local-test/` (gitignored):
+     `thumbnail-cube.png` (678 B, ours) and
+     `thumbnail-cube-gui-reference.png` (1 133 B, GUI).
+- Build on x86 (host) + arm64 (NDK r27d, Android API 29) both
+  succeed; `handslice-cli-{x86,arm64}.commit` match (both
+  carry the pre-commit HEAD now; after this commit the APK
+  build will refresh them to the new HEAD).
+- Baseline timing on x86 for the 684-byte test cube: 0.72 s
+  wall-clock end-to-end (slice + thumbnail). No measurable
+  perf regression vs. before — the rasterizer only touches
+  144×144 pixels regardless of model size.
+
+### Not verified at the printer
+
+- Big model (`Auryn` 140 MB) is not present in the repo —
+  the `--simplify` path is unit-safe (QEC is Orca's own code)
+  but a measured end-to-end run against a 1.5M-triangle model
+  comes with the next session.
+- Firmware's `method 1045` extraction of the new block: Klaus
+  will upload the next slice and check that the preview on the
+  printer display and in `method 1045` matches what
+  `local-test/thumbnail-cube.png` looks like.
+
+### Does not go
+
+- (no new blockers.)
+
+---
+
 ## 2026-10-31 21:00 UTC – M9 Vorstufe am Geraet bestaetigt (App f602d1d)
 
 - **Fach-Farbe im G-Code**: Klaus hat frisch gesliced; neue Datei
