@@ -18,6 +18,87 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 22:40 UTC – Pflicht 6 follow-up: shader + background fixes
+
+Klaus live-tested `ab67cbb` and found two deficiencies: white
+filament (`filament_colour=#FFFFFF` from slot A4) rendered as
+dark grey, and the model's three visible faces had no useful
+shading spread — the cube looked like a flat silhouette with
+the notches only visible on the outline.
+
+### Verified
+
+- Compared our output (`local-test/thumbnail-cube.png`) to the
+  GUI reference (`local-test/thumbnail-cube-gui-reference.png`)
+  and traced three distinct problems in
+  `engine/cli/thumbnail_renderer.cpp`:
+
+  1. **Background was opaque light grey** (`#F2F2F2`), while
+     Orca's GUI thumbnail is RGBA color-type 6 with alpha = 0
+     everywhere. A near-white model on a near-white background
+     disappears. Fixed: background pixels now stay transparent
+     (alpha = 0); `ThumbnailData::set()` initialises to 0xFF,
+     so we explicitly zero the buffer after `set()`.
+  2. **STL winding wasn't being normalised.** Our per-triangle
+     normal came from `vcross(a-v0, b-v0)` and pointed outward
+     for some triangles and inward for others, depending on
+     admesh's load order. Lambert then put half the cube's
+     visible surface in ambient-only. Fix: orient each
+     triangle's normal toward the camera (`V.eye`) before
+     shading — the visible side is by definition the one
+     facing us, so this is loss-free.
+  3. **Shader was too tame.** Original `k = 0.35 + 0.65·cosA`
+     capped the top face at ~0.86 even in favourable light, so
+     white filament never climbed past #DADADA. New model:
+     ```
+     k = 0.20 + 0.80·max(0, dot(n, key))
+                + 0.15·max(0, dot(n, fill))
+     ```
+     with `key = (0.15, -0.35, 0.95)` (near top-down, slight
+     front-right tilt) and `fill = (-0.60, 0.40, 0.20)`
+     (behind-left). A camera-facing surface hits the key near
+     cos ≈ 0.95, so top ≈ 0.98 → ~250 (near-white). Side faces
+     drop to ~145, back-facing side to ~82 — three clearly
+     separable greys at any base colour.
+  4. **Camera tilted a bit steeper** (`dir (0.55, -0.90, 0.95)`
+     instead of `(0.6, -1.0, 0.75)`) so the top face reads as
+     a top face, not a wide front.
+
+- `engine/test/run-thumbnail-test.sh` extended with a 5th step
+  that re-renders the cube with
+  `--overrides '{"filament_colour":"#FFFFFF"}'`, decodes the
+  PNG, de-filters it, samples the opaque centre column and
+  asserts:
+    - background pixel at (0,0) is alpha = 0,
+    - all opaque pixels on a white model are greyscale
+      (`r == g == b`),
+    - top-face peak greyvalue is ≥ 240 (near-white),
+    - spread between min and max is ≥ 60 (three faces
+      distinguishable).
+  Current measurement: grey range `[120..250]`, spread 130.
+  All 4 checks (base) + 5th (white) pass.
+- `engine/test/run-reference-test.sh` still passes:
+  EXECUTABLE_BLOCK sha256 = `92951c26…`, 8479 lines, unchanged.
+- `local-test/thumbnail-cube-white.png` and
+  `local-test/thumbnail-cube.png` are regenerated artefacts for
+  side-by-side review (both gitignored).
+- Builds on x86 and arm64 (NDK r27d) both carry the new
+  shader; CLI commit hash will be refreshed by the APK build
+  after this commit.
+
+### Not verified at the printer
+
+- On-device look of the fixed thumbnail. Klaus will upload the
+  next slice; the firmware's `method 1045` should now show
+  near-white top / mid-grey front / dark-grey side instead of
+  flat dark grey.
+
+### Does not go
+
+- (no new blockers.)
+
+---
+
 ## 2026-10-31 22:00 UTC – Pflicht 6: G-code thumbnail (Variant C, CLI software rasterizer)
 
 Implemented the "CLI draws its own thumbnail" plan from

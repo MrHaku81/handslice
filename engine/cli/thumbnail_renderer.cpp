@@ -128,8 +128,10 @@ struct ViewMatrix {
 // bounding-box dimension.
 static ViewMatrix make_view(Vec3 focus, float extent) {
     const float dist = extent * 1.9f + 10.0f;
-    // Camera direction (eye - target), normalised.
-    const Vec3 dir   = vnorm({0.6f, -1.0f, 0.75f});
+    // Camera direction (eye - target), normalised. Steeper Z so
+    // the top face is clearly a top face and the front/right
+    // faces diverge in brightness under lighting.
+    const Vec3 dir   = vnorm({0.55f, -0.90f, 0.95f});
     const Vec3 eye   = vadd(focus, vscale(dir, dist));
     const Vec3 fwd   = vnorm(vsub(focus, eye));              // -z camera
     const Vec3 world_up = {0.0f, 0.0f, 1.0f};
@@ -145,12 +147,27 @@ static Vec3 to_view(const ViewMatrix& V, Vec3 w) {
     return { vdot(d, V.right), vdot(d, V.up), -vdot(d, V.forward) };
 }
 
-static Rgba shade(Vec3 normal, Rgba base, Vec3 light_dir) {
-    // Flat Lambert + fixed ambient; `light_dir` points FROM
-    // surface TO light.
-    const float cosA = std::max(0.0f, vdot(normal, light_dir));
-    const float ambient = 0.35f;
-    const float k = std::min(1.0f, ambient + 0.65f * cosA);
+// Three-component shading so a white part reads as "white" at the
+// top, mid-grey on the front and clearly darker on the side —
+// which was the Klaus-reported deficit of the first version
+// (everything one grey tone, model indistinguishable from
+// silhouette). Mix:
+//   - small ambient so backfaces don't go black,
+//   - strong key light near-top-down, slight front-right tilt,
+//   - weak fill from behind-left to lift the shadow side.
+// Weights sum ~1.08 so a well-lit flat facing the key renders at
+// full base colour (clamped to 255). This is deliberately NOT
+// physically-based; it's tuned so the three visible faces of a
+// 20 mm cube read as distinctly separate greys under a single
+// base colour.
+static Rgba shade(Vec3 normal, Rgba base, Vec3 key, Vec3 fill) {
+    const float cosK = std::max(0.0f, vdot(normal, key));
+    const float cosF = std::max(0.0f, vdot(normal, fill));
+    const float ambient      = 0.20f;
+    const float keyStrength  = 0.80f;
+    const float fillStrength = 0.15f;
+    float k = ambient + keyStrength * cosK + fillStrength * cosF;
+    if (k > 1.0f) k = 1.0f;
     return {
         uint8_t(std::min(255.0f, base.r * k)),
         uint8_t(std::min(255.0f, base.g * k)),
@@ -319,17 +336,14 @@ ThumbnailsList render_handslice_thumbnails(
     if (tris.empty()) {
         // No geometry — still emit well-formed empty thumbnails
         // for each requested size, so the firmware parser is
-        // happy. Pixel buffer stays all-background.
+        // happy. Fully transparent (clear alpha).
         for (const Vec2d& size : params.sizes) {
             ThumbnailData td;
             td.set(unsigned(std::lround(size.x())),
                    unsigned(std::lround(size.y())));
-            // Background colour (matches below).
             for (size_t i = 0; i < td.pixels.size(); i += 4) {
-                td.pixels[i+0] = 0xF2;
-                td.pixels[i+1] = 0xF2;
-                td.pixels[i+2] = 0xF2;
-                td.pixels[i+3] = 0xFF;
+                td.pixels[i+0] = 0; td.pixels[i+1] = 0;
+                td.pixels[i+2] = 0; td.pixels[i+3] = 0;
             }
             out.push_back(std::move(td));
         }
@@ -352,9 +366,21 @@ ThumbnailsList render_handslice_thumbnails(
                            std::max(mx.y - mn.y, mx.z - mn.z));
 
     const ViewMatrix V = make_view(focus, extent);
-    const Vec3 light_dir = vnorm({0.4f, -0.5f, 0.7f});
+    // Two directional lights for the shader (see shade()).
+    const Vec3 key_light  = vnorm({0.15f, -0.35f, 0.95f}); // near-top-down
+    const Vec3 fill_light = vnorm({-0.60f,  0.40f, 0.20f}); // behind-left
     // Pre-project triangles to view space once; this is shared
     // across all requested sizes.
+    //
+    // Normal-orientation note: STLs don't guarantee a consistent
+    // triangle winding, so our `vcross(a-v0, b-v0)` normals point
+    // outward for some triangles and inward for others. Lambert
+    // over the raw normal then kept half the surface in ambient
+    // only — the exact "white model stays dark grey" bug from
+    // the first device test. Fix: orient each triangle's normal
+    // toward the camera (the visible side is by definition the
+    // one facing us), so Lambert against the key light has
+    // predictable sign.
     struct ViewTri {
         Vec3 v[3];
         float min_vx, max_vx, min_vy, max_vy;
@@ -373,7 +399,13 @@ ThumbnailsList render_handslice_thumbnails(
         vt.max_vx = std::max({vt.v[0].x, vt.v[1].x, vt.v[2].x});
         vt.min_vy = std::min({vt.v[0].y, vt.v[1].y, vt.v[2].y});
         vt.max_vy = std::max({vt.v[0].y, vt.v[1].y, vt.v[2].y});
-        vt.shaded = shade(t.normal, t.colour, light_dir);
+        // Orient the per-triangle normal to face the camera.
+        const Vec3 tri_center = vscale(
+            vadd(vadd(t.v[0], t.v[1]), t.v[2]), 1.0f / 3.0f);
+        const Vec3 to_cam = vnorm(vsub(V.eye, tri_center));
+        Vec3 oriented = t.normal;
+        if (vdot(oriented, to_cam) < 0.0f) oriented = vscale(oriented, -1.0f);
+        vt.shaded = shade(oriented, t.colour, key_light, fill_light);
         vtris.push_back(vt);
         vxmin = std::min(vxmin, vt.min_vx); vxmax = std::max(vxmax, vt.max_vx);
         vymin = std::min(vymin, vt.min_vy); vymax = std::max(vymax, vt.max_vy);
@@ -389,11 +421,19 @@ ThumbnailsList render_handslice_thumbnails(
         std::vector<float> depth(W * H,
             std::numeric_limits<float>::infinity());
 
-        // Background: light grey, matches Orca's rendered
-        // thumbnail (looks neutral against both display skins).
+        // Background: fully transparent, same as Orca's GUI
+        // export (see docs/preview-research.md "What a real CC2
+        // G-code actually contains"). This lets the firmware /
+        // display composite the thumbnail onto any theme, and
+        // keeps bright models (white, light grey) distinguishable
+        // from the display background.
+        // NOTE: `ThumbnailData::set()` initialises the pixel
+        // buffer with 0xFF (opaque white — Orca default); we
+        // overwrite it here to transparent-black so background
+        // pixels we never touch report alpha=0.
         for (int i = 0; i < W * H; ++i) {
             uint8_t* p = td.pixels.data() + i * 4;
-            p[0] = 0xF2; p[1] = 0xF2; p[2] = 0xF2; p[3] = 0xFF;
+            p[0] = 0; p[1] = 0; p[2] = 0; p[3] = 0;
         }
 
         // Orthographic scale: fit view bbox into (W, H) with
