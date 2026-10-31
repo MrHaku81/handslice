@@ -9,7 +9,13 @@ import 'package:share_plus/share_plus.dart';
 import '../l10n/app_localizations.dart';
 import '../net/elegoo_cc2_client.dart';
 import '../state/printer_state.dart';
+import '../widgets/printer_camera_panel.dart';
+import '../widgets/printer_files_panel.dart';
 import '../widgets/workshop_card.dart';
+
+/// Welcher Reiter-Unterbereich sichtbar ist. Steuert u. a. das
+/// Starten/Stoppen des Kamera-Streams.
+enum PrinterSection { files, history, camera }
 
 // Phase 5: Reiter „Drucker".
 //
@@ -51,10 +57,15 @@ class _TaskUiState {
   String? downloadError;
 }
 
-class _PrinterScreenState extends State<PrinterScreen> {
+class _PrinterScreenState extends State<PrinterScreen>
+    with WidgetsBindingObserver {
   // Platform-Channel fuer Android-native-Hilfen (MediaStore, nativeLibraryDir).
   static const MethodChannel _engineChannel =
       MethodChannel('dev.handslice.handslice/engine');
+
+  // Welcher Unterbereich oben per SegmentedButton gewaehlt ist.
+  PrinterSection _section = PrinterSection.files;
+  bool _appResumed = true;
 
   List<HistoryTask> _tasks = const [];
   bool _loading = false;
@@ -79,6 +90,7 @@ class _PrinterScreenState extends State<PrinterScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.printerState.addListener(_onStateChanged);
     _statusSub = widget.printerState.client.statusDeltas.listen((_) {
       if (mounted) setState(() {});
@@ -88,9 +100,18 @@ class _PrinterScreenState extends State<PrinterScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.printerState.removeListener(_onStateChanged);
     _statusSub?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final resumed = state == AppLifecycleState.resumed;
+    if (resumed != _appResumed) {
+      setState(() => _appResumed = resumed);
+    }
   }
 
   void _onStateChanged() {
@@ -298,12 +319,57 @@ class _PrinterScreenState extends State<PrinterScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _header(l),
+        _sectionSwitcher(l),
         if (!connected)
           Expanded(child: _notConnectedView(l))
         else
-          Expanded(child: _historyView(l)),
+          Expanded(child: _bodyForSection(l)),
       ],
     );
+  }
+
+  Widget _sectionSwitcher(AppLocalizations l) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: SegmentedButton<PrinterSection>(
+        segments: [
+          ButtonSegment(
+              value: PrinterSection.files,
+              icon: const Icon(Icons.folder_open),
+              label: Text(l.printerSectionFiles)),
+          ButtonSegment(
+              value: PrinterSection.history,
+              icon: const Icon(Icons.history),
+              label: Text(l.printerSectionHistory)),
+          ButtonSegment(
+              value: PrinterSection.camera,
+              icon: const Icon(Icons.videocam_outlined),
+              label: Text(l.printerSectionCamera)),
+        ],
+        selected: {_section},
+        onSelectionChanged: (s) => setState(() => _section = s.first),
+      ),
+    );
+  }
+
+  Widget _bodyForSection(AppLocalizations l) {
+    switch (_section) {
+      case PrinterSection.files:
+        return PrinterFilesPanel(
+          printerState: widget.printerState,
+          downloadLimiter: _limiter.run,
+        );
+      case PrinterSection.history:
+        return _historyView(l);
+      case PrinterSection.camera:
+        return SingleChildScrollView(
+          child: PrinterCameraPanel(
+            printerState: widget.printerState,
+            visible: _section == PrinterSection.camera,
+            appResumed: _appResumed,
+          ),
+        );
+    }
   }
 
   Widget _header(AppLocalizations l) {

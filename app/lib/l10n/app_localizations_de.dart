@@ -671,4 +671,113 @@ class AppLocalizationsDe extends AppLocalizations {
   String reconnectBannerBackoff(int seconds) {
     return 'Verbindung fehlgeschlagen – nächster Versuch in $seconds s.';
   }
+
+  @override
+  String get printerSectionFiles => 'Dateien';
+
+  @override
+  String get printerSectionHistory => 'Historie';
+
+  @override
+  String get printerSectionCamera => 'Kamera';
+
+  @override
+  String get printerFilesEmpty => 'Noch keine Dateien am Drucker.';
+
+  @override
+  String get printerFilesRefresh => 'Neu laden';
+
+  @override
+  String get printerFilesSizeLabel => 'Größe';
+
+  @override
+  String get printerFilesLayersLabel => 'Schichten';
+
+  @override
+  String get printerFilesPrintTimeLabel => 'Druckzeit';
+
+  @override
+  String get printerFilesCurrentPrint =>
+      'Wird gerade gedruckt – nicht löschbar';
+
+  @override
+  String get printerFilesPrintButton => 'Drucken';
+
+  @override
+  String get printerFilesDownloadButton => 'Herunterladen';
+
+  @override
+  String get printerFilesDeleteButton => 'Löschen';
+
+  @override
+  String get printerFilesDeleteBlockedRunning =>
+      'Datei des laufenden Drucks kann nicht gelöscht werden';
+
+  @override
+  String get printerFilesDeleteConfirmTitle => 'Datei vom Drucker löschen?';
+
+  @override
+  String printerFilesDeleteConfirmBody(String name) {
+    return 'Entfernt $name vom Drucker. Kann aus der App nicht rückgängig gemacht werden.';
+  }
+
+  @override
+  String get printerFilesDeleteConfirmYes => 'Ja, löschen';
+
+  @override
+  String get printerFilesDeleteConfirmNo => 'Behalten';
+
+  @override
+  String printerFilesDownloadDone(String path) {
+    return 'Gespeichert unter $path';
+  }
+
+  @override
+  String printerFilesDownloadFailed(String msg) {
+    return 'Download fehlgeschlagen: $msg';
+  }
+
+  @override
+  String get printerFilesDownloadUnavailable =>
+      'Datei gerade nicht abrufbar (Head-Probe fehlgeschlagen).';
+
+  @override
+  String get printerFilesPrintTitle => 'Diese Datei drucken?';
+
+  @override
+  String get printerFilesPrintSlot => 'Aktuelles Fach';
+
+  @override
+  String get printerFilesPrintStart => 'Druck starten';
+
+  @override
+  String get printerFilesPrintCancel => 'Abbrechen';
+
+  @override
+  String get printerFilesVisualCheckHint =>
+      'Erste Schicht am Drucker im Auge behalten.';
+
+  @override
+  String get printerCameraHeading => 'Live-Kamera';
+
+  @override
+  String get printerCameraLoading => 'Verbindung zur Kamera …';
+
+  @override
+  String get printerCameraPaused =>
+      'Kamera aus (Bereich nicht sichtbar oder App im Hintergrund).';
+
+  @override
+  String get printerCameraNoUrl =>
+      'Konnte die Stream-URL vom Drucker nicht laden.';
+
+  @override
+  String printerCameraNoUrlDetail(String detail) {
+    return 'method 1042 fehlgeschlagen: $detail';
+  }
+
+  @override
+  String printerCameraStreamError(String detail) {
+    return 'Stream-Fehler: $detail';
+  }
 }

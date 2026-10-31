@@ -665,4 +665,113 @@ class AppLocalizationsEn extends AppLocalizations {
   String reconnectBannerBackoff(int seconds) {
     return 'Reconnect failed — next attempt in ${seconds}s.';
   }
+
+  @override
+  String get printerSectionFiles => 'Files';
+
+  @override
+  String get printerSectionHistory => 'History';
+
+  @override
+  String get printerSectionCamera => 'Camera';
+
+  @override
+  String get printerFilesEmpty => 'No files on the printer yet.';
+
+  @override
+  String get printerFilesRefresh => 'Refresh';
+
+  @override
+  String get printerFilesSizeLabel => 'Size';
+
+  @override
+  String get printerFilesLayersLabel => 'Layers';
+
+  @override
+  String get printerFilesPrintTimeLabel => 'Print time';
+
+  @override
+  String get printerFilesCurrentPrint => 'Currently printing — cannot delete';
+
+  @override
+  String get printerFilesPrintButton => 'Print';
+
+  @override
+  String get printerFilesDownloadButton => 'Download';
+
+  @override
+  String get printerFilesDeleteButton => 'Delete';
+
+  @override
+  String get printerFilesDeleteBlockedRunning =>
+      'Cannot delete the file of the running print';
+
+  @override
+  String get printerFilesDeleteConfirmTitle =>
+      'Delete this file from the printer?';
+
+  @override
+  String printerFilesDeleteConfirmBody(String name) {
+    return 'This will remove $name from the printer. It cannot be undone from the app.';
+  }
+
+  @override
+  String get printerFilesDeleteConfirmYes => 'Yes, delete';
+
+  @override
+  String get printerFilesDeleteConfirmNo => 'Keep file';
+
+  @override
+  String printerFilesDownloadDone(String path) {
+    return 'Saved to $path';
+  }
+
+  @override
+  String printerFilesDownloadFailed(String msg) {
+    return 'Download failed: $msg';
+  }
+
+  @override
+  String get printerFilesDownloadUnavailable =>
+      'File not downloadable right now (head-probe failed).';
+
+  @override
+  String get printerFilesPrintTitle => 'Print this file?';
+
+  @override
+  String get printerFilesPrintSlot => 'Current slot';
+
+  @override
+  String get printerFilesPrintStart => 'Start print';
+
+  @override
+  String get printerFilesPrintCancel => 'Cancel';
+
+  @override
+  String get printerFilesVisualCheckHint =>
+      'Keep an eye on the first layer at the printer.';
+
+  @override
+  String get printerCameraHeading => 'Live camera';
+
+  @override
+  String get printerCameraLoading => 'Connecting to camera…';
+
+  @override
+  String get printerCameraPaused =>
+      'Camera off (section hidden or app in background).';
+
+  @override
+  String get printerCameraNoUrl =>
+      'Could not get the stream URL from the printer.';
+
+  @override
+  String printerCameraNoUrlDetail(String detail) {
+    return 'method 1042 failed: $detail';
+  }
+
+  @override
+  String printerCameraStreamError(String detail) {
+    return 'Stream error: $detail';
+  }
 }

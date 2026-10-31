@@ -126,6 +126,12 @@ class PrinterState extends ChangeNotifier {
   @visibleForTesting
   void triggerReconnectForTest() => _scheduleReconnect();
 
+  @visibleForTesting
+  void setConnectionForTest(CanvasConnection s) {
+    _state = s;
+    notifyListeners();
+  }
+
   // Status-Watchdog: haertet die Verbindungserkennung, falls der
   // Broker die TCP-Verbindung still kappt (keine CONNACK-Fehlerspur,
   // der mqtt_client meldet keinen Disconnect). Wenn in `_watchdogGrace`
@@ -206,6 +212,16 @@ class PrinterState extends ChangeNotifier {
   List? get exceptionStatus => _get(['machine_status', 'exception_status']) as List?;
   int? get chassisCameraConfigured =>
       _getInt(['external_device', 'chassis_camera', 'configured']);
+
+  // Dateiname der gerade laufenden Druckaufgabe (fuer den
+  // "aktive Datei nicht loeschen"-Guard und fuer die Live-UI).
+  // `null`, wenn die Firmware keinen `print_status.filename`
+  // gepusht hat oder der Drucker idle ist.
+  String? get runningFilename {
+    final s = _getString(['print_status', 'filename']);
+    if (s == null || s.isEmpty) return null;
+    return s;
+  }
 
   bool get isIdle => machineStatus == statusIdle;
   bool get isPrinting =>
@@ -526,14 +542,61 @@ class PrinterState extends ChangeNotifier {
       notifyListeners();
       return null;
     }
-    // delay_video entscheidet sich aus Capability-Flag + User-Switch:
-    //  - unterstuetzt (Default fuer CC2) und User aktiv → true
-    //  - sonst → false (bei nicht-unterstuetzt wird false explizit
-    //    gesendet, damit die Firmware es nicht raet).
+    return _startPrintCore(
+      filename: _lastUploadedName!,
+      bedlevelForce: bedlevelForce,
+      printerCheck: printerCheck,
+      enableTimelapse: enableTimelapse,
+    );
+  }
+
+  // M8 Pflicht 4: Druckstart fuer eine BEREITS AM DRUCKER liegende
+  // Datei. Preflight ohne bounds-Check (die liegt nur in der
+  // Upload-Pipeline vor); ansonsten identisch zum Upload-Flow.
+  Future<StartPrintResult?> startPrintFile({
+    required String filename,
+    required bool bedlevelForce,
+    required bool printerCheck,
+    required bool enableTimelapse,
+  }) async {
+    if (_state != CanvasConnection.connected) {
+      _lastError = 'preflight.not_connected';
+      notifyListeners();
+      return null;
+    }
+    if (!isIdle) {
+      _lastError = 'preflight.not_idle';
+      notifyListeners();
+      return null;
+    }
+    final slot = _slots.firstWhere(
+      (s) => s.trayId == _trayAssignmentForTool0,
+      orElse: () => CanvasSlot(
+          trayId: -1, filamentType: '', filamentName: '', filamentColor: ''),
+    );
+    if (slot.trayId < 0 || slot.filamentType.isEmpty) {
+      _lastError = 'preflight.tray_empty';
+      notifyListeners();
+      return null;
+    }
+    return _startPrintCore(
+      filename: filename,
+      bedlevelForce: bedlevelForce,
+      printerCheck: printerCheck,
+      enableTimelapse: enableTimelapse,
+    );
+  }
+
+  Future<StartPrintResult?> _startPrintCore({
+    required String filename,
+    required bool bedlevelForce,
+    required bool printerCheck,
+    required bool enableTimelapse,
+  }) async {
     final bool delayVideo = supportsTimelapse && enableTimelapse;
     try {
       final r = await _client.startPrint(
-        filename: _lastUploadedName!,
+        filename: filename,
         bedlevelForce: bedlevelForce,
         printerCheck: printerCheck,
         delayVideo: delayVideo,
@@ -553,6 +616,39 @@ class PrinterState extends ChangeNotifier {
       _lastError = e.message; notifyListeners(); return null;
     } catch (e) {
       _lastError = e.toString(); notifyListeners(); return null;
+    }
+  }
+
+  // M8 Pflicht 4: Datei(en) am Drucker loeschen. Shape nach dem
+  // 2026-10-31 Block-A-Beleg: `file_path` MUSS Liste sein. Hier
+  // nehmen wir trotzdem nur eine Datei entgegen – die UI entscheidet
+  // Multi-Delete ggf. spaeter.
+  //
+  // Guard: die gerade laufende Datei (`runningFilename`) wird NIE
+  // gesendet. Rueckgabe `null` bei Guard-Verletzung.
+  Future<int?> deleteFile(String filename) async {
+    if (_state != CanvasConnection.connected) {
+      _lastError = 'delete.not_connected';
+      notifyListeners();
+      return null;
+    }
+    if (runningFilename == filename) {
+      _lastError = 'delete.running_file';
+      notifyListeners();
+      return null;
+    }
+    try {
+      final r = await _client.deleteFile([filename]);
+      final code = ((r['result'] as Map?)?['error_code'] ?? -1) as int;
+      _lastError = code == 0 ? null : 'delete.error_code.$code';
+      notifyListeners();
+      return code;
+    } on TimeoutException {
+      _lastError = 'delete.timeout';
+      return null;
+    } catch (e) {
+      _lastError = e.toString();
+      return null;
     }
   }
 

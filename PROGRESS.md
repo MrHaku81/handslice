@@ -18,6 +18,129 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 18:00 UTC – M8: Dateien am Drucker + Live-Kamera (Pflicht 4+5)
+
+Neuer "Dateien"- und "Kamera"-Bereich im Reiter „Drucker". Nur zwei
+Methoden am echten Geraet live angetastet (1045/1046 lesen), alles
+andere baut Klaus selbst in der App.
+
+### Nachweislich
+
+**Teil A – Dateien**
+- Live-Pruefung 1045 + 1046 am idle Drucker:
+  - **1046 `{storage_media, filename}`**: `error_code=0`,
+    Felder `color_map, create_time, filename, last_print_time,
+    layer, print_time, size, total_filament_used, total_print_times`.
+    Belegt an `handslice_1793449708341.gcode` (221 kB, 100 Schichten).
+  - **1045 `{storage_media, file_name}`** (file_name **mit**
+    Unterstrich): bei kleiner Testdatei `error_code=1015
+    ThumbnailNotExist`, bei groesserer Datei
+    (`Elegoo-Bauplattenhalter-1.gcode`, 12 MB) `error_code=0` +
+    2 684 B base64-PNG im `thumbnail`-Feld.
+  - Rohantworten anonymisiert in `docs/networking-cc2.md`
+    Abschnitt M8.
+- Client-API in `app/lib/net/elegoo_cc2_client.dart`:
+  - `RemoteFile.fromJson(..)` liest jetzt die vollen 1044-Felder
+    (`layer`, `print_time`, `create_time`, `last_print_time`,
+    `total_filament_used`, `color_map[]`); neue Klasse
+    `ColorMapEntry`.
+  - `getFileThumbnail/getFileDetail/deleteFile` neu (Shape wie
+    oben, `deleteFile` sendet `file_path` als **Liste**).
+  - `probeFile`/`downloadFile` als duenne Alias auf die
+    vorhandenen Timelapse-Pfade (gleicher `/download`-Endpunkt).
+  - `getLivingVideoUrl()` fuer method 1042.
+- `PrinterState`:
+  - `runningFilename` aus `print_status.filename`.
+  - `startPrintFile(filename, …)` fuer vorhandene Dateien;
+    gleicher Preflight (ohne bounds) + delay_video-Logik wie
+    beim Upload-Flow.
+  - `deleteFile(filename)` mit Guards:
+    `not_connected`, `running_file`, Firmware-Error.
+- UI (`widgets/printer_files_panel.dart`): Karten pro Datei mit
+  Thumbnail (lazy via 1045), Groesse/Schichten/Druckzeit,
+  Farb-Chips aus `color_map`, "Currently printing"-Marker.
+  Aktionen Print/Download/Delete; Lauf-Datei bekommt
+  deaktivierten Delete-Button mit lokalisiertem Tooltip.
+  Download via geteiltem `_DownloadLimiter(maxConcurrent: 2)`
+  mit Head-Probe, Ziel `getExternalStorageDirectory()/
+  handslice-downloads/`.
+
+**Teil B – Kamera**
+- `widgets/mjpeg_viewer.dart`: eigener schlanker Decoder
+  (~230 LoC), parst `multipart/x-mixed-replace`, extrahiert
+  JPEG-Frames per `Content-Length`, rendert ueber
+  `Image.memory(..., gaplessPlayback: true)`. **Kein Fremd-
+  Paket** – F-Droid-tauglich, AGPL-3.0-kompatibel.
+- `widgets/printer_camera_panel.dart`: holt URL via 1042,
+  startet Stream nur wenn `visible && appResumed`.
+  Fehlerzustaende (kein URL, HTTP != 200, no-first-frame-10s,
+  Stream ended, SocketException) kommen als eindeutige
+  lokalisierte Texte – **nie** schwarzes Bild.
+  **Kein 1054-Call** (Block-A-Beleg: 1054 lehnt {enable} ab).
+- `screens/printer_screen.dart` ist jetzt ein 3-way
+  SegmentedButton (Dateien / Historie / Kamera). Screen hat
+  `WidgetsBindingObserver`-Hook fuer `_appResumed`; Section-
+  Wechsel + Lifecycle steuern zusammen den Kamera-Stream.
+
+**Tests (`flutter test` → 108/108 gruen, +9 ggue M7)**
+- `files_and_camera_test.dart`:
+  - Payload-Form 1047 (`file_path` als Liste), `RemoteFile.fromJson`,
+    `ThumbnailResult.ok`-Semantik (1015 → false), `LivingVideoResult.ok`.
+  - Delete-Guards: running_file, not_connected, erlaubter Fall.
+  - MJPEG-Dekoder: zwei Frames, byteweise fragmentierter Input
+    wird reassembliert.
+
+**Doku + Scrub**
+- Englischer Abschnitt
+  "M8 – File management + live camera (CC2 fw 02.01.01.07,
+  2026-10-31)" in `docs/networking-cc2.md` mit Rohantworten.
+- Scrub-Check (strict): 0 Treffer.
+
+### Ungeprueft
+
+- **Print/Download/Delete am echten Drucker in der App**:
+  macht Klaus beim naechsten Session. Die zwei lesen-only-
+  Methoden sind heute live belegt; mutierende Aufrufe nicht.
+- **MJPEG-Live gegen die echte Kamera**: Stream-Server-URL ist
+  per 1042 belegt (Block A), der Decoder ist nur gegen
+  synthetische Frames getestet (Unit-Test). Fehlerzweige wie
+  "Server haengt mitten im Stream" sind nicht am Geraet
+  gepruft.
+- **1046-Felder bei Multi-Color-Dateien**: `color_map` wurde
+  heute nur mit einem Eintrag (PLA) belegt; die UI unterstuetzt
+  mehrere Chips, aber eine Datei mit >1 Material war beim
+  Testlauf nicht angetippt.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+---
+
+## 2026-10-31 16:30 UTC – M7 Nachbesserungen am Geraet bestaetigt
+
+Klaus hat die M7-Nachbesserung mit App `aaea699` am echten CC2
+durchgespielt:
+
+### Nachweislich
+
+- **WLAN aus → ein: Reconnect sofort** (nicht mehr nach ~30 s
+  Backoff-Wartezeit). Der neue `connectivity_plus`-Hook aus
+  `main.dart` → `PrinterState.networkAvailability` →
+  `_triggerImmediateReconnect()` greift wie entworfen.
+- Preparing-Text und Reconnect-Flow-Test bleiben unveraendert.
+
+### Ungeprueft
+
+- Fehler-Banner-Trigger am Geraet weiterhin nicht ausloesbar
+  ohne echten Printer-Error.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+---
+
 ## 2026-10-31 16:15 UTC – M7-Nachbesserungen: OS-Netz-Signal, Preparing-Text, Reconnect-Flow-Test
 
 Klaus hat Pflicht 3 am Geraet (App 0c469228e5) durchgespielt:

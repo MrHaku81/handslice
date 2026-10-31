@@ -63,10 +63,86 @@ class CanvasSlot {
   String get slotLabel => 'A${trayId + 1}';
 }
 
+// Eintrag aus method 1044 (file_list[]). Felder gemaess
+// Live-Lesen 2026-10-31 (siehe docs/networking-cc2.md Abschnitt
+// "M8 – File listing + per-file reads").
 class RemoteFile {
-  RemoteFile({required this.filename, required this.sizeBytes});
+  RemoteFile({
+    required this.filename,
+    required this.sizeBytes,
+    this.layer = 0,
+    this.printTimeSec = 0,
+    this.createTime = 0,
+    this.lastPrintTime = 0,
+    this.totalFilamentUsedMm = 0,
+    this.colorMap = const <ColorMapEntry>[],
+  });
   final String filename;
   final int sizeBytes;
+  final int layer;
+  final int printTimeSec;
+  final int createTime;
+  final int lastPrintTime;
+  final double totalFilamentUsedMm;
+  final List<ColorMapEntry> colorMap;
+
+  static RemoteFile fromJson(Map j) {
+    final cm = (j['color_map'] as List?) ?? const [];
+    return RemoteFile(
+      filename: ((j['filename'] ?? '') as String),
+      sizeBytes: ((j['size'] ?? 0) as num).toInt(),
+      layer: ((j['layer'] ?? 0) as num).toInt(),
+      printTimeSec: ((j['print_time'] ?? 0) as num).toInt(),
+      createTime: ((j['create_time'] ?? 0) as num).toInt(),
+      lastPrintTime: ((j['last_print_time'] ?? 0) as num).toInt(),
+      totalFilamentUsedMm: ((j['total_filament_used'] ?? 0) as num).toDouble(),
+      colorMap: cm
+          .whereType<Map>()
+          .map((e) => ColorMapEntry.fromJson(Map<String, dynamic>.from(e)))
+          .toList(),
+    );
+  }
+}
+
+// Ein Eintrag im color_map-Array einer 1044/1046-Antwort.
+class ColorMapEntry {
+  const ColorMapEntry(
+      {required this.toolIndex,
+      required this.color,
+      required this.filamentType});
+  final int toolIndex;    // "t"
+  final String color;     // "#RRGGBB"
+  final String filamentType; // "PLA", "PETG", …
+
+  static ColorMapEntry fromJson(Map<String, dynamic> j) => ColorMapEntry(
+        toolIndex: ((j['t'] ?? 0) as num).toInt(),
+        color: (j['color'] ?? '') as String,
+        filamentType: (j['name'] ?? '') as String,
+      );
+}
+
+// Ergebnis von method 1045 (GetFileThumbnail). Bei fw 02.01.01.07
+// liefert nicht jede Datei ein Preview (siehe docs: Testfall
+// 2026-10-31, kleine Dateien → error_code=1015 ThumbnailNotExist).
+class ThumbnailResult {
+  const ThumbnailResult({required this.errorCode, this.base64Png});
+  final int errorCode;
+  final String? base64Png;
+  bool get ok => errorCode == 0 && (base64Png?.isNotEmpty ?? false);
+}
+
+// Ergebnis von method 1046 (GetFileDetail). Felder dieselben wie
+// im 1044-Listing + evtl. zusaetzliche. Live-Capture am
+// 2026-10-31 liefert color_map/create_time/filename/last_print_time/
+// layer/print_time/size/total_filament_used/total_print_times.
+class RemoteFileDetail {
+  const RemoteFileDetail({
+    required this.errorCode,
+    required this.file,
+  });
+  final int errorCode;
+  final RemoteFile file;
+  bool get ok => errorCode == 0;
 }
 
 // Phase 5a: ein Eintrag aus `method 1036` (`history_task_list[]`).
@@ -361,11 +437,64 @@ class ElegooCc2Client {
     final r = await _request(1044, {'storage_media': storageMedia});
     final files = (r['result']['file_list'] ?? const []) as List;
     return files
-        .map((e) => RemoteFile(
-              filename: ((e as Map)['filename'] ?? '') as String,
-              sizeBytes: ((e['size'] ?? 0) as num).toInt(),
-            ))
+        .whereType<Map>()
+        .map((e) => RemoteFile.fromJson(e))
         .toList();
+  }
+
+  // method 1045 – Thumbnail (base64 PNG). Shape: Orca-UI nutzt
+  // `file_name` (mit Unterstrich), docs/networking-cc2.md
+  // Abschnitt M7-Tabelle. Daniels Form ist identisch; Live-Beleg
+  // 2026-10-31 (RAW 1045 fuer "Elegoo-Bauplattenhalter-1.gcode").
+  Future<ThumbnailResult> getFileThumbnail(
+    String filename, {
+    String storageMedia = 'local',
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final r = await _request(1045, {
+      'storage_media': storageMedia,
+      'file_name': filename,
+    }, timeout: timeout);
+    final res = (r['result'] ?? const <String, dynamic>{}) as Map;
+    return ThumbnailResult(
+      errorCode: ((res['error_code'] ?? -1) as num).toInt(),
+      base64Png: (res['thumbnail'] as String?),
+    );
+  }
+
+  // method 1046 – Datei-Detail. Shape: Orca-UI nutzt `filename`
+  // (OHNE Unterstrich – anders als 1045). Live-Beleg 2026-10-31.
+  Future<RemoteFileDetail> getFileDetail(
+    String filename, {
+    String storageMedia = 'local',
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final r = await _request(1046, {
+      'storage_media': storageMedia,
+      'filename': filename,
+    }, timeout: timeout);
+    final res = ((r['result'] ?? const <String, dynamic>{}) as Map)
+        .cast<String, dynamic>();
+    final code = ((res['error_code'] ?? -1) as num).toInt();
+    return RemoteFileDetail(
+      errorCode: code,
+      file: RemoteFile.fromJson(res),
+    );
+  }
+
+  // method 1047 – Datei(en) loeschen. Shape auf fw 02.01.01.07
+  // am 2026-10-31 verifiziert: `file_path` MUSS eine Liste von
+  // Dateinamen sein. Orca-UI (`Mte` + oberer Wrap `Ve.push(De)`)
+  // sendet genau das; Daniels filename-String-Form liefert 1003.
+  Future<Map<String, dynamic>> deleteFile(
+    List<String> filenames, {
+    String storageMedia = 'local',
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    return _request(1047, {
+      'storage_media': storageMedia,
+      'file_path': filenames,
+    }, timeout: timeout);
   }
 
   // Baut die method-1020-Payload. `delayVideo` nur mitsenden, wenn
@@ -473,6 +602,20 @@ class ElegooCc2Client {
   Future<Map<String, dynamic>> setLight(bool power,
       {Duration timeout = const Duration(seconds: 10)}) async {
     return _request(1029, buildLightParams(power), timeout: timeout);
+  }
+
+  // method 1042 GetLivingVideoUrl – reiner URL-Getter (ohne Params).
+  // Block-A-Beleg 2026-10-31: Antwort ist `{error_code, url}`, der
+  // MJPEG-Server auf :8080 laeuft dauerhaft. Pflicht-5-Vorgabe:
+  // kein 1054-Call.
+  Future<LivingVideoResult> getLivingVideoUrl(
+      {Duration timeout = const Duration(seconds: 10)}) async {
+    final r = await _request(1042, null, timeout: timeout);
+    final res = (r['result'] ?? const <String, dynamic>{}) as Map;
+    return LivingVideoResult(
+      errorCode: ((res['error_code'] ?? -1) as num).toInt(),
+      url: (res['url'] ?? '') as String,
+    );
   }
 
   Future<void> ping() async {
@@ -656,6 +799,34 @@ class ElegooCc2Client {
     }
   }
 
+  // Generische Head-Probe fuer /download. Semantik wie
+  // probeTimelapse, aber neutral benannt – Phase 5a-Pfad fuer
+  // G-Code-Dateien an derselben URL.
+  Future<TimelapseProbe> probeFile(
+    String remoteName, {
+    Duration timeout = const Duration(seconds: 2),
+  }) =>
+      probeTimelapse(remoteName, timeout: timeout);
+
+  // Generischer GET /download → Bytes-Stream mit Fortschritt.
+  // Nutzt denselben /download-Endpunkt wie Zeitraffer-Download.
+  // Rueckgabe: komplette Bytes; der Caller schreibt sie in die
+  // Zieldatei (SAF/Platform-Channel bleibt im UI-Layer).
+  Future<List<int>> downloadFile(
+    String remoteName, {
+    int? expectedBytes,
+    DownloadProgress? onProgress,
+    Duration headTimeout = const Duration(seconds: 3),
+    Duration overallTimeout = const Duration(seconds: 300),
+  }) =>
+      downloadTimelapse(
+        remoteName,
+        expectedBytes: expectedBytes,
+        onProgress: onProgress,
+        headTimeout: headTimeout,
+        overallTimeout: overallTimeout,
+      );
+
   Uri _downloadUri(String fileName) {
     final ip = _ip!;
     final code = _accessCode!;
@@ -718,6 +889,14 @@ class ElegooCc2Client {
     const chars = '0123456789abcdef';
     return List.generate(len, (_) => chars[rand.nextInt(chars.length)]).join();
   }
+}
+
+// Antwort auf method 1042 GetLivingVideoUrl.
+class LivingVideoResult {
+  const LivingVideoResult({required this.errorCode, required this.url});
+  final int errorCode;
+  final String url;
+  bool get ok => errorCode == 0 && url.isNotEmpty;
 }
 
 class ElegooAuthException implements Exception {

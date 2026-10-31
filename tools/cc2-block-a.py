@@ -330,6 +330,52 @@ def cmd_delete(args):
         cli.disconnect()
 
 
+def cmd_thumbnail(args):
+    """1045 GetFileThumbnail – Orca-Shape {storage_media, file_name}."""
+    env = load_env()
+    cli, sn = session({1045}, env)
+    try:
+        rid = cli.publish_method(1045, {
+            "storage_media": args.storage,
+            "file_name": args.filename,
+        })
+        print(f"PUB 1045 id={rid} file_name={args.filename!r}")
+        reply = cli.wait_reply(1045, timeout=15)
+        if reply is None:
+            sys.exit("1045 timeout.")
+        # Fuer die Doku: thumbnail-Feld kuerzen, es ist base64 (bis zu
+        # ~hunderte kB). Volltext bleibt in logs/cc2-sniff-*.jsonl.
+        res = reply.get("result", {}) if isinstance(reply, dict) else {}
+        thumb = res.get("thumbnail")
+        preview = res.copy() if isinstance(res, dict) else {}
+        if isinstance(thumb, str):
+            preview["thumbnail"] = f"<base64 len={len(thumb)}>"
+        preview_wrap = {k: v for k, v in reply.items() if k != "result"}
+        preview_wrap["result"] = preview
+        dump("RAW 1045 (anonymized, thumbnail base64 gekuerzt)",
+             preview_wrap, sn, env)
+    finally:
+        cli.disconnect()
+
+
+def cmd_detail(args):
+    """1046 GetFileDetail – Orca-Shape {storage_media, filename}."""
+    env = load_env()
+    cli, sn = session({1046}, env)
+    try:
+        rid = cli.publish_method(1046, {
+            "storage_media": args.storage,
+            "filename": args.filename,
+        })
+        print(f"PUB 1046 id={rid} filename={args.filename!r}")
+        reply = cli.wait_reply(1046, timeout=15)
+        if reply is None:
+            sys.exit("1046 timeout.")
+        dump("RAW 1046 (anonymized)", reply, sn, env)
+    finally:
+        cli.disconnect()
+
+
 def cmd_camera_get(args):
     env = load_env()
     cli, sn = session({1042}, env)
@@ -385,6 +431,14 @@ def main():
     d.add_argument("--as-array", action="store_true",
                    help="Send file_path as [filename] instead of string")
     d.set_defaults(func=cmd_delete)
+    th = sub.add_parser("thumbnail")
+    th.add_argument("filename")
+    th.add_argument("--storage", default="local")
+    th.set_defaults(func=cmd_thumbnail)
+    de = sub.add_parser("detail")
+    de.add_argument("filename")
+    de.add_argument("--storage", default="local")
+    de.set_defaults(func=cmd_detail)
     sub.add_parser("camera-get").set_defaults(func=cmd_camera_get)
     cs = sub.add_parser("camera-set")
     cs.add_argument("enable", type=int, choices=(0, 1))

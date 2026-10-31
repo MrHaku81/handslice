@@ -1219,6 +1219,192 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Reconnect failed — next attempt in {seconds}s.'**
   String reconnectBannerBackoff(int seconds);
+
+  /// No description provided for @printerSectionFiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Files'**
+  String get printerSectionFiles;
+
+  /// No description provided for @printerSectionHistory.
+  ///
+  /// In en, this message translates to:
+  /// **'History'**
+  String get printerSectionHistory;
+
+  /// No description provided for @printerSectionCamera.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera'**
+  String get printerSectionCamera;
+
+  /// No description provided for @printerFilesEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No files on the printer yet.'**
+  String get printerFilesEmpty;
+
+  /// No description provided for @printerFilesRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get printerFilesRefresh;
+
+  /// No description provided for @printerFilesSizeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Size'**
+  String get printerFilesSizeLabel;
+
+  /// No description provided for @printerFilesLayersLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Layers'**
+  String get printerFilesLayersLabel;
+
+  /// No description provided for @printerFilesPrintTimeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Print time'**
+  String get printerFilesPrintTimeLabel;
+
+  /// No description provided for @printerFilesCurrentPrint.
+  ///
+  /// In en, this message translates to:
+  /// **'Currently printing — cannot delete'**
+  String get printerFilesCurrentPrint;
+
+  /// No description provided for @printerFilesPrintButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Print'**
+  String get printerFilesPrintButton;
+
+  /// No description provided for @printerFilesDownloadButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get printerFilesDownloadButton;
+
+  /// No description provided for @printerFilesDeleteButton.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete'**
+  String get printerFilesDeleteButton;
+
+  /// No description provided for @printerFilesDeleteBlockedRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'Cannot delete the file of the running print'**
+  String get printerFilesDeleteBlockedRunning;
+
+  /// No description provided for @printerFilesDeleteConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete this file from the printer?'**
+  String get printerFilesDeleteConfirmTitle;
+
+  /// No description provided for @printerFilesDeleteConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This will remove {name} from the printer. It cannot be undone from the app.'**
+  String printerFilesDeleteConfirmBody(String name);
+
+  /// No description provided for @printerFilesDeleteConfirmYes.
+  ///
+  /// In en, this message translates to:
+  /// **'Yes, delete'**
+  String get printerFilesDeleteConfirmYes;
+
+  /// No description provided for @printerFilesDeleteConfirmNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep file'**
+  String get printerFilesDeleteConfirmNo;
+
+  /// No description provided for @printerFilesDownloadDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved to {path}'**
+  String printerFilesDownloadDone(String path);
+
+  /// No description provided for @printerFilesDownloadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Download failed: {msg}'**
+  String printerFilesDownloadFailed(String msg);
+
+  /// No description provided for @printerFilesDownloadUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'File not downloadable right now (head-probe failed).'**
+  String get printerFilesDownloadUnavailable;
+
+  /// No description provided for @printerFilesPrintTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Print this file?'**
+  String get printerFilesPrintTitle;
+
+  /// No description provided for @printerFilesPrintSlot.
+  ///
+  /// In en, this message translates to:
+  /// **'Current slot'**
+  String get printerFilesPrintSlot;
+
+  /// No description provided for @printerFilesPrintStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Start print'**
+  String get printerFilesPrintStart;
+
+  /// No description provided for @printerFilesPrintCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get printerFilesPrintCancel;
+
+  /// No description provided for @printerFilesVisualCheckHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep an eye on the first layer at the printer.'**
+  String get printerFilesVisualCheckHint;
+
+  /// No description provided for @printerCameraHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Live camera'**
+  String get printerCameraHeading;
+
+  /// No description provided for @printerCameraLoading.
+  ///
+  /// In en, this message translates to:
+  /// **'Connecting to camera…'**
+  String get printerCameraLoading;
+
+  /// No description provided for @printerCameraPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Camera off (section hidden or app in background).'**
+  String get printerCameraPaused;
+
+  /// No description provided for @printerCameraNoUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not get the stream URL from the printer.'**
+  String get printerCameraNoUrl;
+
+  /// No description provided for @printerCameraNoUrlDetail.
+  ///
+  /// In en, this message translates to:
+  /// **'method 1042 failed: {detail}'**
+  String printerCameraNoUrlDetail(String detail);
+
+  /// No description provided for @printerCameraStreamError.
+  ///
+  /// In en, this message translates to:
+  /// **'Stream error: {detail}'**
+  String printerCameraStreamError(String detail);
 }
 
 class _AppLocalizationsDelegate

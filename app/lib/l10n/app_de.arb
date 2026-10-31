@@ -206,5 +206,39 @@
 
   "reconnectBannerLost": "Verbindung verloren – verbinde neu …",
   "reconnectBannerRetrying": "Erneuter Verbindungsversuch in {seconds} s …",
-  "reconnectBannerBackoff": "Verbindung fehlgeschlagen – nächster Versuch in {seconds} s."
+  "reconnectBannerBackoff": "Verbindung fehlgeschlagen – nächster Versuch in {seconds} s.",
+
+  "printerSectionFiles": "Dateien",
+  "printerSectionHistory": "Historie",
+  "printerSectionCamera": "Kamera",
+
+  "printerFilesEmpty": "Noch keine Dateien am Drucker.",
+  "printerFilesRefresh": "Neu laden",
+  "printerFilesSizeLabel": "Größe",
+  "printerFilesLayersLabel": "Schichten",
+  "printerFilesPrintTimeLabel": "Druckzeit",
+  "printerFilesCurrentPrint": "Wird gerade gedruckt – nicht löschbar",
+  "printerFilesPrintButton": "Drucken",
+  "printerFilesDownloadButton": "Herunterladen",
+  "printerFilesDeleteButton": "Löschen",
+  "printerFilesDeleteBlockedRunning": "Datei des laufenden Drucks kann nicht gelöscht werden",
+  "printerFilesDeleteConfirmTitle": "Datei vom Drucker löschen?",
+  "printerFilesDeleteConfirmBody": "Entfernt {name} vom Drucker. Kann aus der App nicht rückgängig gemacht werden.",
+  "printerFilesDeleteConfirmYes": "Ja, löschen",
+  "printerFilesDeleteConfirmNo": "Behalten",
+  "printerFilesDownloadDone": "Gespeichert unter {path}",
+  "printerFilesDownloadFailed": "Download fehlgeschlagen: {msg}",
+  "printerFilesDownloadUnavailable": "Datei gerade nicht abrufbar (Head-Probe fehlgeschlagen).",
+  "printerFilesPrintTitle": "Diese Datei drucken?",
+  "printerFilesPrintSlot": "Aktuelles Fach",
+  "printerFilesPrintStart": "Druck starten",
+  "printerFilesPrintCancel": "Abbrechen",
+  "printerFilesVisualCheckHint": "Erste Schicht am Drucker im Auge behalten.",
+
+  "printerCameraHeading": "Live-Kamera",
+  "printerCameraLoading": "Verbindung zur Kamera …",
+  "printerCameraPaused": "Kamera aus (Bereich nicht sichtbar oder App im Hintergrund).",
+  "printerCameraNoUrl": "Konnte die Stream-URL vom Drucker nicht laden.",
+  "printerCameraNoUrlDetail": "method 1042 fehlgeschlagen: {detail}",
+  "printerCameraStreamError": "Stream-Fehler: {detail}"
 }

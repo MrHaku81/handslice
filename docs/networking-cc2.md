@@ -3285,3 +3285,135 @@ App commit `0c469228e5` installed on the Poco X3 Pro.
      — the reconnect must **not** replay any user command.
   Separate cases cover the connectivity-up-signal shortcut and
   the "spurious up-signal while connected" idle path.
+
+---
+
+## M8 – File management + live camera (CC2 fw 02.01.01.07, 2026-10-31)
+
+### Live read-only verification of 1045 + 1046 (step 2 of the brief)
+
+Klaus at the printer, idle. Sniff in
+`logs/cc2-sniff-2026-10-31-*.jsonl`. Only two methods issued.
+
+**1046 GetFileDetail** (Orca-shape: `{storage_media, filename}` –
+`filename` without underscore):
+
+```json
+{
+  "id": …,
+  "method": 1046,
+  "result": {
+    "color_map": [{"color": "#F2754E", "name": "PLA", "t": 0}],
+    "create_time": 1793449708,
+    "error_code": 0,
+    "filename": "handslice_1793449708341.gcode",
+    "last_print_time": 0,
+    "layer": 100,
+    "print_time": 565,
+    "size": 221143,
+    "total_filament_used": 3.52,
+    "total_print_times": 0
+  }
+}
+```
+
+**1045 GetFileThumbnail** (Orca-shape: `{storage_media, file_name}` –
+`file_name` **with** underscore):
+
+- For the small test cube (`handslice_1793449708341.gcode`, 221 kB,
+  100 layers) the firmware returned `error_code = 1015
+  ThumbnailNotExist`. No preview was embedded during that slice.
+- For a larger file with a bundled thumbnail
+  (`Elegoo-Bauplattenhalter-1.gcode`, 12 MB): `error_code = 0`,
+  `thumbnail` field carried a 2 684-byte base64 PNG.
+
+The 1045 vs. 1046 key-naming asymmetry (`file_name` vs `filename`)
+is as documented in the M7 per-method table and matches the
+captured UI payloads.
+
+### App – `app/lib/net/elegoo_cc2_client.dart`
+
+- `RemoteFile.fromJson(..)` now carries the full 1044 payload
+  shape (`layer`, `print_time`, `create_time`, `last_print_time`,
+  `total_filament_used`, `color_map[]`). `ColorMapEntry` wraps the
+  per-slot tuple.
+- `getFileThumbnail(filename)` → `ThumbnailResult{errorCode,
+  base64Png?}`. `ok` requires `error_code == 0` AND non-empty
+  base64 — covers the fw 02.01.01.07 "ThumbnailNotExist" case
+  (1015).
+- `getFileDetail(filename)` → `RemoteFileDetail{errorCode, file}`.
+- `deleteFile(List<String> filenames)` → `method 1047` with
+  `file_path` as a **list** (Block-A ground truth 2026-10-31).
+- `probeFile`/`downloadFile` are thin aliases for the existing
+  `probeTimelapse`/`downloadTimelapse` on the shared `/download`
+  endpoint.
+- `getLivingVideoUrl()` → `LivingVideoResult{errorCode, url}`.
+  No `1054` call (Block A proved it rejects `{enable}` on this
+  firmware and the MJPEG server runs permanently anyway).
+
+### App – `app/lib/state/printer_state.dart`
+
+- New `runningFilename` getter reads
+  `print_status.filename` from the aggregated live state.
+- `startPrintFile(filename, …)` runs the same preflight +
+  `startPrint` path as the upload-driven flow, minus the
+  bounds-check (that is only known at upload time). Reuses the
+  current tray assignment and respects `supportsTimelapse`.
+- `deleteFile(filename)` guards:
+  - not connected → `delete.not_connected`;
+  - `runningFilename == filename` → `delete.running_file`
+    (the UI greys the delete button in that row as well);
+  - firmware rejection → `delete.error_code.<n>` surfaces to the
+    user via `lastError`.
+
+### UI – "Drucker" tab now a 3-way SegmentedButton
+
+Sections: **Files · History · Camera**. Switching sections is
+what gates the camera stream — only `camera` section + app
+`AppLifecycleState.resumed` enables the MJPEG viewer.
+`WidgetsBindingObserver` on the screen keeps `_appResumed` in
+sync; backgrounding the app stops the viewer within one frame.
+
+### UI – `widgets/printer_files_panel.dart`
+
+- One card per file: thumbnail (lazy via 1045, falls back to a
+  neutral icon when 1015), filename, size, layers, print time,
+  per-slot color chips, "currently printing" badge when the row
+  matches `runningFilename`.
+- Actions: **Print** (opens a settings dialog mirroring the
+  upload-driven print flow + visual-check hint), **Download**
+  (shared `_DownloadLimiter(maxConcurrent: 2)` from the history
+  panel, head-probe first, saves to
+  `getExternalStorageDirectory()/handslice-downloads/`),
+  **Delete** (confirmation dialog, then `deleteFile`, then
+  automatic 1044 re-list).
+- Running-print file row: Delete button disabled with a
+  localised tooltip; Print button also hidden/disabled.
+
+### UI – `widgets/printer_camera_panel.dart` + `widgets/mjpeg_viewer.dart`
+
+- `getLivingVideoUrl` on section entry; errors surface as
+  explicit text ("Could not get the stream URL", "method 1042
+  failed: …"), never a black box.
+- `MjpegViewer` is a lean own implementation (~230 LoC): parses
+  `multipart/x-mixed-replace; boundary=frame`, extracts JPEG
+  frames by `Content-Length`, renders via
+  `Image.memory(..., gaplessPlayback: true)`. No external
+  package → F-Droid-friendly, AGPL-3.0 compatible.
+- Lifecycle: viewer `active` prop is driven by
+  `visible && appResumed`. On transition to `false` the HTTP
+  connection is force-closed; on return `true` a fresh request
+  is started.
+- Error states (connect fail, no first-frame within 10 s, server
+  closed stream, HTTP ≠ 200 / wrong Content-Type) each produce a
+  distinct localised message.
+
+### Scope kept narrow
+
+Per Klaus's rule, the only methods issued to the real printer
+during this work were the two live reads above (1045/1046). All
+mutating operations — print start, download, delete, light,
+camera stream open — are triggered **by Klaus in the app**, not
+by any script in this repo. `tools/cc2-block-a.py` carries the
+new `thumbnail` and `detail` subcommands for repeatable
+verification.
