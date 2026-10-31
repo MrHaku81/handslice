@@ -18,6 +18,46 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 20:30 UTC – Pflicht 7: flutter_scene chosen, memory refactor, pan fix
+
+Klaus measured on the Poco (profile build, Impeller OpenGL ES):
+
+- notched_cube: fps 114, p95 12 ms
+- 100 k: load 31 ms, build 642 ms, vram 9.2 MB, fps 138, p95 9.4 ms, Δload 185 MB
+- 300 k: load 66 ms, build 2149 ms, vram 27.5 MB, fps 137, p95 10.4 ms, Δload 559 MB
+- 500 k: load 87 ms, build 3964 ms, vram 45.8 MB, fps 46, p95 23.4 ms, Δload 896 MB
+
+Decision: **flutter_scene is the plate renderer.** Even on a
+Vulkan-denylisted Adreno 640 the benchmark holds 60+ fps up to
+300 k and stays interactive at 500 k. The Canvas comparison was
+skipped — the flutter_scene numbers were already clearly good
+enough to decide.
+
+Side-finding: ~1.8 KB RSS per triangle during the build step,
+GPU VRAM only a tenth of that. Root cause: the GeometryBuilder
+path held every attribute stream in three forms (List<double>,
+Float32List, packed interleaved) on the Dart heap until the node
+was attached.
+
+Changes in this run:
+
+- `_rebuildSceneUnsafe` drops the GeometryBuilder path and feeds
+  `MeshGeometry.fromArrays` directly with the HSPM's own
+  Float32Lists (zero-copy for positions and normals). Vertex
+  colors (RGBA, Lambert pre-baked) are a single Float32List.
+  `retainCpuData: false` lets the CPU streams go after the GPU
+  upload. Pass-2 numbers in `docs/plate-view-benchmark.md` are
+  staged as a blank table — Klaus fills after the next
+  device run.
+- Two-finger pan: flipped the sign on both axes so the point
+  under the fingers tracks the fingers (Blender / Fusion
+  convention).
+- `docs/plate-view-benchmark.md`: Pass-1 table filled, decision
+  bullet committed, Pass-2 table placeholder, plus two drafts —
+  automatic LOD by device RAM (not built yet; thresholds settle
+  after Pass 2) and a "System requirements" draft for the user
+  docs.
+
 ## 2026-10-31 19:50 UTC – Pflicht 7 benchmark: profile build + Vulkan/Adreno-Fundstelle
 
 Debug-APK zeigt beim leeren Benchmark-Screen auf dem Poco fps=24,

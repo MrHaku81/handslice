@@ -309,45 +309,58 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
 
   void _rebuildSceneUnsafe(HspmFile mesh) {
     _scene.root.children.clear();
-    if (_mode == RendererMode.flutterScene) {
-      // 1. The bed plate (CC2: 256×256 at z=0). Flat grey, slight
-      //    key-light shading baked in so it reads as a surface,
-      //    not a flat sticker.
-      _addPlate();
-      // 2. Each volume's triangle soup, with Lambert shading
-      //    pre-computed per vertex into the per-vertex color
-      //    slot. UnlitMaterial (vertexColorWeight=1) multiplies
-      //    baseColorFactor * vertexColor, so flipping to a lit
-      //    look costs no extra render-time work.
-      for (final vol in mesh.volumes) {
-        final gb = fscene.GeometryBuilder(deduplicate: false);
-        final tint = _colorFor(vol.filamentIdx);
-        for (int t = 0; t < vol.triangleCount; ++t) {
-          final base = t * 9;
-          final n = vm.Vector3(
-              vol.normals[base], vol.normals[base + 1], vol.normals[base + 2]);
-          final litRgb = _lambertShade(tint, n);
-          gb.normal(n);
-          gb.color(litRgb);
-          final i0 = gb.addVertex(vm.Vector3(
-              vol.positions[base],     vol.positions[base + 1], vol.positions[base + 2]));
-          final i1 = gb.addVertex(vm.Vector3(
-              vol.positions[base + 3], vol.positions[base + 4], vol.positions[base + 5]));
-          final i2 = gb.addVertex(vm.Vector3(
-              vol.positions[base + 6], vol.positions[base + 7], vol.positions[base + 8]));
-          gb.addTriangle(i0, i1, i2);
-        }
-        final geom = gb.build();
-        // baseColor white: the per-vertex color already carries
-        // tint and shading, so UnlitMaterial just lets it pass.
-        final mat = fscene.UnlitMaterial()
-          ..baseColorFactor = vm.Vector4(1, 1, 1, 1);
-        _scene.add(fscene.Node(name: 'vol_${vol.filamentIdx}',
-            mesh: fscene.Mesh(geom, mat)));
+    if (_mode != RendererMode.flutterScene) return;
+    // 1. The CC2 bed (256×256 at z=0). Only four vertices, so we
+    //    keep using GeometryBuilder for brevity.
+    _addPlate();
+    // 2. Each volume: build the vertex streams directly as
+    //    Float32Lists and feed MeshGeometry.fromArrays with
+    //    retainCpuData=false. This bypasses GeometryBuilder's
+    //    List<double> intermediates (which, for 500 k tris, were
+    //    the dominant allocation in the earlier `GeometryBuilder`
+    //    path — see `docs/plate-view-benchmark.md`). The HSPM
+    //    buffers are already Float32List, so positions and
+    //    normals are reused in place without copy.
+    for (final vol in mesh.volumes) {
+      final nTris = vol.triangleCount;
+      if (nTris == 0) continue;
+      final tint = _colorFor(vol.filamentIdx);
+      final tintR = tint.r, tintG = tint.g, tintB = tint.b;
+      final lx = _keyLight.x, ly = _keyLight.y, lz = _keyLight.z;
+      final a = _ambient;
+      final b = 1.0 - a;
+      final nVerts = nTris * 3;
+      final colors = Float32List(nVerts * 4);
+      final normals = vol.normals;
+      // One Lambert factor per triangle (flat shading), replicated
+      // across its three vertices.
+      for (int t = 0; t < nTris; ++t) {
+        final nBase = t * 9;
+        final nx = normals[nBase];
+        final ny = normals[nBase + 1];
+        final nz = normals[nBase + 2];
+        final dot = nx * lx + ny * ly + nz * lz;
+        final k = a + b * (dot < 0 ? -dot : dot);
+        final r = tintR * k, g = tintG * k, bl = tintB * k;
+        final cBase = t * 12;
+        colors[cBase     ] = r; colors[cBase +  1] = g;
+        colors[cBase +  2] = bl; colors[cBase +  3] = 1.0;
+        colors[cBase +  4] = r; colors[cBase +  5] = g;
+        colors[cBase +  6] = bl; colors[cBase +  7] = 1.0;
+        colors[cBase +  8] = r; colors[cBase +  9] = g;
+        colors[cBase + 10] = bl; colors[cBase + 11] = 1.0;
       }
+      final geom = fscene.MeshGeometry.fromArrays(
+        positions: vol.positions,  // reused in place
+        normals: normals,          // reused in place
+        colors: colors,
+        retainCpuData: false,      // release CPU streams after GPU upload
+      );
+      final mat = fscene.UnlitMaterial()
+        ..baseColorFactor = vm.Vector4(1, 1, 1, 1);
+      _scene.add(fscene.Node(name: 'vol_${vol.filamentIdx}',
+          mesh: fscene.Mesh(geom, mat)));
     }
-    // Canvas-mode doesn't touch the scene graph; it reads
-    // `_mesh.volumes` directly in CustomPainter.
   }
 
   // World-space key light (down-and-forward, Z-up world). Values
@@ -435,8 +448,10 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
             -math.sin(_pitch) * math.sin(_yaw),
              math.sin(_pitch) * math.cos(_yaw),
              math.cos(_pitch));
-        _panOffset += right * (-d.focalPointDelta.dx * k)
-                    + up    * ( d.focalPointDelta.dy * k);
+        // Drag the scene with the fingers: target moves along the
+        // finger direction so the point under the fingers tracks.
+        _panOffset += right * (d.focalPointDelta.dx  * k)
+                    + up    * (-d.focalPointDelta.dy * k);
       });
     }
   }

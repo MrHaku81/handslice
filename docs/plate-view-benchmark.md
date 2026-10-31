@@ -61,8 +61,10 @@ io.flutter.embedding.android.EnableFlutterGPU metadata key to true
 in the AndroidManifest.xml
 ```
 
-For the benchmark we set the key **only in the debug manifest**
-(`app/android/app/src/debug/AndroidManifest.xml`):
+For the benchmark we set the key in the **debug and profile**
+manifests only
+(`app/android/app/src/debug/AndroidManifest.xml`,
+`app/android/app/src/profile/AndroidManifest.xml`):
 
 ```xml
 <application>
@@ -72,8 +74,11 @@ For the benchmark we set the key **only in the debug manifest**
 </application>
 ```
 
-Release builds stay untouched; whether we flip the switch in the
-main manifest is a decision we make after this benchmark lands.
+Release builds stay untouched; the production decision follows the
+benchmark results below. The debug build only ran the empty scene at
+~24 fps (JIT + Impeller shader warm-up), so the numbers below were
+taken from `--profile` builds, which run the same AOT Dart code and
+Impeller pipeline a release build would.
 
 If the key is missing at runtime (or Flutter GPU rejects the device
 for some other reason), the benchmark screen catches the exception,
@@ -124,43 +129,104 @@ certainly do better. If it struggles, we still don't know whether
 Vulkan would save it — that would need a second measurement on an
 Adreno-660-or-newer device.
 
-## Measurement table (fill after the Poco run)
+## Measurement results — Poco X3 Pro, Impeller OpenGL ES
 
-The Poco X3 Pro (Adreno 619, Android 12, API 31) should default to
-Impeller Vulkan.
+Device: Poco X3 Pro, Snapdragon 860, Adreno 640, Android 12
+(API 31). Profile APK commit `1b17e4215c`. Backend reported as
+Impeller OpenGL ES (per the Adreno-≤650 Vulkan denylist above).
+Test models: an Auryn-sized STL re-exported from `handslice-cli
+--export-preview-mesh --simplify N` at 100 / 300 / 500 k targets,
+plus the 24-triangle notched cube. The model source stays on
+Klaus' AMR5 (not in the repo), only the numbers come back.
 
-| Model               | Tris   | Renderer   | load  | build | vram  | fps_avg | p95_frame | rss    | Δload | backend     |
-|---------------------|--------|------------|-------|-------|-------|---------|-----------|--------|-------|-------------|
-| notched_cube        |     24 | flutter_scene |    |       |       |         |           |        |       |             |
-| notched_cube        |     24 | canvas     |       |       |       |         |           |        |       | n/a (Dart)  |
-| mid_model (100 k)   | ~100 k | flutter_scene |    |       |       |         |           |        |       |             |
-| mid_model (100 k)   | ~100 k | canvas     |       |       |       |         |           |        |       | n/a (Dart)  |
-| big_model (300 k)   | ~300 k | flutter_scene |    |       |       |         |           |        |       |             |
-| big_model (300 k)   | ~300 k | canvas     |       |       |       |         |           |        |       | n/a (Dart)  |
-| big_model (500 k)   | ~500 k | flutter_scene |    |       |       |         |           |        |       |             |
-| big_model (500 k)   | ~500 k | canvas     |       |       |       |         |           |        |       | n/a (Dart)  |
+### Pass 1 — original GeometryBuilder path
 
-Big model source stays on Klaus' machine (not in the repo) — only
-the numbers above come back.
+| Model         | Tris    | load   | build    | vram    | fps_avg | p95_frame | Δload RSS | notes                                   |
+|---------------|---------|--------|----------|---------|---------|-----------|-----------|-----------------------------------------|
+| notched_cube  |     24  |    —   |     —    |   —     |  114    |  12 ms    |     —     | small; smooth                           |
+| big_model     | 100 k   |  31 ms |   642 ms |  9.2 MB |  138    |  9.4 ms   |  185 MB   | smooth                                  |
+| big_model     | 300 k   |  66 ms |  2149 ms | 27.5 MB |  137    | 10.4 ms   |  559 MB   | smooth                                  |
+| big_model     | 500 k   |  87 ms |  3964 ms | 45.8 MB |   46    | 23.4 ms   |  896 MB   | still interactive, build dominates      |
 
-## Recommendation framework
+Pattern: ~1.8 KB resident per triangle on the Dart heap for the
+build step; GPU VRAM is a tenth of that. The dominant cost was the
+`GeometryBuilder` → `Float32List.fromList` → packed-interleaved
+path keeping multiple copies of every attribute on the CPU.
 
-To be committed to a bullet after the Poco numbers are in:
+(Canvas.drawVertices comparison was skipped at this point — the
+flutter_scene numbers were already clearly good enough to decide.)
 
-- **If `flutter_scene` holds ≥ 50 fps at 300 k and ≥ 30 fps at
-  500 k** → use `flutter_scene` as the only plate renderer. Keep
-  the `Canvas.drawVertices` path alive only for widget-test
-  rendering. Soft-cap the preview at 500 k triangles (the CLI
-  already simplifies above that).
-- **If `flutter_scene` holds 60 fps at 100 k but drops below 20 fps
-  by 300 k** → use `flutter_scene` but cap plate preview at
-  ~150 k; auto-call `--simplify` with a tighter target before
-  export. Document the cap in `architecture.md`.
-- **If `flutter_scene` fails to initialise on the Poco (Vulkan
-  context creation fails or shaders don't compile)** → ship
-  `Canvas.drawVertices` as the production renderer; keep
-  `flutter_scene` as a build-time opt-in. Draft an upstream issue
-  under `docs/upstream/` with the reproduction (stub below).
+### Pass 2 — direct `MeshGeometry.fromArrays`, `retainCpuData: false`
+
+(Updated after Klaus re-runs on the new APK; builder path replaced
+with a direct upload of the HSPM Float32Lists.)
+
+| Model         | Tris    | load | build | vram  | fps_avg | p95_frame | Δload RSS |
+|---------------|---------|------|-------|-------|---------|-----------|-----------|
+| notched_cube  |     24  |      |       |       |         |           |           |
+| big_model     | 100 k   |      |       |       |         |           |           |
+| big_model     | 300 k   |      |       |       |         |           |           |
+| big_model     | 500 k   |      |       |       |         |           |           |
+
+## Decision — `flutter_scene` is the plate renderer
+
+Even on an Adreno-640 Vulkan-denylisted device the baseline run
+holds 60+ fps up to 300 k triangles and stays interactive at 500 k
+(46 fps avg, 23 ms p95). The only pain point was the build-step
+RAM footprint, which Pass 2 addresses on the Dart side.
+
+Consequences for the rest of the app:
+
+- `flutter_scene: 0.24.3` becomes the production plate-view
+  renderer. The release manifest gets the Flutter-GPU opt-in flag
+  once the main plate view (not just the benchmark) is wired up.
+- The `Canvas.drawVertices` fallback stays in the tree, gated to
+  the benchmark screen only, as a readable Dart-only reference
+  rasterizer. It is not shipped as a user-facing option — the
+  benchmark did not need it to decide.
+- The CLI's `--simplify` is the knob we use to stay under the
+  device's triangle budget. The next section proposes a draft
+  for picking that budget automatically.
+
+## Draft — automatic LOD by device RAM
+
+(Proposal only; thresholds settle after Pass 2 numbers are in.)
+
+- At app start, read `MemoryInfo.totalMem` via a `PlatformChannel`
+  one-shot (one `ActivityManager.MemoryInfo` call), cache it.
+- Pick a default preview triangle budget `preview_simplify_target`:
+  | Device totalMem | Budget   |
+  |-----------------|----------|
+  | ≥ 8 GB          | 500 000  |
+  | 4 – 8 GB        | 300 000  |
+  | < 4 GB          | 100 000  |
+  The Poco X3 Pro reports 6 GB, so it would land on 300 k.
+- Expose an override under **Settings → Expert**:
+  `preview_simplify_target` as an integer, with the auto-value
+  shown as default and a `Reset to auto` button. Default is
+  "auto"; a user who wants to push a specific device explicitly
+  flips to a fixed number.
+- The CLI call for `--export-preview-mesh` (and the preview path
+  for the thumbnail) passes `--simplify <preview_simplify_target>`
+  so the HSPM shipped to the device is already at the right
+  resolution — no on-device decimation needed.
+
+## Draft — "System requirements" section for the user docs
+
+(For `docs/system-requirements.md`, once we have the Pass 2
+numbers to commit to.)
+
+- Android 10+ (API 29+), 64-bit arm64 only. Impeller is the only
+  renderer we test against.
+- 4 GB RAM minimum, 6 GB recommended. The plate-view budget scales
+  with available memory (see the auto-LOD table above).
+- GPU: any OpenGL ES 3.0 device will work via Impeller; newer
+  devices (Adreno 660+ / Mali G710+ / Xclipse 920+) additionally
+  get Vulkan.
+- Storage: 300 MB for the app + a few MB per saved print profile.
+- No specific minimum CPU — libslic3r runs on whatever the device
+  gives it; a profile Snapdragon 7-series or newer slices an Auryn
+  in roughly a minute (Pflicht 6 result).
 
 ## Appendix A — `.hspm` binary format
 
