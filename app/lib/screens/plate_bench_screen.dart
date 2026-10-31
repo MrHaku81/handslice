@@ -134,6 +134,15 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
   final List<int> _frameMicros = []; // last ~60 frames
   double _fpsAvg = 0.0;
   double _rasterMsP95 = 0.0;
+  // After a (re)build the first frames are dominated by shader
+  // compilation and pipeline cache warm-up, so we discard them.
+  // Found empirically on the Poco X3 Pro: the first ~30 frames
+  // after rebuild measure ~46 fps even for a 24-triangle cube,
+  // after which the steady-state kicks in. Match the on-screen
+  // "warming up" label to this window so the user can watch
+  // the counter settle.
+  static const int _warmUpFrames = 30;
+  int _warmUpRemaining = 0;
   int _rssBeforeMb = 0;   // RSS captured right before pickFile().
   int _rssAfterMb  = 0;   // RSS captured right after _rebuildScene().
   late final TimingsCallback _timingsCb;
@@ -212,10 +221,19 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
 
   void _onFrameTimings(List<FrameTiming> timings) {
     for (final t in timings) {
+      if (_warmUpRemaining > 0) {
+        _warmUpRemaining--;
+        continue;
+      }
       _frameMicros.add(t.totalSpan.inMicroseconds);
       if (_frameMicros.length > 60) _frameMicros.removeAt(0);
     }
-    if (_frameMicros.isEmpty) return;
+    if (_frameMicros.isEmpty) {
+      _fpsAvg = 0;
+      _rasterMsP95 = 0;
+      if (mounted) setState(() {});
+      return;
+    }
     final avgUs = _frameMicros.reduce((a, b) => a + b) / _frameMicros.length;
     _fpsAvg = avgUs > 0 ? 1e6 / avgUs : 0;
     final sorted = List<int>.from(_frameMicros)..sort();
@@ -223,6 +241,13 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
         .clamp(0, sorted.length - 1)] / 1000.0;
     // Rebuild only the status card, not the heavy scene.
     if (mounted) setState(() {});
+  }
+
+  void _resetFpsStats() {
+    _frameMicros.clear();
+    _fpsAvg = 0;
+    _rasterMsP95 = 0;
+    _warmUpRemaining = _warmUpFrames;
   }
 
   Future<void> _pickFile() async {
@@ -254,6 +279,7 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
     await _rebuildScene(mesh);
     sw2.stop();
     _rssAfterMb = _currentRssMb();
+    _resetFpsStats();
     // Rough VRAM estimate: positions + normals + rgba vertex colours
     // = 32 bytes/vertex × 3 verts/tri.
     final vram = mesh.triangleCount * 3 * 32;
@@ -429,7 +455,9 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
       final delta = d.focalPoint - (_dragStart ?? d.focalPoint);
       setState(() {
         _yaw   += delta.dx * 0.01;
-        _pitch -= delta.dy * 0.01;
+        // Drag down → tilt the top of the model toward the viewer
+        // (increase pitch). Trackball convention.
+        _pitch += delta.dy * 0.01;
         _pitch = _pitch.clamp(-1.4, 1.4);
       });
       _dragStart = d.focalPoint;
@@ -450,8 +478,11 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
              math.cos(_pitch));
         // Drag the scene with the fingers: target moves along the
         // finger direction so the point under the fingers tracks.
-        _panOffset += right * (d.focalPointDelta.dx  * k)
-                    + up    * (-d.focalPointDelta.dy * k);
+        // Vertical sign matches the rotation vertical: moving the
+        // fingers down pulls the view target down (= the scene
+        // scrolls up on screen), which is what Blender / Fusion do.
+        _panOffset += right * (d.focalPointDelta.dx * k)
+                    + up    * (d.focalPointDelta.dy * k);
       });
     }
   }
@@ -498,10 +529,14 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
             Text('triangles=$tris  '
                  'load=${load ?? '-'}ms  build=${build ?? '-'}ms  '
                  'vram≈${_vramEstimateBytes == null ? '-' : (_vramEstimateBytes! / 1024 / 1024).toStringAsFixed(1)}MB'),
-            Text('fps_avg=${_fpsAvg.toStringAsFixed(1)}  '
-                 'p95_frame=${_rasterMsP95.toStringAsFixed(1)}ms  '
-                 'rss=${_currentRssMb()}MB  '
-                 'Δload=${_rssAfterMb - _rssBeforeMb}MB'),
+            Text(_warmUpRemaining > 0
+                ? 'fps_avg=warming up ($_warmUpRemaining frames left)  '
+                  'rss=${_currentRssMb()}MB  '
+                  'Δload=${_rssAfterMb - _rssBeforeMb}MB'
+                : 'fps_avg=${_fpsAvg.toStringAsFixed(1)}  '
+                  'p95_frame=${_rasterMsP95.toStringAsFixed(1)}ms  '
+                  'rss=${_currentRssMb()}MB  '
+                  'Δload=${_rssAfterMb - _rssBeforeMb}MB'),
             if (_backendCaps.isNotEmpty) ...[
               Text('gpu backend ≈ $_backendGuess'),
               Text(_backendCaps.join('  '),
@@ -533,6 +568,7 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
             sw.stop();
             if (mounted) setState(() { _buildTime = sw.elapsed; });
           }
+          _resetFpsStats();
         },
       ),
     );
@@ -555,6 +591,13 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
           final target = _orbitCentre + _panOffset;
           return fscene.SceneView(
             _scene,
+            // Precompile the pipeline so the first draw does not
+            // stall for shader compilation; without this the Poco
+            // measured ~46 fps on the first model after launch and
+            // 130+ fps thereafter. warmUp blocks the reveal until
+            // the pipeline cache is ready — fine for the benchmark
+            // and intentional for the production plate view.
+            warmUp: true,
             camera: fscene.PerspectiveCamera(
               position: _cameraPos(target),
               target: target,

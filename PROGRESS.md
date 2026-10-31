@@ -18,6 +18,40 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 21:00 UTC – Pflicht 7: shader warm-up, vertical gesture fix, LOD/system-req updates
+
+Pass-2 numbers on the Poco (profile):
+
+- 100 k: load 43 ms, build 24 ms, vram 9.2 MB, fps 46.1, p95 23.6 ms, Δload 20 MB
+- 300 k: load 57 ms, build 45 ms, vram 27.5 MB, fps 127.6, p95 10.3 ms, Δload 81 MB
+- 500 k: load 78 ms, build 75 ms, vram 45.8 MB, fps 108.3, p95 11.6 ms, Δload 141 MB
+
+Build time ~30× faster, Δload RSS ~6× smaller than Pass 1
+(~0.28 KB per preview triangle on Dart heap now vs. ~1.8 KB
+before).
+
+Observed artefact in both passes: the FIRST model after launch
+measured ~46 fps regardless of size (Pass 1: 500 k, Pass 2: 100 k),
+subsequent models hit 100+ fps. Impeller/Flutter GPU compiled the
+`UnlitFragment` pipeline on first use. Fixes:
+
+- `SceneView(..., warmUp: true)` so flutter_scene calls
+  `Scene.warmUp` before the first reveal.
+- Fps counter now discards the first 30 frames after any (re)build
+  and shows `warming up (N frames left)` in the status line.
+
+Vertical input: Klaus called it out as inverted on both the
+rotation and the pan. Signs flipped so down-drag rotates the top
+of the model toward the viewer (trackball convention) and
+two-finger down-drag scrolls the view target in the same
+direction — point under the fingers tracks.
+
+Docs: Pass-2 table in `plate-view-benchmark.md`, auto-LOD
+thresholds grounded in the new per-triangle costs (≥ 8 GB → 500 k,
+4 – 8 GB → 300 k, < 4 GB → 100 k; budget bounded by slicing
+head-room, not by renderer saturation), System-requirements draft
+updated with the measured plate-view costs and the warm-up note.
+
 ## 2026-10-31 20:30 UTC – Pflicht 7: flutter_scene chosen, memory refactor, pan fix
 
 Klaus measured on the Poco (profile build, Impeller OpenGL ES):

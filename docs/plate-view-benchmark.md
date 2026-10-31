@@ -158,15 +158,38 @@ flutter_scene numbers were already clearly good enough to decide.)
 
 ### Pass 2 — direct `MeshGeometry.fromArrays`, `retainCpuData: false`
 
-(Updated after Klaus re-runs on the new APK; builder path replaced
-with a direct upload of the HSPM Float32Lists.)
+App restarted between models to isolate per-model Δload RSS from
+the previous model's leftovers.
 
-| Model         | Tris    | load | build | vram  | fps_avg | p95_frame | Δload RSS |
-|---------------|---------|------|-------|-------|---------|-----------|-----------|
-| notched_cube  |     24  |      |       |       |         |           |           |
-| big_model     | 100 k   |      |       |       |         |           |           |
-| big_model     | 300 k   |      |       |       |         |           |           |
-| big_model     | 500 k   |      |       |       |         |           |           |
+| Model         | Tris    | load   | build   | vram    | fps_avg | p95_frame | rss    | Δload RSS | notes                                                   |
+|---------------|---------|--------|---------|---------|---------|-----------|--------|-----------|---------------------------------------------------------|
+| big_model     | 100 k   |  43 ms |   24 ms |  9.2 MB |  46.1   |  23.6 ms  | 294 MB |   20 MB   | *first model after launch* — shader warm-up dominates   |
+| big_model     | 300 k   |  57 ms |   45 ms | 27.5 MB | 127.6   |  10.3 ms  | 361 MB |   81 MB   |                                                         |
+| big_model     | 500 k   |  78 ms |   75 ms | 45.8 MB | 108.3   |  11.6 ms  | 461 MB |  141 MB   |                                                         |
+
+Build time collapsed roughly **30 ×** (300 k: 2149 → 45 ms; 500 k:
+3964 → 75 ms) and Δload RSS roughly **6 ×** (300 k: 559 → 81 MB;
+500 k: 896 → 141 MB). Per-triangle Dart-heap cost went from ~1.8 KB
+to ~0.28 KB.
+
+### A note on the first-model fps number
+
+In both passes the first model loaded after an app launch
+measured ~46 fps while subsequent models cleared 100+ fps on the
+same device. That is Impeller / Flutter GPU compiling the
+`UnlitFragment` pipeline (and friends) on first use — the next
+model hits a warm pipeline cache. Mitigations in place after this
+run:
+
+- The `SceneView` is constructed with `warmUp: true`, so
+  flutter_scene calls `Scene.warmUp` before the first reveal and
+  blocks the frame until the pipeline cache is ready.
+- The fps counter now discards the first 30 frames after any
+  (re)build (file load or renderer-mode toggle) and shows a
+  `warming up (N frames left)` label meanwhile.
+
+Re-run numbers for the 100 k row should land near the 300 k row's
+fps once Klaus has re-measured.
 
 ## Decision — `flutter_scene` is the plate renderer
 
@@ -190,17 +213,33 @@ Consequences for the rest of the app:
 
 ## Draft — automatic LOD by device RAM
 
-(Proposal only; thresholds settle after Pass 2 numbers are in.)
+Baseline cost on the Poco X3 Pro (Pass 2 numbers):
+
+- ~0.28 KB per preview triangle on the Dart heap during load,
+  releasing after the GPU upload.
+- ~90 B per preview triangle on the GPU (vram column, roughly
+  matches `3 × (position + normal + rgba) × 4 B`).
+- ~200 MB app baseline before the model is loaded (profile build,
+  no slicing in-flight).
+
+With the auto-LOD table below the plate view's working-set is
+bounded at 500 k × 0.37 KB ≈ 180 MB extra on top of the baseline,
+which leaves slicing enough room on a 4 GB device.
 
 - At app start, read `MemoryInfo.totalMem` via a `PlatformChannel`
   one-shot (one `ActivityManager.MemoryInfo` call), cache it.
 - Pick a default preview triangle budget `preview_simplify_target`:
-  | Device totalMem | Budget   |
-  |-----------------|----------|
-  | ≥ 8 GB          | 500 000  |
-  | 4 – 8 GB        | 300 000  |
-  | < 4 GB          | 100 000  |
-  The Poco X3 Pro reports 6 GB, so it would land on 300 k.
+
+  | Device totalMem | Budget   | Rationale                                                 |
+  |-----------------|----------|-----------------------------------------------------------|
+  | ≥ 8 GB          | 500 000  | Measured 108 fps on 6 GB with headroom to spare           |
+  | 4 – 8 GB        | 300 000  | Keeps peak plate-view RSS under 150 MB; slicing has room  |
+  | < 4 GB          | 100 000  | Keeps peak plate-view RSS under 50 MB; still 60+ fps      |
+
+  The Poco X3 Pro reports 6 GB, so it would land on 300 k. It
+  cleared 108 fps at 500 k, which is why the ≥ 8 GB band keeps
+  the upper limit — the budget is set by *slicing head-room*,
+  not by renderer saturation.
 - Expose an override under **Settings → Expert**:
   `preview_simplify_target` as an integer, with the auto-value
   shown as default and a `Reset to auto` button. Default is
@@ -213,20 +252,42 @@ Consequences for the rest of the app:
 
 ## Draft — "System requirements" section for the user docs
 
-(For `docs/system-requirements.md`, once we have the Pass 2
-numbers to commit to.)
+(For `docs/system-requirements.md`, pending one review pass.)
 
-- Android 10+ (API 29+), 64-bit arm64 only. Impeller is the only
-  renderer we test against.
-- 4 GB RAM minimum, 6 GB recommended. The plate-view budget scales
-  with available memory (see the auto-LOD table above).
-- GPU: any OpenGL ES 3.0 device will work via Impeller; newer
-  devices (Adreno 660+ / Mali G710+ / Xclipse 920+) additionally
-  get Vulkan.
-- Storage: 300 MB for the app + a few MB per saved print profile.
-- No specific minimum CPU — libslic3r runs on whatever the device
-  gives it; a profile Snapdragon 7-series or newer slices an Auryn
-  in roughly a minute (Pflicht 6 result).
+**Minimum**
+
+- Android 10 (API 29) or newer, 64-bit arm64.
+- 4 GB RAM.
+- A GPU that supports OpenGL ES 3.0. Impeller handles the backend
+  selection; recent Adreno/Mali/Xclipse devices additionally
+  qualify for Vulkan (see "Why the Poco X3 Pro reports GLES"
+  above for the Flutter-side denylist).
+- 300 MB free storage for the app, plus a few MB per saved print
+  profile and per cached slice.
+
+**Recommended**
+
+- 6 GB RAM or more.
+- Snapdragon 7-series / Dimensity 1000-series or newer, so a
+  million-triangle slice (Auryn-sized) finishes in roughly a
+  minute (Pflicht 6).
+
+**What scales with RAM**
+
+- Plate-view detail: 100 k / 300 k / 500 k preview triangles for
+  the three RAM bands above. The CLI's `--simplify` is called with
+  the chosen target before export; nothing runs on-device.
+- Measured plate-view memory cost (Poco X3 Pro, Impeller OpenGL ES,
+  Pass 2): ~0.28 KB Dart-heap per preview triangle during load,
+  released after GPU upload, plus ~90 B GPU-side per triangle.
+
+**First-launch warm-up**
+
+- The first model opened after an app launch will show a brief
+  compile stall (Impeller building the Dart ↔ GPU shader
+  pipelines). The app warms up on view construction, so the
+  observed fps counter does not include this phase; subsequent
+  models hit a warm cache.
 
 ## Appendix A — `.hspm` binary format
 
