@@ -135,6 +135,67 @@ G1 X0 Y0 Z0.6 E4
       expect(g.layerCount, 3);
     });
 
+    test('M83 relative-E: identical E values are not treated as travel',
+        () async {
+      // Regression: an M83 g-code with two consecutive extrusions
+      // of the same length (common on walls, same perimeter edge
+      // length) used to bucket the second as travel, because the
+      // parser was running the delta subtraction regardless of
+      // mode. Here each move extrudes 1 mm.
+      final s = '''
+M83
+;TYPE:Outer wall
+G1 X0 Y0 Z0.2 E0
+G1 X10 Y0 Z0.2 E1
+G1 X10 Y10 Z0.2 E1
+G1 X0 Y10 Z0.2 E1
+G1 X0 Y0 Z0.2 E1
+''';
+      final g = await _parseString(s);
+      // All four moves after the first should be Outer wall.
+      final outerCount = <int>[
+        for (int i = 0; i < g.segmentCount; ++i)
+          if (g.types[i] == PathType.outerWall.code) i,
+      ].length;
+      expect(outerCount, 4);
+      expect(g.extrudedMm, closeTo(4.0, 1e-6));
+    });
+
+    test('G2 arc interpolates into many short segments', () async {
+      // A quarter circle from (1,0) around centre (0,0) going CCW
+      // to (0,1). Expect several interpolated segments and
+      // every emitted segment length to be short.
+      final s = '''
+M83
+G1 X1 Y0 Z0.2 E0
+;TYPE:Outer wall
+G3 X0 Y1 Z0.2 I-1 J0 E1
+''';
+      final g = await _parseString(s);
+      expect(g.segmentCount, greaterThan(5));
+      // Chord of the quarter circle is sqrt(2) ≈ 1.414; the
+      // interpolated path should run along the arc (length
+      // = π/2 ≈ 1.571), measurably longer than the chord.
+      final totalLen = g.lengthByType[PathType.outerWall.code];
+      expect(totalLen, greaterThan(1.5));
+      expect(totalLen, lessThan(1.7));
+    });
+
+    test('G92 E0 resets the absolute-E baseline', () async {
+      final s = '''
+M82
+;TYPE:Outer wall
+G1 X0 Y0 Z0.2 E0
+G1 X10 Y0 Z0.2 E5
+G92 E0
+G1 X10 Y10 Z0.2 E5
+''';
+      final g = await _parseString(s);
+      // Two extruded 10 mm segments, each adding 5 mm to the
+      // E counter (second one after the G92 reset).
+      expect(g.extrudedMm, closeTo(10.0, 1e-6));
+    });
+
     test('normal types map correctly', () async {
       final cases = {
         'Outer wall': PathType.outerWall.code,
@@ -198,5 +259,45 @@ G1 X0 Y0 Z0.6 E4
       // exact value.
       expect(g.maxZ, greaterThanOrEqualTo(19.8));
     });
+
+    test('notched cube: parsed filament matches Orca footer within 1 %',
+        () async {
+      if (!cube.existsSync()) return;
+      // Footer:  ; filament used [mm] = 1177.15
+      // Parser must count every extrusion delta (M83 relative,
+      // retract/un-retract balancing out, G92 E0 resets around
+      // retracts). Allow 1 % slack; retracts are kept out of
+      // the sum because we only add positive deltas.
+      final footerMm = _footerFilamentMm(cube);
+      final g = await parseGcodeInline(cube.path);
+      final rel = (g.extrudedMm - footerMm).abs() / footerMm;
+      expect(rel, lessThan(0.01),
+          reason: 'parsed=${g.extrudedMm.toStringAsFixed(3)} '
+              'footer=${footerMm.toStringAsFixed(3)}');
+    });
+
+    test('notched cube: per-type lengths add up and cover walls',
+        () async {
+      if (!cube.existsSync()) return;
+      final g = await parseGcodeInline(cube.path);
+      final outer = g.lengthByType[PathType.outerWall.code];
+      final inner = g.lengthByType[PathType.innerWall.code];
+      // A 20 mm cube with 100 layers of ~75 mm outer perimeter
+      // gives ≈ 7500 mm of outer wall. We only check the order
+      // of magnitude.
+      expect(outer, greaterThan(5000));
+      expect(inner, greaterThan(5000));
+    });
   });
+}
+
+double _footerFilamentMm(File gcode) {
+  final text = gcode.readAsStringSync();
+  final re = RegExp(r'^;\s*filament used \[mm\]\s*=\s*([\d.]+)',
+      multiLine: true);
+  final match = re.firstMatch(text);
+  if (match == null) {
+    throw StateError('no "; filament used [mm]" line in ${gcode.path}');
+  }
+  return double.parse(match.group(1)!);
 }

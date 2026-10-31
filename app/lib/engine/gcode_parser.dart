@@ -23,6 +23,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 /// Enumerated path types the parser can emit, in a stable byte
@@ -97,9 +98,12 @@ class GcodeGeometry {
     required this.layers,
     required this.minZ,
     required this.maxZ,
-    required this.minXY,
-    required this.maxXY,
+    required this.minX,
+    required this.maxX,
+    required this.minY,
+    required this.maxY,
     required this.extrudedMm,
+    required this.lengthByType,
   });
 
   final Float32List positions;
@@ -107,9 +111,13 @@ class GcodeGeometry {
   final Uint8List filaments;
   final Uint32List layers;      // start segment index per layer, length == layerCount
   final double minZ, maxZ;
-  final double minXY;           // AABB min across X and Y
-  final double maxXY;
-  final double extrudedMm;      // total extruded filament (just E delta)
+  final double minX, maxX, minY, maxY;
+  final double extrudedMm;      // total extruded filament (sum of E deltas)
+  // Per-path-type aggregated extrusion-path length in millimetres
+  // (not E, but Euclidean XY distance of extruded moves). Indexed
+  // by `PathType.code`. Travel is kept at index 0 for symmetry
+  // but is left at 0.
+  final Float64List lengthByType;
 
   int get segmentCount => types.length;
   int get layerCount => layers.length;
@@ -117,6 +125,12 @@ class GcodeGeometry {
   int layerStart(int layer) => layers[layer];
   int layerEnd(int layer) =>
       (layer + 1 < layers.length) ? layers[layer + 1] : segmentCount;
+
+  // Back-compat shim: the earlier shape returned a single square
+  // AABB spanning both X and Y. Some callers still use it; it is
+  // computed on the fly from the separate axis bounds.
+  double get minXY => math.min(minX, minY);
+  double get maxXY => math.max(maxX, maxY);
 }
 
 /// Progress update emitted by the parser.
@@ -215,7 +229,14 @@ Future<GcodeGeometry> _parseFile(
   bool haveLastE = false;
 
   double minZ = double.infinity, maxZ = -double.infinity;
-  double minXY = double.infinity, maxXY = -double.infinity;
+  double minX = double.infinity, maxX = -double.infinity;
+  double minY = double.infinity, maxY = -double.infinity;
+  final lengthByType = Float64List(PathType.values.length);
+  // Extrusion mode. RepRap default is M82 (absolute) at power-on,
+  // but Orca puts M83 (relative) near the top of its g-code via
+  // the filament-start script. We track both so legacy files
+  // still work.
+  bool relativeE = false;
   int lastProgressReport = 0;
 
   void grow(int needed) {
@@ -282,13 +303,47 @@ Future<GcodeGeometry> _parseFile(
       if (idx != null && idx >= 0 && idx < 255) currentFil = idx;
       continue;
     }
-    // Everything else: want 'G0' or 'G1'.
+    // M-codes: M82 (absolute E), M83 (relative E), G92 (set
+    // extruder/position reference). Everything else beginning
+    // with M is irrelevant to the path geometry.
+    if (c == 0x4D /* 'M' */) {
+      if (line.startsWith('M82')) {
+        relativeE = false; lastE = 0; haveLastE = true;
+      } else if (line.startsWith('M83')) {
+        relativeE = true;
+      }
+      continue;
+    }
+    // Everything else: want 'G0', 'G1', 'G2', 'G3', or 'G92'.
     if (c != 0x47 /* 'G' */) continue;
     if (line.length < 2) continue;
     final c1 = line.codeUnitAt(1);
-    if (c1 != 0x30 && c1 != 0x31) continue;
-    // Parse X, Y, Z, E lazily.
-    double? nx, ny, nz, ne;
+    // G92: reset the extruder reference (always), and in absolute
+    // mode this is a reset of lastE to the given value (default 0).
+    if (c1 == 0x39 /* '9' */) {
+      if (line.startsWith('G92')) {
+        // Parse E value (default 0).
+        final eIdx = line.indexOf('E');
+        double newE = 0;
+        if (eIdx >= 0 && eIdx + 1 < line.length) {
+          int j = eIdx + 1;
+          while (j < line.length) {
+            final cj = line.codeUnitAt(j);
+            if (cj == 0x20 || cj == 0x09 || cj == 0x3B) break;
+            j++;
+          }
+          newE = double.tryParse(line.substring(eIdx + 1, j)) ?? 0;
+        }
+        lastE = newE;
+        haveLastE = true;
+      }
+      continue;
+    }
+    final isG0 = c1 == 0x30, isG1 = c1 == 0x31;
+    final isG2 = c1 == 0x32, isG3 = c1 == 0x33;
+    if (!isG0 && !isG1 && !isG2 && !isG3) continue;
+    // Parse X, Y, Z, E, I, J, R lazily (arcs need the last three).
+    double? nx, ny, nz, ne, ni, nj, nr;
     int i = 2;
     final len = line.length;
     while (i < len) {
@@ -309,55 +364,124 @@ Future<GcodeGeometry> _parseFile(
         case 0x59: ny = num; break;   // Y
         case 0x5A: nz = num; break;   // Z
         case 0x45: ne = num; break;   // E
-        default: break;               // ignore F, S, I, J, …
+        case 0x49: ni = num; break;   // I (arc centre offset X)
+        case 0x4A: nj = num; break;   // J (arc centre offset Y)
+        case 0x52: nr = num; break;   // R (arc radius)
+        default: break;               // ignore F, S, …
       }
       i = j;
     }
-    if (nx != null) x = nx;
-    if (ny != null) y = ny;
-    if (nz != null) z = nz;
+    final nextX = nx ?? x;
+    final nextY = ny ?? y;
+    final nextZ = nz ?? z;
     final isMove = nx != null || ny != null || nz != null;
     if (!isMove) continue;
-    // Extrusion: absolute E grew since the last move. The first
-    // E we see sets the baseline and does NOT count as extrusion
-    // (Orca emits G92 E0 at layer boundaries that we ignore).
+    // Extrusion delta: in M83 (relative) each E value IS the
+    // delta; in M82 (absolute) delta = E - lastE. Was wrong in
+    // the first 7b pass — M83 was treated as absolute, which
+    // made every same-value E in a wall path look like 0 delta
+    // and get bucketed as a travel segment.
     final double eDelta;
     if (ne != null) {
-      eDelta = haveLastE ? (ne - lastE) : 0;
-      lastE = ne;
+      if (relativeE) {
+        eDelta = ne;
+      } else {
+        eDelta = haveLastE ? (ne - lastE) : 0;
+        lastE = ne;
+      }
       haveLastE = true;
     } else {
       eDelta = 0;
     }
     final isExtrude = eDelta > 1e-6;
     final segType = isExtrude ? currentType : PathType.travel.code;
+
+    // Layer boundary (same as before, out here so the arc-fan
+    // emits all its sub-segments within the same layer).
     if (haveLastPos) {
-      // Layer boundary: an explicit `;LAYER:<N>` pending, OR
-      // (legacy fallback) a strictly larger Z while we have not
-      // yet seen any explicit marker.
       final triggerLayer = pendingLayerStart ||
-          (!sawExplicitLayerMarker && z > lastReportedZ + 1e-6);
+          (!sawExplicitLayerMarker && nextZ > lastReportedZ + 1e-6);
       if (triggerLayer) {
         layerStarts.add(segCount);
-        lastReportedZ = z;
+        lastReportedZ = nextZ;
         pendingLayerStart = false;
       }
+    }
+
+    void emit(double x0, double y0, double z0,
+              double x1, double y1, double z1, int segType) {
       grow(segCount + 1);
       final o = segCount * 6;
-      positions[o    ] = lastX; positions[o + 1] = lastY; positions[o + 2] = lastZ;
-      positions[o + 3] = x;     positions[o + 4] = y;     positions[o + 5] = z;
+      positions[o    ] = x0; positions[o + 1] = y0; positions[o + 2] = z0;
+      positions[o + 3] = x1; positions[o + 4] = y1; positions[o + 5] = z1;
       types[segCount] = segType;
       filaments[segCount] = currentFil;
       segCount++;
-      if (x < minXY) minXY = x;
-      if (y < minXY) minXY = y;
-      if (x > maxXY) maxXY = x;
-      if (y > maxXY) maxXY = y;
+      if (x0 < minX) minX = x0; if (x1 < minX) minX = x1;
+      if (y0 < minY) minY = y0; if (y1 < minY) minY = y1;
+      if (x0 > maxX) maxX = x0; if (x1 > maxX) maxX = x1;
+      if (y0 > maxY) maxY = y0; if (y1 > maxY) maxY = y1;
+      final dx = x1 - x0, dy = y1 - y0, dz = z1 - z0;
+      final len = math.sqrt(dx * dx + dy * dy + dz * dz);
+      lengthByType[segType] += len;
     }
-    lastX = x; lastY = y; lastZ = z;
+
+    if (haveLastPos) {
+      if (isG2 || isG3) {
+        // Arc interpolation. Centre is either (lastX+I, lastY+J)
+        // (I/J form) or derived from R (chord + radius). We only
+        // handle the I/J form reliably; R-form arcs are rare in
+        // slicer output and we approximate them with a single
+        // segment when I/J are absent.
+        if (ni != null || nj != null) {
+          final cx = lastX + (ni ?? 0);
+          final cy = lastY + (nj ?? 0);
+          final r = math.sqrt((lastX - cx) * (lastX - cx) +
+                              (lastY - cy) * (lastY - cy));
+          final a0 = math.atan2(lastY - cy, lastX - cx);
+          var   a1 = math.atan2(nextY - cy, nextX - cx);
+          // G2 is clockwise (angle decreases), G3 is counter-
+          // clockwise. We walk the arc in `arcDir` increments.
+          if (isG2) {
+            if (a1 >= a0) a1 -= 2 * math.pi;
+          } else {
+            if (a1 <= a0) a1 += 2 * math.pi;
+          }
+          final arcAngle = (a1 - a0).abs();
+          // One sub-segment per ~0.4 mm of arc length, min 8,
+          // max 128 — enough to look smooth without exploding the
+          // segment count on big radii.
+          final arcLen = arcAngle * r;
+          final steps = arcLen > 0
+              ? math.min(128, math.max(8, (arcLen / 0.4).ceil()))
+              : 8;
+          final dAngle = (a1 - a0) / steps;
+          final dZ     = (nextZ - lastZ) / steps;
+          var px = lastX, py = lastY, pz = lastZ;
+          for (int s = 1; s <= steps; ++s) {
+            final a = a0 + dAngle * s;
+            final sx = cx + r * math.cos(a);
+            final sy = cy + r * math.sin(a);
+            final sz = lastZ + dZ * s;
+            emit(px, py, pz, sx, sy, sz, segType);
+            px = sx; py = sy; pz = sz;
+          }
+        } else {
+          // R-form (or malformed) — fall back to a straight line.
+          emit(lastX, lastY, lastZ, nextX, nextY, nextZ, segType);
+        }
+      } else {
+        emit(lastX, lastY, lastZ, nextX, nextY, nextZ, segType);
+      }
+    }
+    lastX = nextX; lastY = nextY; lastZ = nextZ;
+    x = nextX; y = nextY; z = nextZ;
+    // Suppress "unused" warnings for the arc-only radius field
+    // when R-form arcs are not used.
+    nr?.toDouble();
     haveLastPos = true;
-    if (z < minZ) minZ = z;
-    if (z > maxZ) maxZ = z;
+    if (nextZ < minZ) minZ = nextZ;
+    if (nextZ > maxZ) maxZ = nextZ;
     if (eDelta > 0) extruded += eDelta;
     // Progress updates every ~1 MB.
     if (bytesRead - lastProgressReport > 1 << 20) {
@@ -396,8 +520,9 @@ Future<GcodeGeometry> _parseFile(
     segmentsSoFar: segCount,
     layersSoFar: layerStarts.length,
   ));
-  if (minXY == double.infinity) { minXY = 0; maxXY = 0; }
-  if (minZ == double.infinity)  { minZ  = 0; maxZ  = 0; }
+  if (minX == double.infinity) { minX = 0; maxX = 0; }
+  if (minY == double.infinity) { minY = 0; maxY = 0; }
+  if (minZ == double.infinity) { minZ = 0; maxZ = 0; }
   return GcodeGeometry(
     positions: finalPositions,
     types: finalTypes,
@@ -405,9 +530,12 @@ Future<GcodeGeometry> _parseFile(
     layers: finalLayers,
     minZ: minZ,
     maxZ: maxZ,
-    minXY: minXY,
-    maxXY: maxXY,
+    minX: minX,
+    maxX: maxX,
+    minY: minY,
+    maxY: maxY,
     extrudedMm: extruded,
+    lengthByType: lengthByType,
   );
 }
 

@@ -18,6 +18,49 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 01:00 UTC – Pflicht 7b fixes: arcs + relative-E + 2D centring + widths
+
+Device test on `a4e5b86` of the notched cube: layer count,
+auto-switch, bed, centring and header now right; path geometry
+is not. 3D shows closed faces with a slanted "roof", 2D shows
+only infill (walls missing) and is offset off-centre. Root
+causes and fixes:
+
+- Walls missing because the parser ran absolute-E delta math on
+  Orca's M83 (relative) output. Every same-length wall segment
+  then showed `eDelta == 0` and got bucketed as a travel move
+  (travels hidden by default). Parser now tracks M82/M83 mode
+  (also M83 after `M82`), and G92 E0 resets the baseline. In
+  M83 mode each `E` value IS the delta.
+- Arc moves (G2/G3) were silently falling through, so any arc-
+  fitted file would also lose segments. Parser now interpolates
+  I/J-form arcs into short straight segments (~0.4 mm each,
+  min 8, max 128 per arc). CC2 process has `enable_arc_fitting
+  = 0` by default, but the start-g-code uses G2 for the
+  initial Z-dip and other profiles can turn arc fitting on.
+- Self-check wired as a test: sum of E deltas on the real
+  `thumbnail-cube.gcode` is now within 1 % of the Orca footer
+  `; filament used [mm] = 1177.15`. Per-type path lengths are
+  also tracked (new `lengthByType` field on `GcodeGeometry`)
+  so wall / infill / support totals can be reported later.
+- 2D top-down painter was off-centre on a cube not centred on
+  the bed because it used a single square XY union. Separate
+  per-axis bounds (`minX / maxX / minY / maxY`) feed the
+  projection; Y stays inverted so the bed's back wall is at
+  the top of the viewport (Orca convention).
+- 3D line widths were 1.1 mm (current) / 0.5 mm (dim); on a
+  dense cube top those ribbons overlapped into solid faces,
+  which read as a closed roof. Widths now match the real
+  extrusion (0.42 mm current, 0.25 mm dim), so bahnen stay
+  distinguishable at a layer-ready zoom level.
+- Reference image from Orca at the AMR5 was declined for now
+  (no Orca GUI binary built on this host, see
+  `docs/blockers.md`). Klaus can drop one into `local-test/`
+  if he opens the model in Orca on another machine.
+- Tests: new synthetic cases for M83 relative-E, G2 I/J arc
+  interpolation and G92 E0 reset. Real-file cases on the cube
+  cover the 1 %-footer check and per-type lengths.
+
 ## 2026-11-01 00:20 UTC – Pflicht 7b fixes: layer count, bed, auto-switch, highlight, header
 
 Five issues surfaced by the device test on `b48863d`.

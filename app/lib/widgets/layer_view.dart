@@ -167,8 +167,8 @@ class _LayerViewState extends State<LayerView> {
     // = radius / sin(fovY/2) * 1.3.
     final g = widget.geometry;
     final modelAabb = vm.Aabb3.minMax(
-        vm.Vector3(g.minXY, g.minXY, g.minZ),
-        vm.Vector3(g.maxXY, g.maxXY, g.maxZ));
+        vm.Vector3(g.minX, g.minY, g.minZ),
+        vm.Vector3(g.maxX, g.maxY, g.maxZ));
     final aabb = hullWithBed(modelAabb);
     final centre = (aabb.min + aabb.max) * 0.5;
     final extent = aabb.max - aabb.min;
@@ -201,18 +201,21 @@ class _LayerViewState extends State<LayerView> {
     for (final type in PathType.values) {
       if (!_visibleTypes.contains(type)) continue;
       final color = kPathTypeColors[type]!;
-      // Below-layer slice (dim, thin).
+      // Line widths tuned to the CC2 default extrusion width
+      // (0.42 mm — matches `;WIDTH:0.42` lines Orca emits for
+      // outer walls on the 0.4 nozzle profile). Earlier 1.1 mm
+      // ribbons on dense layers merged into solid faces, which
+      // is what Klaus hit on the 7b device test. Dim stacks run
+      // at 0.25 mm so wall topology is still readable.
       _emitSlice(scene,
           g: g, type: type, color: color,
           dim: true,
-          width: 0.5,
+          width: 0.25,
           from: 0, to: endOfBelow);
-      // Current-layer slice (bright, thicker — so the slider's
-      // position reads clearly even on a packed cube top).
       _emitSlice(scene,
           g: g, type: type, color: color,
           dim: false,
-          width: 1.1,
+          width: 0.42,
           from: endOfBelow, to: endOfCurrent);
     }
   }
@@ -626,13 +629,24 @@ class _TopDownPainter extends CustomPainter {
     final from = g.layerStart(currentLayer);
     final to   = g.layerEnd(currentLayer);
     if (to <= from) return;
-    final rangeX = (g.maxXY - g.minXY).clamp(1.0, double.infinity);
-    final scale = math.min(size.width, size.height) / rangeX * 0.9;
+    // Per-axis bounds so a model that is not centred on the bed
+    // (notched cube at X≈128, Y≈126) still draws in the middle
+    // of the viewport instead of using a square XY union that
+    // offsets both axes to the combined centre.
+    final rangeX = (g.maxX - g.minX).clamp(1.0, double.infinity);
+    final rangeY = (g.maxY - g.minY).clamp(1.0, double.infinity);
+    final maxRange = math.max(rangeX, rangeY);
+    final scale = math.min(size.width, size.height) / maxRange * 0.9;
     final cx = size.width  / 2;
     final cy = size.height / 2;
-    final mid = (g.minXY + g.maxXY) * 0.5;
-    double toScreenX(double x) => cx + (x - mid) * scale;
-    double toScreenY(double y) => cy - (y - mid) * scale;
+    final midX = (g.minX + g.maxX) * 0.5;
+    final midY = (g.minY + g.maxY) * 0.5;
+    // Flutter screen Y points down; printer Y points away from
+    // the operator (front = Y low, back = Y high). We invert so
+    // the "back" of the bed sits at the top of the preview,
+    // matching Orca's top-down convention.
+    double toScreenX(double x) => cx + (x - midX) * scale;
+    double toScreenY(double y) => cy - (y - midY) * scale;
     // Paint each type separately so the colour stroke is one path.
     final paint = Paint()
       ..style = PaintingStyle.stroke
