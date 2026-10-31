@@ -18,6 +18,58 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 01:30 UTC – Pflicht 7c: toolpaths from Orca's GCodeProcessor
+
+Dart g-code parser is now the fallback; the authoritative path
+emits a packed HSPT binary from `GCodeProcessor::moves` so the
+layer view consumes the same data Orca's desktop viewer does.
+
+- CLI gained `--export-toolpaths <path>` (byproduct of slicing)
+  and `--input-gcode <path>` (runs
+  `GCodeProcessor::process_file()` on an existing g-code,
+  so printer-downloaded files also flow through the same path).
+  Record layout: 16 B header + 28 B per move (role, extruder,
+  move_type, layer_id, width×100, height×100, feedrate,
+  x/y/z/delta_e). GCodeProcessor's internal-only moves are
+  filtered out (otherwise the "actual speed" duplicates triple
+  the sum).
+- `app/lib/engine/toolpath_parser.dart`: streaming TypedData
+  reader. Loads a 65 MB HSPT via `Isolate.run` so the UI
+  thread is never pinned on parse. Carries per-role summed
+  extrusion in `Toolpaths.extrudedByRole` + a bounding box
+  (per-axis, not the earlier square XY).
+- Orca palette and default visibilities ported from
+  `libvgcode/src/ViewerImpl.cpp` + `libvgcode/src/Settings.hpp`
+  (every extrusion role on, travel / wipe / retract / … off,
+  seam on). `OrcaPalette` + `OrcaDefaults` are plain Dart
+  constants, no runtime theme.
+- New `ToolpathLayerView` widget mirrors `LayerView`'s
+  gestures, bed quad and standard-view buttons but renders
+  one `LineSegmentsGeometry` per role at that role's recorded
+  width (CC2 default: 0.42 mm). The legend uses the Orca
+  swatches and lets the user toggle both roles and move-type
+  options.
+- `ProjectState.parseSliceGeometry` now prefers the HSPT path:
+  loads `.gcode.hspt` and populates `sliceToolpaths`; falls
+  back to the Dart parser only when the HSPT is missing.
+  `SlicerService.slice` passes `--export-toolpaths` so every
+  slice writes the HSPT next to the g-code.
+  `SlicerService.processGcodeToToolpaths()` wraps the
+  `--input-gcode` CLI mode for files pulled from the printer.
+- Self-check (measurement): HSPT's summed positive
+  `delta_extruder` on `thumbnail-cube.gcode` lands at
+  ~1356 mm vs the footer's `; filament used [mm] = 1177.15`
+  — about 15 % higher, from start-purge/retract extrusions
+  that Orca excludes from the footer. Role mapping is correct;
+  the Dart g-code parser keeps its ±1 % footer check as the
+  tighter reference.
+- Docs: `docs/layer-view.md` gained a Pflicht-7c section with
+  the HSPT schema, palette source, internal-only filter note
+  and self-check numbers; the earlier Pflicht-7b parser doc is
+  now marked as the fallback path.
+- 67 MB stress-test on the Poco is Klaus' pass; parse time,
+  RSS peak, FPS during slider scrub are the numbers to report.
+
 ## 2026-11-01 01:00 UTC – Pflicht 7b fixes: arcs + relative-E + 2D centring + widths
 
 Device test on `a4e5b86` of the notched cube: layer count,

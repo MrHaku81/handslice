@@ -506,6 +506,108 @@ abstract class AppLocalizations {
   /// **'Unknown'**
   String get layerTypeUnknown;
 
+  /// No description provided for @gcodeRoleOverhang.
+  ///
+  /// In en, this message translates to:
+  /// **'Overhang wall'**
+  String get gcodeRoleOverhang;
+
+  /// No description provided for @gcodeRoleIroning.
+  ///
+  /// In en, this message translates to:
+  /// **'Ironing'**
+  String get gcodeRoleIroning;
+
+  /// No description provided for @gcodeRoleInternalBridge.
+  ///
+  /// In en, this message translates to:
+  /// **'Internal bridge'**
+  String get gcodeRoleInternalBridge;
+
+  /// No description provided for @gcodeRoleGapFill.
+  ///
+  /// In en, this message translates to:
+  /// **'Gap fill'**
+  String get gcodeRoleGapFill;
+
+  /// No description provided for @gcodeRoleSkirt.
+  ///
+  /// In en, this message translates to:
+  /// **'Skirt'**
+  String get gcodeRoleSkirt;
+
+  /// No description provided for @gcodeRoleBrim.
+  ///
+  /// In en, this message translates to:
+  /// **'Brim'**
+  String get gcodeRoleBrim;
+
+  /// No description provided for @gcodeRoleSupportTransition.
+  ///
+  /// In en, this message translates to:
+  /// **'Support transition'**
+  String get gcodeRoleSupportTransition;
+
+  /// No description provided for @gcodeRoleWipeTower.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe tower'**
+  String get gcodeRoleWipeTower;
+
+  /// No description provided for @gcodeRoleMixed.
+  ///
+  /// In en, this message translates to:
+  /// **'Mixed'**
+  String get gcodeRoleMixed;
+
+  /// No description provided for @gcodeMoveWipe.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe'**
+  String get gcodeMoveWipe;
+
+  /// No description provided for @gcodeMoveRetract.
+  ///
+  /// In en, this message translates to:
+  /// **'Retract'**
+  String get gcodeMoveRetract;
+
+  /// No description provided for @gcodeMoveUnretract.
+  ///
+  /// In en, this message translates to:
+  /// **'Unretract'**
+  String get gcodeMoveUnretract;
+
+  /// No description provided for @gcodeMoveSeam.
+  ///
+  /// In en, this message translates to:
+  /// **'Seam'**
+  String get gcodeMoveSeam;
+
+  /// No description provided for @gcodeMoveToolChange.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool change'**
+  String get gcodeMoveToolChange;
+
+  /// No description provided for @gcodeMoveColorChange.
+  ///
+  /// In en, this message translates to:
+  /// **'Colour change'**
+  String get gcodeMoveColorChange;
+
+  /// No description provided for @gcodeMovePausePrint.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause print'**
+  String get gcodeMovePausePrint;
+
+  /// No description provided for @gcodeMoveCustomGcode.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom G-code'**
+  String get gcodeMoveCustomGcode;
+
   /// No description provided for @projectZOffset.
   ///
   /// In en, this message translates to:

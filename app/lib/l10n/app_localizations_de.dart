@@ -226,6 +226,57 @@ class AppLocalizationsDe extends AppLocalizations {
   String get layerTypeUnknown => 'Unbekannt';
 
   @override
+  String get gcodeRoleOverhang => 'Überhang';
+
+  @override
+  String get gcodeRoleIroning => 'Bügeln';
+
+  @override
+  String get gcodeRoleInternalBridge => 'Innenbrücke';
+
+  @override
+  String get gcodeRoleGapFill => 'Lückenfüllung';
+
+  @override
+  String get gcodeRoleSkirt => 'Skirt';
+
+  @override
+  String get gcodeRoleBrim => 'Brim';
+
+  @override
+  String get gcodeRoleSupportTransition => 'Stützen-Übergang';
+
+  @override
+  String get gcodeRoleWipeTower => 'Wischtuch';
+
+  @override
+  String get gcodeRoleMixed => 'Gemischt';
+
+  @override
+  String get gcodeMoveWipe => 'Wischen';
+
+  @override
+  String get gcodeMoveRetract => 'Rückzug';
+
+  @override
+  String get gcodeMoveUnretract => 'Vorschub';
+
+  @override
+  String get gcodeMoveSeam => 'Nahtpunkt';
+
+  @override
+  String get gcodeMoveToolChange => 'Werkzeugwechsel';
+
+  @override
+  String get gcodeMoveColorChange => 'Farbwechsel';
+
+  @override
+  String get gcodeMovePausePrint => 'Pause';
+
+  @override
+  String get gcodeMoveCustomGcode => 'Custom G-Code';
+
+  @override
   String get projectZOffset =>
       'Z-Offset pro Seite (wird beim Slicen angewendet)';
 

@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../engine/bounds_check.dart';
 import '../engine/gcode_parser.dart';
 import '../engine/slicer.dart';
+import '../engine/toolpath_parser.dart';
 import '../settings/settings_overrides.dart';
 
 // Zentraler Zustand des aktiven Projekts. Nicht persistent (ausser
@@ -44,6 +45,14 @@ class ProjectState extends ChangeNotifier {
   bool get sliceGeometryBuilding => _sliceGeometryBuilding;
   String? get sliceGeometryError => _sliceGeometryError;
   GcodeProgress? get sliceGeometryProgress => _sliceGeometryProgress;
+
+  // Pflicht 7c — toolpaths from the CLI's `--export-toolpaths`
+  // artefact. Preferred over `_sliceGeometry` by the UI: it is
+  // Orca's own GCodeProcessor output, so the roles, widths and
+  // colours line up with the desktop.
+  Toolpaths? _sliceToolpaths;
+  String? _sliceToolpathsPath;
+  Toolpaths? get sliceToolpaths => _sliceToolpaths;
 
   String? _previewMeshPath;
   // Raw-RGBA 'HSPB' thumbnail built next to the HSPM, used by the
@@ -154,13 +163,15 @@ class ProjectState extends ChangeNotifier {
     _sliceGeometry = null;
     _sliceGeometryError = null;
     _sliceGeometryProgress = null;
+    _sliceToolpaths = null;
+    _sliceToolpathsPath = null;
     notifyListeners();
   }
 
-  // Pflicht 7b — parse the g-code produced by the last slice into
-  // the compact `GcodeGeometry` the layer view consumes. Spawns an
-  // isolate; emits progress on the main thread. Idempotent: if the
-  // last-parsed path matches the current slice output, a no-op.
+  // Pflicht 7b/7c — build the layer-view input from the last
+  // slice: prefer the HSPT (`_sliceToolpathsPath`) written by
+  // `--export-toolpaths` on the way out of the slicer; fall back
+  // to the Dart g-code parser if the HSPT is missing.
   Future<void> parseSliceGeometry() async {
     final slice = _lastSlice;
     if (slice == null) return;
@@ -168,20 +179,35 @@ class ProjectState extends ChangeNotifier {
     _sliceGeometryBuilding = true;
     _sliceGeometryError = null;
     _sliceGeometry = null;
+    _sliceToolpaths = null;
     _sliceGeometryProgress = null;
     notifyListeners();
-    try {
-      final g = await parseGcode(slice.gcodePath, onProgress: (p) {
-        _sliceGeometryProgress = p;
-        notifyListeners();
-      });
-      _sliceGeometry = g;
-    } catch (e) {
-      _sliceGeometryError = e.toString();
-    } finally {
-      _sliceGeometryBuilding = false;
-      notifyListeners();
+    // Try the CLI-produced HSPT first; this is the Orca-source
+    // path and matches the desktop viewer.
+    final tp = _sliceToolpathsPath;
+    if (tp != null && await File(tp).exists()) {
+      try {
+        _sliceToolpaths = await loadToolpaths(tp);
+      } catch (e) {
+        // Fall through to the g-code parser below so the layer
+        // view still shows something; keep the error for a UI
+        // hint.
+        _sliceGeometryError = 'toolpaths load failed: $e';
+      }
     }
+    if (_sliceToolpaths == null) {
+      try {
+        final g = await parseGcode(slice.gcodePath, onProgress: (p) {
+          _sliceGeometryProgress = p;
+          notifyListeners();
+        });
+        _sliceGeometry = g;
+      } catch (e) {
+        _sliceGeometryError = e.toString();
+      }
+    }
+    _sliceGeometryBuilding = false;
+    notifyListeners();
   }
 
   // Pflicht 7a — fire-and-forget preview-mesh build. Caller is the
@@ -303,10 +329,12 @@ class ProjectState extends ChangeNotifier {
       for (final e in slotOverrides.entries) {
         merged.putIfAbsent(e.key, () => e.value);
       }
+      _sliceToolpathsPath = '$outputPath.hspt';
       final r = await slicer.slice(
         modelPath: _modelPath!,
         bedType: _bedType,
         outputPath: outputPath,
+        outputToolpathsPath: _sliceToolpathsPath,
         zOffsetMm: zOffsetFor(_bedType),
         overrides: merged,
         filamentProfileRelative: filamentProfileRelative,

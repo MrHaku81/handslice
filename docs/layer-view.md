@@ -1,4 +1,97 @@
-# Layer preview — Pflicht 7b
+# Layer preview — Pflicht 7b / 7c
+
+Pflicht 7c (2026-11-01): the authoritative data path is now the
+CLI's HSPT binary produced by `handslice-cli --export-toolpaths`.
+The Dart g-code parser documented below stays as a fallback for
+files that do not come with an HSPT sidecar.
+
+## HSPT — handslice toolpaths binary
+
+Dumped by `handslice-cli --export-toolpaths <path>` either as a
+byproduct of slicing or in `--input-gcode <path>` mode (which
+runs `GCodeProcessor::process_file()` on an existing .gcode and
+exits without slicing).
+
+```
+Header (16 B, little-endian):
+  magic     "HSPT"               4 B
+  version   u32 = 1               4 B
+  flags     u32 = 0 (reserved)    4 B
+  n_moves   u32                   4 B
+
+Per-move record (28 B each, little-endian):
+  u8  role            libslic3r::ExtrusionRole code (0..19)
+  u8  extruder        0..255
+  u8  move_type       libslic3r::EMoveType code    (0..10)
+  u8  pad             0
+  u16 layer_id        0..65535
+  u16 width_x100      extrusion width in 0.01-mm units
+  u16 height_x100     extrusion height in 0.01-mm units
+  u16 feedrate_mm_s   0..65535
+  f32 x, y, z         mm
+  f32 delta_extruder  mm, signed (per-move E delta)
+```
+
+The record size is 28 B so a Pflicht-6-sized print (~2.4 M
+moves on `auryn-x86.gcode`) weighs ≈ 67 MB on disk — about the
+same as the source g-code, and the Dart side can mmap-style
+read it as one Float32/Uint8 view without parsing text.
+
+Fields we deliberately drop today: `fan_speed`, `temperature`,
+`pressure_advance`, `acceleration`, `jerk`, `layer_duration`,
+`actual_feedrate`, `mm3_per_mm`, `gcode_id`. None of them are
+consumed by the Dart viewer yet; adding one is a header-flag
++ record-size bump.
+
+### Internal-only move filter
+
+`GCodeProcessor` inserts a parallel "actual speed" vertex for
+each real move (with `internal_only = true`). The CLI writer
+drops those; otherwise the record stream triples in size and
+the summed `delta_extruder` triples too. Mirrors how
+`libvgcode` filters internal-only moves on load.
+
+### Self-check against the g-code footer
+
+On the thumbnail-cube test fixture Orca writes
+`; filament used [mm] = 1177.15` in the g-code footer. After
+dropping internal-only moves the HSPT's summed positive
+`delta_extruder` lands at ~1356 mm — about 15 % higher. The gap
+comes from start-g-code purge extrusions (`G1 X87 E20` + prime
+lines) and the end-print retract that Orca excludes from the
+footer. For the UI the role mapping is what matters; the number
+is reported but no test fails on it.
+
+The Dart g-code parser (used only as a fallback) is held to the
+tighter 1 % tolerance because it reads the exact text and does
+no post-processing. See `app/test/gcode_parser_test.dart`.
+
+### Palette
+
+Dart constants in `app/lib/engine/toolpath_parser.dart`
+(`OrcaPalette.roleColor`, `.moveColor`) are a direct port of
+`OrcaSlicer/src/libvgcode/src/ViewerImpl.cpp:283-317`
+(`DEFAULT_EXTRUSION_ROLES_COLORS` and `DEFAULT_OPTIONS_COLORS`).
+The role-order follows libslic3r's `ExtrusionRole` enum
+(ExtrusionEntity.hpp:20), which is what the HSPT byte carries.
+Default visibilities (`OrcaDefaults.visibleRoles`,
+`.visibleMoveOptions`) match `libvgcode/src/Settings.hpp:33-71`
+— every extrusion role on, travel / wipe / retract / unretract
+/ tool-change / colour-change / pause / custom-g-code off,
+seams on.
+
+### Rendering notes
+
+flutter_scene's `LineSegmentsGeometry` takes a single
+`width` per instance. We bucket by role and feed each
+`LineSegmentsGeometry` the width of the first extruding move
+of that role (which matches Orca's `;WIDTH:` comment). Per-
+move width ribbons that change thickness mid-path would need a
+custom shader and remain a 7c follow-up.
+
+---
+
+# Layer preview — Pflicht 7b (fallback path)
 
 Status: on-device numbers pending Klaus' Poco run. Report in
 English per the current project-language rule.

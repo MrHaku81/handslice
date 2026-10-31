@@ -169,6 +169,10 @@ class SlicerService {
     required String modelPath,
     required BedType bedType,
     required String outputPath,
+    // Pflicht 7c: if set, the CLI also writes the HSPT toolpath
+    // artefact alongside the g-code; the app's layer view
+    // prefers that over its Dart g-code fallback.
+    String? outputToolpathsPath,
     double zOffsetMm = 0.0,
     // Standardverhalten: Modell wie Orca-GUI auf die Platte setzen –
     // XY mittig auf das Druckbett (ModelObject::center_around_origin
@@ -211,6 +215,8 @@ class SlicerService {
       if (applyZ) ...['--z-offset', zOffsetMm.toStringAsFixed(3)],
       if (overrides.isNotEmpty)
         ...['--overrides', jsonEncode(overrides)],
+      if (outputToolpathsPath != null)
+        ...['--export-toolpaths', outputToolpathsPath],
       '--quiet',
       if (noCenter) '--no-center',
       modelPath,
@@ -313,6 +319,43 @@ class SlicerService {
     final exitCode  = await proc.exitCode;
     final stderrStr = await stderrFut;
     await stdoutFut;  // drain
+    if (exitCode != 0) {
+      final killed = exitCode < 0 || exitCode == 137 || exitCode == 143;
+      throw SliceProcessException(
+        exitCode: exitCode,
+        killedBySignal: killed,
+        stderr: stderrStr,
+        args: args,
+        binary: _binaryPath!,
+      );
+    }
+  }
+
+  // Pflicht 7c — standalone g-code → HSPT converter. Runs the
+  // CLI with `--input-gcode <path> --export-toolpaths <path>`,
+  // which skips slicing entirely and only exercises
+  // GCodeProcessor::process_file. Used for g-code files pulled
+  // from the printer that never ran through our slice path.
+  Future<void> processGcodeToToolpaths({
+    required String gcodePath,
+    required String outputToolpathsPath,
+    void Function(Process proc)? onProcessStarted,
+  }) async {
+    if (!isReady) {
+      throw StateError('SlicerService.init() wurde nicht aufgerufen');
+    }
+    final args = <String>[
+      '--input-gcode', gcodePath,
+      '--export-toolpaths', outputToolpathsPath,
+      '--quiet',
+    ];
+    final proc = await Process.start(_binaryPath!, args);
+    if (onProcessStarted != null) onProcessStarted(proc);
+    final stdoutFut = proc.stdout.transform(utf8.decoder).join();
+    final stderrFut = proc.stderr.transform(utf8.decoder).join();
+    final exitCode = await proc.exitCode;
+    final stderrStr = await stderrFut;
+    await stdoutFut;
     if (exitCode != 0) {
       final killed = exitCode < 0 || exitCode == 137 || exitCode == 143;
       throw SliceProcessException(

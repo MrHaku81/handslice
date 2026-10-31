@@ -223,6 +223,57 @@ class AppLocalizationsEn extends AppLocalizations {
   String get layerTypeUnknown => 'Unknown';
 
   @override
+  String get gcodeRoleOverhang => 'Overhang wall';
+
+  @override
+  String get gcodeRoleIroning => 'Ironing';
+
+  @override
+  String get gcodeRoleInternalBridge => 'Internal bridge';
+
+  @override
+  String get gcodeRoleGapFill => 'Gap fill';
+
+  @override
+  String get gcodeRoleSkirt => 'Skirt';
+
+  @override
+  String get gcodeRoleBrim => 'Brim';
+
+  @override
+  String get gcodeRoleSupportTransition => 'Support transition';
+
+  @override
+  String get gcodeRoleWipeTower => 'Wipe tower';
+
+  @override
+  String get gcodeRoleMixed => 'Mixed';
+
+  @override
+  String get gcodeMoveWipe => 'Wipe';
+
+  @override
+  String get gcodeMoveRetract => 'Retract';
+
+  @override
+  String get gcodeMoveUnretract => 'Unretract';
+
+  @override
+  String get gcodeMoveSeam => 'Seam';
+
+  @override
+  String get gcodeMoveToolChange => 'Tool change';
+
+  @override
+  String get gcodeMoveColorChange => 'Colour change';
+
+  @override
+  String get gcodeMovePausePrint => 'Pause print';
+
+  @override
+  String get gcodeMoveCustomGcode => 'Custom G-code';
+
+  @override
   String get projectZOffset => 'Z-offset per plate (applied at slice time)';
 
   @override

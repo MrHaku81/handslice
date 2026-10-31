@@ -15,10 +15,12 @@ import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
 import '../engine/gcode_parser.dart';
+import '../engine/toolpath_parser.dart';
 import '../widgets/build_info_badge.dart';
 import '../widgets/layer_view.dart';
 import '../widgets/plate_view.dart';
 import '../widgets/printer_panel.dart';
+import '../widgets/toolpath_layer_view.dart';
 import '../widgets/workshop_card.dart';
 import '../widgets/workshop_row.dart';
 
@@ -450,13 +452,13 @@ class _PlateViewCardState extends State<_PlateViewCard> {
   // state directly and track the edge.
   void _onStateChanged() {
     final ps = widget.projectState;
-    final hasGeom = ps.sliceGeometry != null;
-    if (hasGeom && !_sawGeometry && mounted) {
+    final hasAnyLayer = ps.sliceGeometry != null || ps.sliceToolpaths != null;
+    if (hasAnyLayer && !_sawGeometry && mounted) {
       setState(() {
         _tab = _SceneCardTab.layers;
         _sawGeometry = true;
       });
-    } else if (!hasGeom && _sawGeometry) {
+    } else if (!hasAnyLayer && _sawGeometry) {
       _sawGeometry = false;
     }
     if (ps.modelPath != _trackedModelPath) {
@@ -487,7 +489,9 @@ class _PlateViewCardState extends State<_PlateViewCard> {
     final layerProgress = projectState.sliceGeometryProgress;
     final layerError = projectState.sliceGeometryError;
     final layerGeom = projectState.sliceGeometry;
-    final layersAvailable = layerGeom != null || layerBuilding;
+    final layerToolpaths = projectState.sliceToolpaths;
+    final layersAvailable =
+        layerGeom != null || layerToolpaths != null || layerBuilding;
 
     return WorkshopCard(
       child: Column(
@@ -541,7 +545,7 @@ class _PlateViewCardState extends State<_PlateViewCard> {
           if (_tab == _SceneCardTab.model)
             _modelTab(context, l, color, hspm, building, err)
           else
-            _layerTab(context, l, layerGeom, layerBuilding,
+            _layerTab(context, l, layerToolpaths, layerGeom, layerBuilding,
                 layerProgress, layerError),
         ],
       ),
@@ -592,6 +596,7 @@ class _PlateViewCardState extends State<_PlateViewCard> {
   }
 
   Widget _layerTab(BuildContext context, AppLocalizations l,
+      Toolpaths? toolpaths,
       GcodeGeometry? geom, bool building,
       GcodeProgress? progress, String? err) {
     final theme = Theme.of(context);
@@ -625,6 +630,32 @@ class _PlateViewCardState extends State<_PlateViewCard> {
         ],
       );
     }
+    // Prefer the CLI-produced toolpaths (Orca palette, real
+    // widths, exact role mapping); fall back to the Dart g-code
+    // parser only when the CLI did not emit an HSPT.
+    if (toolpaths != null) {
+      return ToolpathLayerView(
+        toolpaths: toolpaths,
+        onInteractionChanged: onInteractionChanged,
+        labels: ToolpathLayerViewLabels(
+          layer: l.layerViewLayer,
+          of: l.layerViewOf,
+          resetView: l.plateViewReset,
+          top: l.plateViewTop,
+          front: l.plateViewFront,
+          oblique: l.plateViewOblique,
+          zoomIn: l.plateViewZoomIn,
+          zoomOut: l.plateViewZoomOut,
+          pathTypes: l.layerViewPathTypes,
+          renderer3d: l.layerViewRenderer3d,
+          renderer2d: l.layerViewRenderer2d,
+          decrementLayer: l.layerViewDecrement,
+          incrementLayer: l.layerViewIncrement,
+          roleLabel: (r) => _localizedRole(l, r),
+          moveLabel: (m) => _localizedMove(l, m),
+        ),
+      );
+    }
     if (geom == null) {
       return Text(l.projectLayerViewEmpty,
           style: theme.textTheme.bodySmall
@@ -652,6 +683,46 @@ class _PlateViewCardState extends State<_PlateViewCard> {
         typeLabel: (t) => _localizedType(l, t),
       ),
     );
+  }
+
+  String _localizedRole(AppLocalizations l, GcodeRole r) {
+    switch (r) {
+      case GcodeRole.none:                     return l.layerTypeUnknown;
+      case GcodeRole.perimeter:                return l.layerTypeInnerWall;
+      case GcodeRole.externalPerimeter:        return l.layerTypeOuterWall;
+      case GcodeRole.overhangPerimeter:        return l.gcodeRoleOverhang;
+      case GcodeRole.internalInfill:           return l.layerTypeInternalInfill;
+      case GcodeRole.solidInfill:              return l.layerTypeSolidInfill;
+      case GcodeRole.topSolidInfill:           return l.layerTypeTopSurface;
+      case GcodeRole.bottomSurface:            return l.layerTypeBottomSurface;
+      case GcodeRole.ironing:                  return l.gcodeRoleIroning;
+      case GcodeRole.bridgeInfill:             return l.layerTypeBridge;
+      case GcodeRole.internalBridgeInfill:     return l.gcodeRoleInternalBridge;
+      case GcodeRole.gapFill:                  return l.gcodeRoleGapFill;
+      case GcodeRole.skirt:                    return l.gcodeRoleSkirt;
+      case GcodeRole.brim:                     return l.gcodeRoleBrim;
+      case GcodeRole.supportMaterial:          return l.layerTypeSupport;
+      case GcodeRole.supportMaterialInterface: return l.layerTypeSupportInterface;
+      case GcodeRole.supportTransition:        return l.gcodeRoleSupportTransition;
+      case GcodeRole.wipeTower:                return l.gcodeRoleWipeTower;
+      case GcodeRole.custom:                   return l.layerTypeCustom;
+      case GcodeRole.mixed:                    return l.gcodeRoleMixed;
+    }
+  }
+  String _localizedMove(AppLocalizations l, MoveType m) {
+    switch (m) {
+      case MoveType.travel:        return l.layerTypeTravel;
+      case MoveType.wipe:          return l.gcodeMoveWipe;
+      case MoveType.retract:       return l.gcodeMoveRetract;
+      case MoveType.unretract:     return l.gcodeMoveUnretract;
+      case MoveType.seam:          return l.gcodeMoveSeam;
+      case MoveType.toolChange:    return l.gcodeMoveToolChange;
+      case MoveType.colorChange:   return l.gcodeMoveColorChange;
+      case MoveType.pausePrint:    return l.gcodeMovePausePrint;
+      case MoveType.customGcode:   return l.gcodeMoveCustomGcode;
+      case MoveType.noop:          return '';
+      case MoveType.extrude:       return '';
+    }
   }
 
   String _localizedType(AppLocalizations l, PathType t) {

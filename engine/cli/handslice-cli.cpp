@@ -114,6 +114,17 @@ struct Args {
     // (Pflicht 7a) to produce a plate-view HSPM without paying
     // the full slice. --output is not required with --no-slice.
     bool no_slice = false;
+    // Pflicht 7c:
+    //   --export-toolpaths <path> emits GCodeProcessorResult::moves
+    //     as a packed HSPT binary (format described in docs/
+    //     layer-view.md). Combined with slicing, it is written
+    //     as a byproduct of export_gcode(); combined with
+    //     --input-gcode <path>, the CLI skips slicing entirely
+    //     and runs GCodeProcessor::process_file() on the given
+    //     g-code file (which is how we also handle files
+    //     downloaded from the printer).
+    std::string toolpaths_path;
+    std::string input_gcode_path;
     // --export-thumbnail-raw <path>: render a standalone thumbnail
     // via the Pflicht 6 software rasterizer and write it as
     // 'HSPB' + u32 version=1 + u32 w + u32 h + RGBA bytes. Used
@@ -187,7 +198,18 @@ void usage(std::ostream& os) {
         "             version=1 + u32 w + u32 h + RGBA bytes. Used by the\n"
         "             project-tab 3D view as a fallback when flutter_scene\n"
         "             cannot start on a device.\n"
-        "--thumbnail-size WxH    Thumbnail resolution; defaults to 512x512.\n";
+        "--thumbnail-size WxH    Thumbnail resolution; defaults to 512x512.\n"
+        "\n"
+        "--export-toolpaths <path>\n"
+        "             Write GCodeProcessorResult::moves to <path> as the\n"
+        "             packed HSPT binary (one 28 B record per move; see\n"
+        "             docs/layer-view.md for the schema). As a byproduct\n"
+        "             of slicing when --input-gcode is not given.\n"
+        "--input-gcode <path>  (mutually exclusive with --output + model)\n"
+        "             Skip slicing and run GCodeProcessor::process_file()\n"
+        "             on an existing .gcode file (e.g. one downloaded\n"
+        "             from the printer). Must be combined with\n"
+        "             --export-toolpaths.\n";
 }
 
 Args parse_args(int argc, char** argv) {
@@ -221,6 +243,12 @@ Args parse_args(int argc, char** argv) {
             a.preview_mesh_path = need_val("--export-preview-mesh");
         }
         else if (arg == "--no-slice") a.no_slice = true;
+        else if (arg == "--export-toolpaths") {
+            a.toolpaths_path = need_val("--export-toolpaths");
+        }
+        else if (arg == "--input-gcode") {
+            a.input_gcode_path = need_val("--input-gcode");
+        }
         else if (arg == "--export-thumbnail-raw") {
             a.thumbnail_raw_path = need_val("--export-thumbnail-raw");
         }
@@ -297,6 +325,15 @@ Args parse_args(int argc, char** argv) {
     // libslic3r-Options-Definitionen. Alle anderen Argumente werden
     // ignoriert.
     if (a.dump_schema) return a;
+    // --input-gcode is a standalone mode that only exercises
+    // GCodeProcessor::process_file; no slicer, no model, no
+    // profiles. It must come with --export-toolpaths.
+    if (!a.input_gcode_path.empty()) {
+        if (a.toolpaths_path.empty()) {
+            die("--input-gcode requires --export-toolpaths");
+        }
+        return a;
+    }
     const bool output_optional = a.no_slice;
     if (a.machine.empty() || a.process.empty() || a.filaments.empty()
         || a.resources_dir.empty() || a.input_path.empty()
@@ -310,6 +347,11 @@ Args parse_args(int argc, char** argv) {
     }
     if (!a.thumbnail_raw_path.empty() && !a.no_slice) {
         die("--export-thumbnail-raw requires --no-slice");
+    }
+    if (!a.toolpaths_path.empty() && a.no_slice) {
+        die("--export-toolpaths requires a full slice (not --no-slice); "
+            "use --input-gcode <path> --export-toolpaths <path> to run "
+            "GCodeProcessor on an existing g-code without slicing");
     }
     return a;
 }
@@ -451,6 +493,94 @@ Vec3d compute_bed_center(const DynamicPrintConfig& cfg) {
         hi.y() = std::max(hi.y(), p.y());
     }
     return Vec3d(0.5 * (lo.x() + hi.x()), 0.5 * (lo.y() + hi.y()), 0.0);
+}
+
+// Pflicht 7c — write a GCodeProcessorResult as the packed HSPT
+// (Handslice ToolPaths) binary. Format:
+//
+//   Header (16 B, LE):
+//     magic   = "HSPT"           (4 B)
+//     version = u32 1            (4 B)
+//     flags   = u32 0            (4 B, reserved)
+//     n_moves = u32               (4 B)
+//
+//   Per-move record (28 B each, LE):
+//     u8  role            Orca ExtrusionRole (erNone=0 … erCount)
+//     u8  extruder        0..255
+//     u8  move_type       Orca EMoveType     (Noop=0 … Extrude=10)
+//     u8  pad             0
+//     u16 layer_id        clamp to 65535
+//     u16 width_x100      extrusion width in 0.01-mm units
+//     u16 height_x100     extrusion height in 0.01-mm units
+//     u16 feedrate_mm_s   clamp to 65535
+//     f32 x, y, z         mm
+//     f32 delta_extruder  mm (per-move E delta; sums to filament-
+//                         used total)
+//
+// 28 bytes per move keeps the artefact roughly the size of the
+// g-code it was built from (2.4 M moves on auryn-x86 ≈ 67 MB).
+// Fields outside the viewer's hot path (temperature, fan,
+// pressure advance, …) are intentionally dropped for now; the
+// Dart viewer does not consume them yet, and adding them later
+// is a header-flag + record-size bump.
+void write_toolpaths_hspt(const std::string& out_path,
+                          const GCodeProcessorResult& gcr,
+                          bool quiet) {
+    std::ofstream f(out_path, std::ios::binary);
+    if (!f) die("cannot open toolpaths output: " + out_path);
+    auto w32 = [&](uint32_t v) {
+        f.write(reinterpret_cast<const char*>(&v), 4);
+    };
+    auto wu16 = [&](uint16_t v) {
+        f.write(reinterpret_cast<const char*>(&v), 2);
+    };
+    auto wu8  = [&](uint8_t v) {
+        f.write(reinterpret_cast<const char*>(&v), 1);
+    };
+    auto wf = [&](float v) {
+        f.write(reinterpret_cast<const char*>(&v), 4);
+    };
+    const auto& all_moves = gcr.moves;
+    // Drop GCodeProcessor's internal-only moves (the "actual
+    // speed" visualization inserts duplicate vertices with
+    // internal_only=true next to each real move). Counting them
+    // triples the extrusion sum and crowds the viewer with
+    // overlapping segments. The viewer in Orca treats them the
+    // same way (filtered in libvgcode).
+    uint32_t n_out = 0;
+    for (const auto& m : all_moves) {
+        if (!m.internal_only) ++n_out;
+    }
+    f.write("HSPT", 4);
+    w32(1u);
+    w32(0u);
+    w32(n_out);
+    auto clamp16 = [](float v) -> uint16_t {
+        if (v <= 0.0f) return 0;
+        if (v >= 65535.0f) return 65535;
+        return static_cast<uint16_t>(v + 0.5f);
+    };
+    for (const auto& m : all_moves) {
+        if (m.internal_only) continue;
+        wu8(static_cast<uint8_t>(m.extrusion_role));
+        wu8(m.extruder_id);
+        wu8(static_cast<uint8_t>(m.type));
+        wu8(0);
+        wu16(static_cast<uint16_t>(
+            m.layer_id > 65535u ? 65535u : m.layer_id));
+        wu16(clamp16(m.width  * 100.0f));
+        wu16(clamp16(m.height * 100.0f));
+        wu16(clamp16(m.feedrate));
+        wf(m.position.x());
+        wf(m.position.y());
+        wf(m.position.z());
+        wf(m.delta_extruder);
+    }
+    if (!quiet)
+        std::cerr << "handslice-cli: wrote " << n_out
+                  << " toolpath moves to " << out_path
+                  << " (dropped " << (all_moves.size() - n_out)
+                  << " internal-only)\n";
 }
 
 void setup_logging(bool quiet) {
@@ -659,6 +789,24 @@ static int run(int argc, char** argv) {
     if (args.dump_schema) {
         json out = dump_options_schema();
         std::cout << out.dump(2) << "\n";
+        return 0;
+    }
+
+    // Pflicht 7c: standalone G-code → toolpaths. Skips slicing
+    // entirely; runs GCodeProcessor::process_file() on the given
+    // .gcode (so files downloaded from the printer also work)
+    // and writes the HSPT binary.
+    if (!args.input_gcode_path.empty()) {
+        if (!args.quiet)
+            std::cerr << "handslice-cli: toolpaths-only mode, input="
+                      << args.input_gcode_path << "\n";
+        GCodeProcessor::s_IsBBLPrinter = false;
+        GCodeProcessor proc;
+        proc.process_file(args.input_gcode_path);
+        write_toolpaths_hspt(args.toolpaths_path, proc.get_result(),
+                             args.quiet);
+        std::cout << "{\"toolpaths_only\":true,\"moves\":"
+                  << proc.get_result().moves.size() << "}\n" << std::flush;
         return 0;
     }
 
@@ -1028,6 +1176,13 @@ static int run(int argc, char** argv) {
     const std::string written_path = print.export_gcode(args.output_path, &gcr, thumbnail_cb);
     if (written_path.empty())
         die("export_gcode returned empty path – nothing written");
+
+    // 7b. Pflicht 7c: optional dump toolpaths. `gcr.moves` is
+    // populated by GCodeProcessor inside export_gcode(); no extra
+    // parse pass needed.
+    if (!args.toolpaths_path.empty()) {
+        write_toolpaths_hspt(args.toolpaths_path, gcr, args.quiet);
+    }
 
     // 8. Kennzahlen als JSON auf stdout.
     const json out = emit_statistics(print, gcr, written_path);
