@@ -189,5 +189,25 @@
   "substateResumed": "Resumed",
 
   "printerNotConnected": "Printer not connected.",
-  "printerConnectHint": "Pair and connect from the Project tab."
+  "printerConnectHint": "Pair and connect from the Project tab.",
+
+  "printControlSectionLabel": "Print controls",
+  "printControlPause": "Pause",
+  "printControlResume": "Resume",
+  "printControlCancel": "Cancel print",
+  "printControlCancelConfirmTitle": "Cancel the running print?",
+  "printControlCancelConfirmBody": "This stops the print immediately. It cannot be undone from the app.",
+  "printControlCancelConfirmYes": "Yes, cancel",
+  "printControlCancelConfirmNo": "Keep printing",
+  "printControlLightLabel": "Chamber light",
+  "printControlLightUnknown": "unknown (printer doesn't broadcast light state)",
+  "printControlResumeHint": "Resume sent — the printer replies only after the move completes (up to ~2 min).",
+  "printControlFailedPause": "Pause rejected by the printer: {detail}",
+  "@printControlFailedPause": {"placeholders": {"detail": {"type": "String"}}},
+  "printControlFailedCancel": "Cancel rejected by the printer: {detail}",
+  "@printControlFailedCancel": {"placeholders": {"detail": {"type": "String"}}},
+  "printControlFailedLight": "Chamber light command failed: {detail}",
+  "@printControlFailedLight": {"placeholders": {"detail": {"type": "String"}}},
+  "printPhaseCancelling": "Cancelling…",
+  "printPhaseCancelled": "Cancelled"
 }

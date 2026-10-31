@@ -7,6 +7,28 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../net/elegoo_cc2_client.dart';
 
+// Phasen des Drucks, abgeleitet aus `machine_status.status` +
+// `machine_status.sub_status`. Codes stammen aus
+// `elegooofficial/CentauriCarbon2/elegoo/common/method.h` und sind
+// im Block-A-Mitschnitt (2026-10-31) als tatsaechlich gepusht
+// belegt (siehe docs/networking-cc2.md).
+enum PrintPhase {
+  // machine_status.status fehlt oder noch nicht gelesen.
+  unknown,
+  // status == 1
+  idle,
+  // status != 1, keine der besonderen sub_status-Codes aktiv.
+  printing,
+  // sub_status in {2501, 2502, 2505}
+  paused,
+  // sub_status in {2401, 2402} — Resume-Transition
+  resuming,
+  // sub_status == 2503 — Cancel laeuft
+  cancelling,
+  // sub_status == 2504 — Cancel abgeschlossen
+  cancelled,
+}
+
 // Verbindungs-/Pairing-Zustand des CC2. Access-Code lebt in
 // flutter_secure_storage (iOS Keychain / Android EncryptedSharedPreferences);
 // nicht in SharedPreferences und nicht in Logs.
@@ -107,6 +129,60 @@ class PrinterState extends ChangeNotifier {
   bool get isIdle => machineStatus == statusIdle;
   bool get isPrinting =>
       machineStatus != null && machineStatus != statusIdle;
+
+  // --- M6: Phase + Steuerungs-Zustand ---
+
+  int? get subStatus => _getInt(['machine_status', 'sub_status']);
+
+  // Codes gemaess method.h / Block-A-Mitschnitt:
+  //   2501 PRINT_PAUSE_SUCCESS, 2502 PAUSE_STATE, 2505 PAUSE_FILA (Filament-Pause)
+  //   2401 PRINT_RESUME_SUCCESS, 2402 CONTINUE_HEAT (Transition zur Printing-Phase)
+  //   2503 PRINT_CANCEL_START,  2504 PRINT_CANCEL_SUCCESS
+  // "paused" sammelt die drei Pause-Varianten; die UI unterscheidet
+  // Filament-Zufuhr-Fehler erst zusaetzlich ueber exception_status
+  // (siehe isFilamentFeedError).
+  PrintPhase get printPhase {
+    final s = machineStatus;
+    if (s == null) return PrintPhase.unknown;
+    if (s == statusIdle) return PrintPhase.idle;
+    final sub = subStatus;
+    switch (sub) {
+      case 2501:
+      case 2502:
+      case 2505:
+        return PrintPhase.paused;
+      case 2401:
+      case 2402:
+        return PrintPhase.resuming;
+      case 2503:
+        return PrintPhase.cancelling;
+      case 2504:
+        return PrintPhase.cancelled;
+      default:
+        return PrintPhase.printing;
+    }
+  }
+
+  // exception_status 1243 = Filament-Zufuhr-Fehler (method.h,
+  // Enumeration FILAMENT_FEED_FAIL). Erscheint im Mitschnitt als
+  // Eintrag im `exception_status`-Array; die Phase wechselt dabei
+  // ueblicherweise auf sub_status 2505 (PAUSE_FILA).
+  bool get isFilamentFeedError {
+    final list = exceptionStatus;
+    if (list == null) return false;
+    return list.contains(1243);
+  }
+
+  // --- Licht-Zustand ---
+  //
+  // Die CC2-Firmware pusht KEIN `light`/`chamber_light`-Feld
+  // auf `api_status` – im Block-A-Mitschnitt und in allen frueheren
+  // Capture-Logs: 0 Treffer. Deshalb halten wir den zuletzt vom
+  // Nutzer gesetzten Wert hier lokal; `lightOn` ist `null`, bis zum
+  // ersten `setLight(...)`-Aufruf (UI zeigt dann "unbekannt" an).
+
+  bool? _lightOn;
+  bool? get lightOn => _lightOn;
 
   // Zeitraffer-Capability. Reihenfolge der Belege:
   //  - `external_device.chassis_camera.configured == 1` → unterstuetzt
@@ -351,6 +427,102 @@ class PrinterState extends ChangeNotifier {
       _lastError = e.message; notifyListeners(); return null;
     } catch (e) {
       _lastError = e.toString(); notifyListeners(); return null;
+    }
+  }
+
+  // --- M6: Druck-Steuerung + Licht ---
+
+  // Buttons sollen nicht doppelt feuern; `_controlInFlight` sperrt
+  // waehrend des RPC-Umlaufs. Kein automatisches Retry: Klaus loest
+  // Fehler visuell am Panel.
+  bool _controlInFlight = false;
+  bool get controlInFlight => _controlInFlight;
+
+  Future<bool> pausePrint() async {
+    if (printPhase != PrintPhase.printing || _controlInFlight) return false;
+    _controlInFlight = true; _lastError = null; notifyListeners();
+    try {
+      final r = await _client.pausePrint();
+      final code = ((r['result'] as Map?)?['error_code'] ?? -1) as int;
+      if (code != 0) {
+        _lastError = 'control.pause.error_code.$code';
+      }
+      return code == 0;
+    } on TimeoutException {
+      _lastError = 'control.pause.timeout';
+      return false;
+    } catch (e) {
+      _lastError = e.toString();
+      return false;
+    } finally {
+      _controlInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> cancelPrint() async {
+    if (!(printPhase == PrintPhase.printing || printPhase == PrintPhase.paused)
+        || _controlInFlight) {
+      return false;
+    }
+    _controlInFlight = true; _lastError = null; notifyListeners();
+    try {
+      final r = await _client.cancelPrint();
+      final code = ((r['result'] as Map?)?['error_code'] ?? -1) as int;
+      if (code != 0) {
+        _lastError = 'control.cancel.error_code.$code';
+      }
+      return code == 0;
+    } on TimeoutException {
+      _lastError = 'control.cancel.timeout';
+      return false;
+    } catch (e) {
+      _lastError = e.toString();
+      return false;
+    } finally {
+      _controlInFlight = false;
+      notifyListeners();
+    }
+  }
+
+  // Fire-and-forget. Erfolg zeigt sich an der sub_status-Transition
+  // 2401 → 2402 im naechsten `api_status`-Delta; die UI reagiert
+  // dort. Kein Timeout, kein Retry.
+  bool resumePrint() {
+    if (printPhase != PrintPhase.paused || _controlInFlight) return false;
+    try {
+      _client.resumePrint();
+      _lastError = null;
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _lastError = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> setLight(bool power) async {
+    if (_state != CanvasConnection.connected || _controlInFlight) return false;
+    _controlInFlight = true; _lastError = null; notifyListeners();
+    try {
+      final r = await _client.setLight(power);
+      final code = ((r['result'] as Map?)?['error_code'] ?? -1) as int;
+      if (code == 0) {
+        _lightOn = power;
+      } else {
+        _lastError = 'control.light.error_code.$code';
+      }
+      return code == 0;
+    } on TimeoutException {
+      _lastError = 'control.light.timeout';
+      return false;
+    } catch (e) {
+      _lastError = e.toString();
+      return false;
+    } finally {
+      _controlInFlight = false;
+      notifyListeners();
     }
   }
 

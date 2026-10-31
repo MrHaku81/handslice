@@ -423,6 +423,58 @@ class ElegooCc2Client {
                             raw: Map<String, dynamic>.from(r as Map));
   }
 
+  // ---------- M6: Druck-Steuerung (1021/1022/1023) + Licht (1029) ----------
+  //
+  // Formen entsprechen Orcas Vue-UI (docs/networking-cc2.md Tabelle
+  // "Per-method request/response shapes"):
+  //   method 1021 PausePrint  → KEIN params-Objekt (Orca @2510582)
+  //   method 1022 CancelPrint → KEIN params-Objekt (Orca @2511241)
+  //   method 1023 ResumePrint → KEIN params-Objekt (Orca @2510915),
+  //       Reply kommt erst nach Abschluss (~122 s laut Daniel). Daher
+  //       fire-and-forget: wir pushen und beobachten den Erfolg ueber
+  //       die sub_status-Transition 2401 → 2402 im PrinterState.
+  //   method 1029 LightSwitch → params={"power": 0|1}  (Orca @2517873)
+  //       Daniel schickt zusaetzlich {brightness:0|255} (client.py:
+  //       2431-2434), auf fw 02.01.01.07 ist das jedoch unnoetig
+  //       (Block A device test 2026-10-31) – wir folgen Orca.
+  //
+  // Public Payload-Builder sind rein funktional und ohne MQTT-
+  // Abhaengigkeit; die Unit-Tests pruefen die Byte-Form.
+
+  static Map<String, dynamic>? buildPauseParams() => null;
+  static Map<String, dynamic>? buildCancelParams() => null;
+  static Map<String, dynamic>? buildResumeParams() => null;
+  static Map<String, dynamic> buildLightParams(bool power) =>
+      {'power': power ? 1 : 0};
+
+  Future<Map<String, dynamic>> pausePrint(
+      {Duration timeout = const Duration(seconds: 10)}) async {
+    return _request(1021, buildPauseParams(), timeout: timeout);
+  }
+
+  Future<Map<String, dynamic>> cancelPrint(
+      {Duration timeout = const Duration(seconds: 10)}) async {
+    return _request(1022, buildCancelParams(), timeout: timeout);
+  }
+
+  // Fire-and-forget: der echte Reply trifft erst nach dem Abschluss
+  // der Resume-Transition ein (Daniel misst ~122 s). Blockieren bringt
+  // nichts; der UI-Pfad verfolgt den Erfolg via sub_status 2401→2402.
+  // Kein automatisches Retry.
+  void resumePrint() {
+    if (_mqtt == null) {
+      throw StateError('Nicht verbunden');
+    }
+    final id = _nextRequestId();
+    _publishJson('elegoo/$_sn/$_clientId/api_request',
+        {'id': id, 'method': 1023});
+  }
+
+  Future<Map<String, dynamic>> setLight(bool power,
+      {Duration timeout = const Duration(seconds: 10)}) async {
+    return _request(1029, buildLightParams(power), timeout: timeout);
+  }
+
   Future<void> ping() async {
     final client = _mqtt!;
     final sn = _sn!;
@@ -625,7 +677,7 @@ class ElegooCc2Client {
 
   // ---------- intern ----------
 
-  Future<Map<String, dynamic>> _request(int method, Map<String, dynamic> params,
+  Future<Map<String, dynamic>> _request(int method, Map<String, dynamic>? params,
       {Duration timeout = const Duration(seconds: 15)}) async {
     if (_mqtt == null) {
       throw StateError('Nicht verbunden');
@@ -633,8 +685,12 @@ class ElegooCc2Client {
     final id = _nextRequestId();
     final completer = Completer<Map<String, dynamic>>();
     _pendingResponses[id] = completer;
-    _publishJson('elegoo/$_sn/$_clientId/api_request',
-        {'id': id, 'method': method, 'params': params});
+    final body = <String, dynamic>{'id': id, 'method': method};
+    // Orca-UI laesst `params` komplett weg, wenn die Methode keine
+    // Parameter braucht (1021/1022/1023). `null` bedeutet hier:
+    // Feld ganz auslassen; `{}` wuerde ein leeres Objekt senden.
+    if (params != null) body['params'] = params;
+    _publishJson('elegoo/$_sn/$_clientId/api_request', body);
     try {
       return await completer.future.timeout(timeout);
     } on TimeoutException {

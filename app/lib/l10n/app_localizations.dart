@@ -979,6 +979,102 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Pair and connect from the Project tab.'**
   String get printerConnectHint;
+
+  /// No description provided for @printControlSectionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Print controls'**
+  String get printControlSectionLabel;
+
+  /// No description provided for @printControlPause.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause'**
+  String get printControlPause;
+
+  /// No description provided for @printControlResume.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume'**
+  String get printControlResume;
+
+  /// No description provided for @printControlCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel print'**
+  String get printControlCancel;
+
+  /// No description provided for @printControlCancelConfirmTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel the running print?'**
+  String get printControlCancelConfirmTitle;
+
+  /// No description provided for @printControlCancelConfirmBody.
+  ///
+  /// In en, this message translates to:
+  /// **'This stops the print immediately. It cannot be undone from the app.'**
+  String get printControlCancelConfirmBody;
+
+  /// No description provided for @printControlCancelConfirmYes.
+  ///
+  /// In en, this message translates to:
+  /// **'Yes, cancel'**
+  String get printControlCancelConfirmYes;
+
+  /// No description provided for @printControlCancelConfirmNo.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep printing'**
+  String get printControlCancelConfirmNo;
+
+  /// No description provided for @printControlLightLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Chamber light'**
+  String get printControlLightLabel;
+
+  /// No description provided for @printControlLightUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'unknown (printer doesn\'t broadcast light state)'**
+  String get printControlLightUnknown;
+
+  /// No description provided for @printControlResumeHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume sent — the printer replies only after the move completes (up to ~2 min).'**
+  String get printControlResumeHint;
+
+  /// No description provided for @printControlFailedPause.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause rejected by the printer: {detail}'**
+  String printControlFailedPause(String detail);
+
+  /// No description provided for @printControlFailedCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel rejected by the printer: {detail}'**
+  String printControlFailedCancel(String detail);
+
+  /// No description provided for @printControlFailedLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Chamber light command failed: {detail}'**
+  String printControlFailedLight(String detail);
+
+  /// No description provided for @printPhaseCancelling.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelling…'**
+  String get printPhaseCancelling;
+
+  /// No description provided for @printPhaseCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get printPhaseCancelled;
 }
 
 class _AppLocalizationsDelegate

@@ -18,6 +18,111 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 13:15 UTC – M6 Druck-Steuerung + Licht: Code steht, APK auf Poco
+
+Phase 6 Punkt 1+2 der Pflichtliste umgesetzt (Pause/Fortsetzen/Abbrechen
++ Licht). Kein 1007, keine Kamera, keine Dateien in diesem Schritt.
+Geraetetest macht Klaus selbst mit einem kurzen Druck.
+
+### Nachweislich
+
+- `app/lib/net/elegoo_cc2_client.dart`
+  - `pausePrint()` → publish `method 1021` ohne params-Objekt
+    (Orca-Form @2510582, docs/networking-cc2.md).
+  - `cancelPrint()` → publish `method 1022` ohne params (Orca @2511241).
+  - `resumePrint()` → publish `method 1023` ohne params; **fire-and-
+    forget**, kein Timeout, kein Retry (Daniels gemessene
+    ~122 s-Latenz plus Orca-60-s-Timeout → wir warten gar nicht,
+    sondern lesen den Erfolg aus der sub_status-Transition
+    2401 → 2402).
+  - `setLight(bool)` → publish `method 1029 {"power": 0|1}`.
+    Orcas Minimal-Form; Daniels zusaetzliches `brightness` fliegt
+    raus, Fundstellen-Kommentar im Code.
+  - `_request()` nimmt jetzt `Map? params`: `null` = params-Key
+    weglassen (Orca-Shape fuer 1021/22/23), `{}` sendet weiter
+    einen leeren Objekt-Params fuer die bestehenden 1002/1044/1036.
+- `app/lib/state/printer_state.dart`
+  - **Neues Enum `PrintPhase`** (`unknown/idle/printing/paused/
+    resuming/cancelling/cancelled`), abgeleitet aus
+    `machine_status.status` + `machine_status.sub_status`:
+    - 2501/2502/2505 → paused
+    - 2401/2402       → resuming
+    - 2503            → cancelling
+    - 2504            → cancelled
+  - `isFilamentFeedError` → true, wenn `exception_status` den
+    Code `1243` enthaelt (method.h FILAMENT_FEED_FAIL).
+  - `pausePrint()/cancelPrint()` async mit `error_code`-Auswertung;
+    `resumePrint()` synchron fire-and-forget;
+    `setLight(bool)` async, aktualisiert lokalen `_lightOn`-Cache.
+  - `_lightOn` als lokaler Zustand – die CC2-Firmware pusht **keinen**
+    Light-State auf `api_status` (Sniff-Logs grepping: 0 Treffer).
+    UI zeigt "unbekannt", bis zum ersten Set-Aufruf.
+  - `controlInFlight`-Guard verhindert Doppelauslösung.
+- `app/lib/screens/print_screen.dart`
+  - Neue Card `_PrintControls` unter dem Live-Status: Pause/Fortsetzen
+    als **ein** Button (Label + Icon je nach Phase), Abbrechen mit
+    `AlertDialog`-Bestaetigung, Licht-Switch.
+  - Gating:
+    - Pause aktiv nur in Phase `printing`
+    - Fortsetzen aktiv nur in Phase `paused`
+    - Abbrechen aktiv in `printing` oder `paused`
+    - Licht-Switch aktiv immer wenn verbunden
+    - Alle Buttons deaktiviert waehrend `controlInFlight`
+  - `_LiveStatus` zeigt jetzt die vollstaendige Phase (incl.
+    "Pausiert", "Setzt fort", "Bricht ab …", "Abgebrochen").
+  - `isFilamentFeedError`-Vorrang: wenn aktiv, Infobox
+    "Filamentzufuhr-Fehler – PTFE-Schläuche prüfen" statt rohem
+    `exception_status`-Dump.
+- L10n (`app/lib/l10n/app_{en,de}.arb` + regenerated):
+  neue Keys `printControlSectionLabel`, `printControlPause/Resume/
+  Cancel`, `printControlCancelConfirm*`, `printControlLightLabel/
+  Unknown`, `printControlResumeHint`, `printControlFailed*`,
+  `printPhaseCancelling/Cancelled`. Englisch Quelle, Deutsch
+  Uebersetzung.
+- Tests (**82/82 gruen**, `cd app && flutter test`):
+  - Neu: `test/elegoo_control_payloads_test.dart` (4 Faelle) –
+    sichert, dass 1021/1022/1023 **ohne** params-Key gesendet
+    werden und 1029 nur `{power:0|1}` ohne brightness.
+  - Neu: `test/printer_phase_mapping_test.dart` (11 Faelle) –
+    deckt alle sub_status-Codes aus method.h + den
+    exception_status-1243-Pfad ab; nutzt
+    `injectLiveStateForTest`, kein MQTT.
+  - Bestehende Mock-CC2-Tests weiter gruen.
+- Release-APK:
+  - `app/build/app/outputs/flutter-apk/app-release.apk`,
+    32 039 444 Byte, SHA256
+    `238e21088c97a9835ec4c7a43b67cbfec246420f62a0ac167464ab1fc2ea9cef`.
+  - Commit `b1a01c0a79` + CLI `761249e97b` einbrennt (CLI-Guard
+    gruen, INTERNET-Permission vorhanden).
+  - Installiert auf dem Poco X3 Pro via WLAN-ADB
+    (`adb install -r -g`, `Success`).
+
+### Ungeprueft
+
+- **Geraetetest am echten Drucker**: Pause/Fortsetzen/Abbrechen und
+  Licht sind in diesem Schritt bewusst **nicht** am realen CC2
+  getestet (Klaus macht das selbst mit einem kurzen Druck).
+- Die 2401→2402-Transition als Erfolgs-Beleg fuer Resume ist in
+  method.h belegt und im alten Mitschnitt gesichtet, aber noch nicht
+  live gegen diesen App-Pfad gegengeprueft.
+- 1029-Antwort fuer `power=0|1` am echten Geraet nochmal: in Block
+  A (2026-10-31) kam `error_code=0`; dass die App-Logik dasselbe
+  erreicht, muss ein App-Live-Test zeigen.
+
+### Geht nicht
+
+- (keine offenen Blocker; `docs/blockers.md` unveraendert.)
+
+### Konsequenz fuer den naechsten App-Schritt
+
+- Punkt 3+ der Pflichtliste (Datei-Loeschen in der App, Kamera-
+  Panel) kommt in getrennten Commits. Fuer Datei-Loeschen gilt
+  die in Block A entschiedene Shape (`file_path: [<name>]`), fuer
+  die Kamera reicht laut Block A der 1042-URL-Getter plus
+  MJPEG-Decoder – kein 1054.
+
+---
+
 ## 2026-10-31 12:40 UTC – Block A am Drucker: 1047/1042/1054/1029 geklaert, Doku ergaenzt
 
 Hands-on-Test am CC2 (fw 02.01.01.07), Klaus daneben, Drucker idle.

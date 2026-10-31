@@ -531,4 +531,62 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get printerConnectHint => 'Im Projekt-Reiter koppeln und verbinden.';
+
+  @override
+  String get printControlSectionLabel => 'Druck-Steuerung';
+
+  @override
+  String get printControlPause => 'Pausieren';
+
+  @override
+  String get printControlResume => 'Fortsetzen';
+
+  @override
+  String get printControlCancel => 'Druck abbrechen';
+
+  @override
+  String get printControlCancelConfirmTitle =>
+      'Laufenden Druck wirklich abbrechen?';
+
+  @override
+  String get printControlCancelConfirmBody =>
+      'Stoppt den Druck sofort. Kann aus der App nicht rückgängig gemacht werden.';
+
+  @override
+  String get printControlCancelConfirmYes => 'Ja, abbrechen';
+
+  @override
+  String get printControlCancelConfirmNo => 'Weiterdrucken';
+
+  @override
+  String get printControlLightLabel => 'Kammerlicht';
+
+  @override
+  String get printControlLightUnknown =>
+      'unbekannt (Drucker meldet den Zustand nicht)';
+
+  @override
+  String get printControlResumeHint =>
+      'Fortsetzen gesendet – der Drucker antwortet erst nach Abschluss der Bewegung (bis ~2 min).';
+
+  @override
+  String printControlFailedPause(String detail) {
+    return 'Pause vom Drucker abgelehnt: $detail';
+  }
+
+  @override
+  String printControlFailedCancel(String detail) {
+    return 'Abbruch vom Drucker abgelehnt: $detail';
+  }
+
+  @override
+  String printControlFailedLight(String detail) {
+    return 'Licht-Befehl fehlgeschlagen: $detail';
+  }
+
+  @override
+  String get printPhaseCancelling => 'Bricht ab …';
+
+  @override
+  String get printPhaseCancelled => 'Abgebrochen';
 }

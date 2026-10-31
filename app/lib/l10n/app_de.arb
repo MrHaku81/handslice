@@ -159,5 +159,25 @@
   "substateResumed": "Fortgesetzt",
 
   "printerNotConnected": "Drucker nicht verbunden.",
-  "printerConnectHint": "Im Projekt-Reiter koppeln und verbinden."
+  "printerConnectHint": "Im Projekt-Reiter koppeln und verbinden.",
+
+  "printControlSectionLabel": "Druck-Steuerung",
+  "printControlPause": "Pausieren",
+  "printControlResume": "Fortsetzen",
+  "printControlCancel": "Druck abbrechen",
+  "printControlCancelConfirmTitle": "Laufenden Druck wirklich abbrechen?",
+  "printControlCancelConfirmBody": "Stoppt den Druck sofort. Kann aus der App nicht rückgängig gemacht werden.",
+  "printControlCancelConfirmYes": "Ja, abbrechen",
+  "printControlCancelConfirmNo": "Weiterdrucken",
+  "printControlLightLabel": "Kammerlicht",
+  "printControlLightUnknown": "unbekannt (Drucker meldet den Zustand nicht)",
+  "printControlResumeHint": "Fortsetzen gesendet – der Drucker antwortet erst nach Abschluss der Bewegung (bis ~2 min).",
+  "printControlFailedPause": "Pause vom Drucker abgelehnt: {detail}",
+  "@printControlFailedPause": {"placeholders": {"detail": {"type": "String"}}},
+  "printControlFailedCancel": "Abbruch vom Drucker abgelehnt: {detail}",
+  "@printControlFailedCancel": {"placeholders": {"detail": {"type": "String"}}},
+  "printControlFailedLight": "Licht-Befehl fehlgeschlagen: {detail}",
+  "@printControlFailedLight": {"placeholders": {"detail": {"type": "String"}}},
+  "printPhaseCancelling": "Bricht ab …",
+  "printPhaseCancelled": "Abgebrochen"
 }

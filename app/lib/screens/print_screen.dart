@@ -243,6 +243,8 @@ class _PrintScreenState extends State<PrintScreen> {
           Text(l.printStatusHeading, style: theme.textTheme.titleMedium),
           const SizedBox(height: 8),
           _LiveStatus(printer: printer),
+          const SizedBox(height: 12),
+          _PrintControls(printer: printer),
         ],
       ),
     );
@@ -322,11 +324,15 @@ class _LiveStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
-    final s = printer.machineStatus;
-    final stateText = switch (s) {
-      null => l.printStatusUnknown,
-      PrinterState.statusIdle => l.printStatusIdle,
-      _ => l.printStatusPrinting, // weitere Codes: hier generisch
+    final phase = printer.printPhase;
+    final stateText = switch (phase) {
+      PrintPhase.unknown => l.printStatusUnknown,
+      PrintPhase.idle => l.printStatusIdle,
+      PrintPhase.paused => l.substatePaused,
+      PrintPhase.resuming => l.substateResuming,
+      PrintPhase.cancelling => l.printPhaseCancelling,
+      PrintPhase.cancelled => l.printPhaseCancelled,
+      PrintPhase.printing => l.printStatusPrinting,
     };
     return WorkshopCard(
       child: Column(
@@ -380,7 +386,14 @@ class _LiveStatus extends StatelessWidget {
               value: '',
             ),
           ],
-          if (printer.exceptionStatus != null &&
+          if (printer.isFilamentFeedError) ...[
+            const Divider(),
+            _InfoBox(
+              icon: Icons.error_outline,
+              color: const Color(0xFFFF6B6B),
+              message: l.printStatusException1243,
+            ),
+          ] else if (printer.exceptionStatus != null &&
               printer.exceptionStatus!.isNotEmpty) ...[
             const Divider(),
             WorkshopRow(
@@ -440,6 +453,174 @@ class _ToggleRow extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// M6: Steuerungs-Panel. Zeigt genau einen Pause-/Fortsetzen-Button
+// (abhaengig von phase), einen Abbrechen-Button mit Bestaetigungs-
+// dialog und einen Licht-Schalter. Fokus-Navigation ergibt sich
+// aus den Material-Buttons und dem Switch.
+class _PrintControls extends StatefulWidget {
+  const _PrintControls({required this.printer});
+  final PrinterState printer;
+  @override
+  State<_PrintControls> createState() => _PrintControlsState();
+}
+
+class _PrintControlsState extends State<_PrintControls> {
+  String? _lastHint;      // Erfolg oder Hinweis (gruen/orange)
+  String? _lastError;     // Fehlermeldung (rot)
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final p = widget.printer;
+    final phase = p.printPhase;
+    final busy = p.controlInFlight;
+    final connected = p.connection == CanvasConnection.connected;
+
+    final canPause  = connected && phase == PrintPhase.printing && !busy;
+    final canResume = connected && phase == PrintPhase.paused   && !busy;
+    final canCancel = connected &&
+        (phase == PrintPhase.printing || phase == PrintPhase.paused) && !busy;
+    final canLight  = connected && !busy;
+
+    // Pause/Resume ist EIN Knopf, Label je nach Phase.
+    final isResume = phase == PrintPhase.paused;
+    final pauseResumeLabel =
+        isResume ? l.printControlResume : l.printControlPause;
+    final pauseResumeIcon = isResume ? Icons.play_arrow : Icons.pause;
+    VoidCallback? pauseResumeAction;
+    if (canResume) {
+      pauseResumeAction = () async {
+        setState(() { _lastError = null; _lastHint = null; });
+        final ok = p.resumePrint();
+        if (!mounted) return;
+        setState(() {
+          if (ok) {
+            _lastHint = l.printControlResumeHint;
+          } else {
+            _lastError = p.lastError ?? l.printControlFailedPause('—');
+          }
+        });
+      };
+    } else if (canPause) {
+      pauseResumeAction = () async {
+        setState(() { _lastError = null; _lastHint = null; });
+        final ok = await p.pausePrint();
+        if (!mounted) return;
+        setState(() {
+          if (!ok) _lastError = l.printControlFailedPause(p.lastError ?? '—');
+        });
+      };
+    }
+
+    return WorkshopCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(l.printControlSectionLabel,
+              style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 10),
+          Row(children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: pauseResumeAction,
+                icon: Icon(pauseResumeIcon),
+                label: Text(pauseResumeLabel),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: canCancel ? () => _confirmCancel(context, p) : null,
+                icon: const Icon(Icons.stop_circle_outlined),
+                label: Text(l.printControlCancel),
+              ),
+            ),
+          ]),
+          const Divider(height: 20),
+          Row(children: [
+            Expanded(
+              child: Text(l.printControlLightLabel,
+                  style: Theme.of(context).textTheme.bodyMedium),
+            ),
+            if (p.lightOn == null) ...[
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: Text(
+                  l.printControlLightUnknown,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: WorkshopTokens.textMuted),
+                ),
+              ),
+            ],
+            Switch(
+              value: p.lightOn ?? false,
+              onChanged: canLight
+                  ? (v) async {
+                      setState(() { _lastError = null; _lastHint = null; });
+                      final ok = await p.setLight(v);
+                      if (!mounted) return;
+                      if (!ok) {
+                        setState(() {
+                          _lastError =
+                              l.printControlFailedLight(p.lastError ?? '—');
+                        });
+                      }
+                    }
+                  : null,
+            ),
+          ]),
+          if (_lastHint != null) ...[
+            const SizedBox(height: 8),
+            _InfoBox(
+              icon: Icons.info_outline,
+              color: WorkshopTokens.accent,
+              message: _lastHint!,
+            ),
+          ],
+          if (_lastError != null) ...[
+            const SizedBox(height: 8),
+            _InfoBox(
+              icon: Icons.error_outline,
+              color: const Color(0xFFFF6B6B),
+              message: _lastError!,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmCancel(BuildContext context, PrinterState p) async {
+    final l = AppLocalizations.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l.printControlCancelConfirmTitle),
+        content: Text(l.printControlCancelConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text(l.printControlCancelConfirmNo),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(l.printControlCancelConfirmYes),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() { _lastError = null; _lastHint = null; });
+    final success = await p.cancelPrint();
+    if (!mounted) return;
+    setState(() {
+      if (!success) {
+        _lastError = l.printControlFailedCancel(p.lastError ?? '—');
+      }
+    });
   }
 }
 

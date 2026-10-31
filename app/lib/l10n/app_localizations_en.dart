@@ -526,4 +526,61 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get printerConnectHint => 'Pair and connect from the Project tab.';
+
+  @override
+  String get printControlSectionLabel => 'Print controls';
+
+  @override
+  String get printControlPause => 'Pause';
+
+  @override
+  String get printControlResume => 'Resume';
+
+  @override
+  String get printControlCancel => 'Cancel print';
+
+  @override
+  String get printControlCancelConfirmTitle => 'Cancel the running print?';
+
+  @override
+  String get printControlCancelConfirmBody =>
+      'This stops the print immediately. It cannot be undone from the app.';
+
+  @override
+  String get printControlCancelConfirmYes => 'Yes, cancel';
+
+  @override
+  String get printControlCancelConfirmNo => 'Keep printing';
+
+  @override
+  String get printControlLightLabel => 'Chamber light';
+
+  @override
+  String get printControlLightUnknown =>
+      'unknown (printer doesn\'t broadcast light state)';
+
+  @override
+  String get printControlResumeHint =>
+      'Resume sent — the printer replies only after the move completes (up to ~2 min).';
+
+  @override
+  String printControlFailedPause(String detail) {
+    return 'Pause rejected by the printer: $detail';
+  }
+
+  @override
+  String printControlFailedCancel(String detail) {
+    return 'Cancel rejected by the printer: $detail';
+  }
+
+  @override
+  String printControlFailedLight(String detail) {
+    return 'Chamber light command failed: $detail';
+  }
+
+  @override
+  String get printPhaseCancelling => 'Cancelling…';
+
+  @override
+  String get printPhaseCancelled => 'Cancelled';
 }
