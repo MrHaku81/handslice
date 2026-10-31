@@ -18,6 +18,80 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 23:30 UTC – Pflicht 6 follow-up 2: z-buffer sign fix + notched-cube test
+
+Device test of `aca76ac` passed on colour, shading and background,
+but the model rendered upside-down (notch of the notched cube on
+the bottom instead of the top). First hypothesis — buffer row
+order collides with Orca's export flip — turned out wrong after
+proper measurement.
+
+### Verified
+
+- Instrumented the renderer with a 1-row red stripe at
+  buffer-row 20 and read back the resulting PNG: the stripe
+  appeared at PNG row 123 (= `144-1-20`). Orca's PNG encoder
+  (`tdefl_write_image_to_png_file_in_memory_ex`, miniz
+  `flip = 1`) does flip the buffer. So that part was correct.
+- A second instrumentation (world-Z + view-Y + computed py per
+  triangle vertex) showed the actual root cause: **view-space Z
+  had the wrong sign.** `to_view()` returned
+  `-dot(d, V.forward)`, so points further away from the camera
+  got MORE-negative z values, and the rasterizer's `z < depth`
+  test preferred the far side of the model. Result: the
+  invisible bottom face occluded the visible top face and the
+  silhouette ended up mirrored vertically.
+- Fix in `engine/cli/thumbnail_renderer.cpp`: `to_view()` now
+  returns `+dot(d, V.forward)` — positive distance along the
+  camera axis, "smaller = closer" is intuitive. Comment in the
+  code explains why the sign was wrong before.
+- `engine/test/run-thumbnail-test.sh` grew a 6th check that
+  slices `cube_notched_20mm_centered_cc2.stl`, decodes the PNG,
+  measures the standard-deviation of the uppermost opaque y
+  coordinate per column vs. the bottommost, and asserts
+  `stdev(upper) > stdev(lower)` plus `max(upper) - min(upper) >=
+  12 px`. On a right-side-up notched cube the top edge has the
+  step from the notch and the bottom edge is straight; on an
+  upside-down render those swap. Current measurement:
+  upper stdev 12.46, lower stdev 10.16 → PASS.
+- All six script checks + reference test still green.
+  EXECUTABLE_BLOCK sha256 unchanged (`92951c26…`, 8479 lines).
+- `local-test/` artefacts regenerated:
+  - `thumbnail-cube.png` (orange, standard)
+  - `thumbnail-cube-white.png` (white filament override, grey
+    range `[120..250]`)
+  - `thumbnail-notched.png` (white filament, notch now visibly
+    at the top).
+- Builds on x86 + arm64 (NDK r27d) carry the fix.
+
+### Firmware finding also captured
+
+- `docs/networking-cc2.md` new section
+  "Firmware behaviour: cancel during auto-levelling leaves the
+  display stuck (2026-10-31)". Klaus hit Cancel in the app
+  around 15:25 while the printer was auto-levelling. The
+  network side went back to idle correctly, but the printer's
+  own display froze on the "Druck wird gestoppt …" dialog and
+  only recovered after a power cycle.
+- App proposal captured, **not** implemented:
+  either block Cancel while `PrintPhase.preparing` AND the
+  sub_status is a levelling code, or warn in a confirmation
+  dialog that the display may need a power cycle.
+- Decision deferred to Klaus after one or two more live tests
+  and whether to raise it upstream (firmware repo).
+
+### Not verified at the printer
+
+- The fixed orientation live. Klaus will upload the next slice
+  to confirm the notch appears on the top of the display
+  thumbnail.
+
+### Does not go
+
+- (no new blockers.)
+
+---
+
 ## 2026-10-31 22:40 UTC – Pflicht 6 follow-up: shader + background fixes
 
 Klaus live-tested `ab67cbb` and found two deficiencies: white

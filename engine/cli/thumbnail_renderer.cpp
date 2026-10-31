@@ -140,11 +140,17 @@ static ViewMatrix make_view(Vec3 focus, float extent) {
     return {right, up, fwd, eye};
 }
 
-// Project a world-space point to view space (camera z into the
-// scene). z increases with distance from the camera.
+// Project a world-space point to view space. z = signed distance
+// along the camera's forward axis — positive for points in front
+// of the camera, more positive the further away. The rasterizer
+// below picks the smallest z per pixel (`z < depth`), so this
+// convention makes the closest surface win. The earlier
+// `-vdot(..., forward)` form inverted the sign and let the far
+// side of the model occlude the near side — exact cause of the
+// "cube rendered upside-down" bug from the device test.
 static Vec3 to_view(const ViewMatrix& V, Vec3 w) {
     const Vec3 d = vsub(w, V.eye);
-    return { vdot(d, V.right), vdot(d, V.up), -vdot(d, V.forward) };
+    return { vdot(d, V.right), vdot(d, V.up), vdot(d, V.forward) };
 }
 
 // Three-component shading so a white part reads as "white" at the
@@ -448,14 +454,23 @@ ThumbnailsList render_handslice_thumbnails(
         const float cy = (vymin + vymax) * 0.5f;
 
         for (const auto& vt : vtris) {
+            // Pixel-buffer convention: `ThumbnailData::pixels` is
+            // the glReadPixels layout (row 0 = BOTTOM of the
+            // image). Orca's compress_thumbnail_* then flips the
+            // buffer vertically before encoding to PNG/JPG/QOI
+            // (Thumbnails.cpp:55/109/146 "flip the image
+            // vertically"). We therefore map world-Y DIRECTLY to
+            // pixel-Y (no inversion): higher world-Y → higher
+            // pixel-Y → closer to the bottom-of-buffer that will
+            // become top-of-image after Orca's flip.
             Vec3 a = { (vt.v[0].x - cx) * s + W * 0.5f,
-                       (cy - vt.v[0].y) * s + H * 0.5f,
+                       (vt.v[0].y - cy) * s + H * 0.5f,
                        vt.v[0].z };
             Vec3 b = { (vt.v[1].x - cx) * s + W * 0.5f,
-                       (cy - vt.v[1].y) * s + H * 0.5f,
+                       (vt.v[1].y - cy) * s + H * 0.5f,
                        vt.v[1].z };
             Vec3 c = { (vt.v[2].x - cx) * s + W * 0.5f,
-                       (cy - vt.v[2].y) * s + H * 0.5f,
+                       (vt.v[2].y - cy) * s + H * 0.5f,
                        vt.v[2].z };
             raster_triangle(W, H, td.pixels.data(), depth.data(),
                             a, b, c, vt.shaded);

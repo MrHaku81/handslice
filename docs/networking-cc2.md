@@ -3704,3 +3704,42 @@ ans Picker-Panel.
 - `findSlotForFile`: eindeutig / mehrdeutig / kein Treffer /
   Toleranz / case + trim / leere Eingaben / ungueltige Hex-Werte.
 Vollsuite 126/126 gruen (+12 ggue M8-NB3).
+
+---
+
+## Firmware behaviour: cancel during auto-levelling leaves the display stuck (2026-10-31)
+
+Second observation on top of the "cancel is accepted but
+deferred until levelling completes" behaviour already recorded
+under *M8 follow-ups 2*. On 2026-10-31 ~15:25 (local time) Klaus
+hit Cancel in the app while the printer was auto-levelling. The
+network side behaved exactly as before:
+
+- 1022 was accepted (no `error_code != 0`).
+- `sub_status` eventually reported idle, and `method 1002`
+  returned `machine_status.status = 1` ("Bereit").
+
+But the printer's own display stayed on the dialog
+"Druck wird gestoppt …" and did not accept any touch input.
+Only a full power cycle of the printer brought the display back.
+The firmware's network state and its UI state diverged.
+
+### App implication (NOT implemented yet — proposal)
+
+The in-app "Cancel" action should either:
+
+1. **Block cancel while the firmware reports a levelling
+   sub_status** (currently `2801`/`2802`/`2901`/`2902` — see
+   `PrintPhase.preparing`). Button grey + tooltip
+   "Cancel is unsafe during levelling on this firmware; wait
+   for the first layer." Mirrors the existing Pause-is-grey
+   gating.
+2. **Or warn before sending**: a confirmation dialog that says
+   the firmware may leave the printer's own display stuck,
+   requiring a power cycle, if cancel is sent during
+   levelling. User can override.
+
+Not shipped in this commit — Klaus will decide between the two
+options after one or two more live tests, and whether to raise
+the issue upstream (likely elegooofficial GPL repo, since this
+is firmware-side, not app-side).

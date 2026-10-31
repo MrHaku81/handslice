@@ -24,6 +24,7 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RESOURCES="${PROJECT_ROOT}/engine/OrcaSlicer/resources"
 PROFILES="${RESOURCES}/profiles/Elegoo"
 STL="${PROJECT_ROOT}/engine/test/cube_20mm_centered_cc2.stl"
+NOTCHED_STL="${PROJECT_ROOT}/engine/test/cube_notched_20mm_centered_cc2.stl"
 REF_GCODE="${PROJECT_ROOT}/engine/test/reference/cube_20mm_cc2_gui_v2.4.2.gcode"
 OUT_DIR="${PROJECT_ROOT}/local-test"
 mkdir -p "${OUT_DIR}"
@@ -31,6 +32,8 @@ OUT_GCODE="${OUT_DIR}/thumbnail-cube.gcode"
 OUT_PNG="${OUT_DIR}/thumbnail-cube.png"
 OUT_WHITE_GCODE="${OUT_DIR}/thumbnail-cube-white.gcode"
 OUT_WHITE_PNG="${OUT_DIR}/thumbnail-cube-white.png"
+OUT_NOTCHED_GCODE="${OUT_DIR}/thumbnail-notched.gcode"
+OUT_NOTCHED_PNG="${OUT_DIR}/thumbnail-notched.png"
 GUI_PNG="${OUT_DIR}/thumbnail-cube-gui-reference.png"
 
 CLI="${PROJECT_ROOT}/engine/bin/handslice-cli-x86"
@@ -217,7 +220,104 @@ if (gmax - gmin) < 60:
 print('  OK: top near-white, side clearly darker, three faces separable.')
 PY
 
-echo "=== 5/5  GUI-Referenz-PNG daneben legen ==="
+echo "=== 5/6  Notched cube: orientation (notch must be on TOP, not bottom) ==="
+# The symmetric cube cannot tell "upside-down" from "right-side-up".
+# The notched cube has a 5×5×5 mm pocket in a top-face corner, so
+# the TOP outline is uneven while the BOTTOM outline is straight.
+# After the earlier bug (inverted z-sign in to_view()) rendered the
+# model upside-down — exact Klaus report 2026-10-31 — this check
+# nails that specific regression.
+"${CLI}" \
+    --machine "${PROFILES}/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json" \
+    --process "${PROFILES}/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json" \
+    --filament "${PROFILES}/filament/ECC2/Elegoo PLA @ECC2.json" \
+    --resources "${RESOURCES}" \
+    --output "${OUT_NOTCHED_GCODE}" \
+    --overrides '{"filament_colour":"#FFFFFF"}' \
+    --no-center --quiet \
+    "${NOTCHED_STL}" > /dev/null
+python3 - "${OUT_NOTCHED_GCODE}" "${OUT_NOTCHED_PNG}" <<'PY'
+import base64, re, struct, sys, zlib, statistics
+gcode, out_png = sys.argv[1], sys.argv[2]
+with open(gcode) as f:
+    txt = f.read()
+m = re.search(r'; THUMBNAIL_BLOCK_START.*?; thumbnail begin [\dx]+ \d+\n'
+              r'(.*?); thumbnail end',
+              txt, re.S)
+if not m: sys.exit('notched: no thumbnail block')
+b64 = ''.join(l[2:].strip() for l in m.group(1).splitlines() if l.startswith('; '))
+raw = base64.b64decode(b64)
+with open(out_png, 'wb') as f: f.write(raw)
+w = struct.unpack('>I', raw[16:20])[0]
+h = struct.unpack('>I', raw[20:24])[0]
+
+# De-filter PNG → raw RGBA pixels.
+i = 8; data = bytearray()
+while i < len(raw):
+    L = struct.unpack('>I', raw[i:i+4])[0]
+    T = raw[i+4:i+8].decode('latin-1')
+    if T == 'IDAT': data += raw[i+8:i+8+L]
+    i += 8 + L + 4
+dec = zlib.decompress(bytes(data))
+bpp, stride = 4, 1 + w * 4
+pix = bytearray(w * h * bpp); prev = bytes(w * bpp)
+for y in range(h):
+    off = y * stride; filt = dec[off]
+    row = bytearray(dec[off+1:off+stride])
+    if   filt == 1:
+        for x in range(bpp, w*bpp): row[x] = (row[x] + row[x-bpp]) & 0xFF
+    elif filt == 2:
+        for x in range(w*bpp): row[x] = (row[x] + prev[x]) & 0xFF
+    elif filt == 3:
+        for x in range(w*bpp):
+            l = row[x-bpp] if x >= bpp else 0
+            row[x] = (row[x] + (l + prev[x]) // 2) & 0xFF
+    elif filt == 4:
+        for x in range(w*bpp):
+            a = row[x-bpp] if x >= bpp else 0; b = prev[x]
+            c = prev[x-bpp] if x >= bpp else 0
+            p = a + b - c
+            pa, pb, pc = abs(p-a), abs(p-b), abs(p-c)
+            pr = a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+            row[x] = (row[x] + pr) & 0xFF
+    pix[y*w*bpp:(y+1)*w*bpp] = row
+    prev = bytes(row)
+
+# For each column with opaque pixels: topmost y and bottommost y.
+upper, lower = [], []
+for x in range(w):
+    ys = [y for y in range(h) if pix[(y*w+x)*bpp + 3] == 255]
+    if ys:
+        upper.append(ys[0])  # smaller y = higher in the image
+        lower.append(ys[-1])
+
+if len(upper) < 40:
+    sys.exit(f'notched: too few opaque columns ({len(upper)})')
+
+u_sd = statistics.pstdev(upper)
+l_sd = statistics.pstdev(lower)
+print(f'  → upper-outline y stdev = {u_sd:.2f}, '
+      f'lower-outline y stdev = {l_sd:.2f}')
+
+# A right-side-up notched cube: the upper outline has the step from
+# the notch; the lower outline is a straight silhouette of the
+# bottom face. So upper stdev MUST be larger than lower stdev. If
+# the renderer flipped the model, these two swap.
+if u_sd <= l_sd:
+    sys.exit(f'notched: upper outline flatter than lower '
+             f'(u={u_sd:.2f} <= l={l_sd:.2f}) '
+             f'— model probably upside-down')
+# Additionally the upper outline must have real roughness (the
+# notch is 5 mm deep → ~15–25 pixels drop at ~8 px/mm scale), not
+# just the natural isometric slope.
+u_span = max(upper) - min(upper)
+if u_span < 12:
+    sys.exit(f'notched: upper outline span only {u_span} px '
+             f'— notch not visible?')
+print('  OK: upper outline carries the notch, lower outline is straight.')
+PY
+
+echo "=== 6/6  GUI-Referenz-PNG daneben legen ==="
 # Reference G-code → extract the GUI thumbnail PNG for visual
 # side-by-side.
 python3 - "${REF_GCODE}" "${GUI_PNG}" <<'PY'
@@ -239,6 +339,8 @@ print(f'  → GUI reference PNG: {len(raw)} bytes')
 PY
 
 echo
-echo "OK – alle vier Checks bestanden."
-echo "  PNG (handslice-cli): ${OUT_PNG}"
-echo "  PNG (GUI reference): ${GUI_PNG}"
+echo "OK – alle Checks bestanden."
+echo "  PNG (standard cube):  ${OUT_PNG}"
+echo "  PNG (white filament): ${OUT_WHITE_PNG}"
+echo "  PNG (notched cube):   ${OUT_NOTCHED_PNG}"
+echo "  PNG (GUI reference):  ${GUI_PNG}"
