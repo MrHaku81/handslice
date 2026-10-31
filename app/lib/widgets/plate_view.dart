@@ -128,10 +128,13 @@ class PlateView extends StatefulWidget {
     required this.hspmPath,
     required this.filamentColor,
     this.fallbackImagePath,
+    this.onInteractionChanged,
     this.labelResetView = 'Reset view',
     this.labelTop = 'Top',
     this.labelFront = 'Front',
     this.labelOblique = 'Oblique',
+    this.labelZoomIn = 'Zoom in',
+    this.labelZoomOut = 'Zoom out',
     this.labelEmpty = 'Open a model to see the plate view.',
     this.labelBuilding = 'Building preview mesh…',
   });
@@ -139,10 +142,18 @@ class PlateView extends StatefulWidget {
   final String? hspmPath;
   final Color filamentColor;
   final String? fallbackImagePath;
+  /// Fires `true` when a pointer lands on the viewport and `false`
+  /// once the last pointer is released. Parents inside a scroll
+  /// view should use this to switch the scroll physics to
+  /// `NeverScrollableScrollPhysics` so pinches do not fight the
+  /// outer scroll gesture — see `plate-view-benchmark.md`.
+  final ValueChanged<bool>? onInteractionChanged;
   final String labelResetView;
   final String labelTop;
   final String labelFront;
   final String labelOblique;
+  final String labelZoomIn;
+  final String labelZoomOut;
   final String labelEmpty;
   final String labelBuilding;
 
@@ -151,7 +162,13 @@ class PlateView extends StatefulWidget {
 }
 
 class _PlateViewState extends State<PlateView> {
-  final fscene.Scene _scene = fscene.Scene();
+  // Flutter GPU is required for `Scene()`, and it throws in
+  // environments where Impeller is not enabled (flutter_test,
+  // older release builds without the manifest opt-in). We
+  // therefore construct the Scene lazily inside _initScene with
+  // a try/catch so the widget degrades to the HSPB thumbnail /
+  // empty-state card instead of taking down the whole screen.
+  fscene.Scene? _scene;
   bool _sceneReady = false;
   String? _sceneError;
   HspmFile? _mesh;
@@ -193,6 +210,7 @@ class _PlateViewState extends State<PlateView> {
 
   Future<void> _initScene() async {
     try {
+      _scene = fscene.Scene();
       await fscene.Scene.initializeStaticResources();
       if (mounted) setState(() { _sceneReady = true; });
     } catch (e) {
@@ -261,9 +279,11 @@ class _PlateViewState extends State<PlateView> {
   }
 
   void _rebuildScene() {
+    final scene = _scene;
+    if (scene == null) return;   // Flutter GPU not available on this host
     final mesh = _mesh;
-    _scene.root.children.clear();
-    _addPlate();
+    scene.root.children.clear();
+    _addPlate(scene);
     if (mesh == null) return;
     final tintR = widget.filamentColor.r;
     final tintG = widget.filamentColor.g;
@@ -301,12 +321,12 @@ class _PlateViewState extends State<PlateView> {
       );
       final mat = fscene.UnlitMaterial()
         ..baseColorFactor = vm.Vector4(1, 1, 1, 1);
-      _scene.add(fscene.Node(name: 'vol_${vol.filamentIdx}',
+      scene.add(fscene.Node(name: 'vol_${vol.filamentIdx}',
           mesh: fscene.Mesh(geom, mat)));
     }
   }
 
-  void _addPlate() {
+  void _addPlate(fscene.Scene scene) {
     final gb = fscene.GeometryBuilder(deduplicate: false);
     final n = vm.Vector3(0, 0, 1);
     const a = _ambient;
@@ -325,42 +345,98 @@ class _PlateViewState extends State<PlateView> {
     final geom = gb.build();
     final mat = fscene.UnlitMaterial()
       ..baseColorFactor = vm.Vector4(1, 1, 1, 1);
-    _scene.add(fscene.Node(name: 'bed', mesh: fscene.Mesh(geom, mat)));
+    scene.add(fscene.Node(name: 'bed', mesh: fscene.Mesh(geom, mat)));
   }
 
   // -------- gestures --------
-  Offset? _dragStart;
-  double? _distStart;
+  //
+  // We handle pointer events via `Listener` rather than
+  // `GestureDetector` because the project screen is inside a
+  // `ListView` and the gesture arena will not reliably give
+  // `ScaleGestureRecognizer` the two-finger pinch — the scroll
+  // view wins. `Listener` sits outside the arena, so we always
+  // get the raw events; the outer scroll is suppressed by the
+  // project-screen `ListView` switching its physics to
+  // `NeverScrollableScrollPhysics()` while a pointer is on the
+  // viewport (see `onInteractionChanged`).
+  final Map<int, Offset> _pointers = {};
+  double? _pinchStartDist;
+  double? _pinchStartDistance;
+  Offset? _lastCentroid;
 
-  void _onScaleStart(ScaleStartDetails d) {
-    _dragStart = d.focalPoint;
-    _distStart = _distance;
+  void _handlePointerDown(PointerDownEvent e) {
+    _pointers[e.pointer] = e.localPosition;
+    _resetPinchAnchors();
+    if (_pointers.length == 1) widget.onInteractionChanged?.call(true);
   }
 
-  void _onScaleUpdate(ScaleUpdateDetails d) {
-    if (d.pointerCount == 1) {
-      final delta = d.focalPoint - (_dragStart ?? d.focalPoint);
+  void _handlePointerMove(PointerMoveEvent e) {
+    final prev = _pointers[e.pointer] ?? e.localPosition;
+    _pointers[e.pointer] = e.localPosition;
+    if (_pointers.length == 1) {
+      final delta = e.localPosition - prev;
       setState(() {
         _yaw   += delta.dx * 0.01;
         _pitch += delta.dy * 0.01;
         _pitch = _pitch.clamp(-1.4, 1.4);
       });
-      _dragStart = d.focalPoint;
     } else {
-      setState(() {
-        _distance = (_distStart ?? _distance) / d.scale;
-        _distance = _distance.clamp(_orbitRadius * 0.3,
-                                    _orbitRadius * 20.0);
-        final k = _distance * 0.0025;
-        final right = vm.Vector3(math.cos(_yaw), math.sin(_yaw), 0);
-        final up = vm.Vector3(
-            -math.sin(_pitch) * math.sin(_yaw),
-             math.sin(_pitch) * math.cos(_yaw),
-             math.cos(_pitch));
-        _panOffset += right * (d.focalPointDelta.dx * k)
-                    + up    * (d.focalPointDelta.dy * k);
-      });
+      _applyMultiPointer();
     }
+  }
+
+  void _handlePointerUp(PointerEvent e) {
+    _pointers.remove(e.pointer);
+    if (_pointers.length < 2) {
+      _pinchStartDist = null;
+      _pinchStartDistance = null;
+      _lastCentroid = null;
+    }
+    if (_pointers.isEmpty) widget.onInteractionChanged?.call(false);
+  }
+
+  void _resetPinchAnchors() {
+    _pinchStartDist = null;
+    _pinchStartDistance = null;
+    _lastCentroid = null;
+  }
+
+  void _applyMultiPointer() {
+    final ptrs = _pointers.values.toList();
+    final centroid = Offset(
+        ptrs.fold<double>(0, (a, p) => a + p.dx) / ptrs.length,
+        ptrs.fold<double>(0, (a, p) => a + p.dy) / ptrs.length);
+    double dist = 0;
+    for (int i = 0; i < ptrs.length; ++i) {
+      for (int j = i + 1; j < ptrs.length; ++j) {
+        dist += (ptrs[i] - ptrs[j]).distance;
+      }
+    }
+    _pinchStartDist     ??= dist;
+    _pinchStartDistance ??= _distance;
+    _lastCentroid       ??= centroid;
+    final zoomFactor = _pinchStartDist! / math.max(dist, 1e-3);
+    final panDelta = centroid - _lastCentroid!;
+    _lastCentroid = centroid;
+    setState(() {
+      _distance = (_pinchStartDistance! * zoomFactor)
+          .clamp(_orbitRadius * 0.3, _orbitRadius * 20.0);
+      final k = _distance * 0.0025;
+      final right = vm.Vector3(math.cos(_yaw), math.sin(_yaw), 0);
+      final up = vm.Vector3(
+          -math.sin(_pitch) * math.sin(_yaw),
+           math.sin(_pitch) * math.cos(_yaw),
+           math.cos(_pitch));
+      _panOffset += right * (panDelta.dx * k)
+                  + up    * (panDelta.dy * k);
+    });
+  }
+
+  void _nudgeZoom(double factor) {
+    setState(() {
+      _distance = (_distance * factor)
+          .clamp(_orbitRadius * 0.3, _orbitRadius * 20.0);
+    });
   }
 
   vm.Vector3 _cameraPos(vm.Vector3 target) {
@@ -442,13 +518,18 @@ class _PlateViewState extends State<PlateView> {
         ),
       );
     }
+    final scene = _scene;
+    if (scene == null) return _fallbackViewport();
     try {
       final target = _orbitCentre + _panOffset;
-      return GestureDetector(
-        onScaleStart: _onScaleStart,
-        onScaleUpdate: _onScaleUpdate,
+      return Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: _handlePointerDown,
+        onPointerMove: _handlePointerMove,
+        onPointerUp: _handlePointerUp,
+        onPointerCancel: _handlePointerUp,
         child: fscene.SceneView(
-          _scene,
+          scene,
           warmUp: true,
           camera: fscene.PerspectiveCamera(
             position: _cameraPos(target),
@@ -490,28 +571,46 @@ class _PlateViewState extends State<PlateView> {
 
   Widget _viewButtonsRow() {
     final usingFallback = _sceneError != null;
-    // Focus traversal: wrap in a FocusTraversalGroup so the four
+    // Focus traversal: wrap in a FocusTraversalGroup so the six
     // buttons form their own group inside the project ListView.
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(child: _viewBtn(widget.labelResetView,
-              Icons.center_focus_strong,
-              onPressed: usingFallback ? null : () => _applyView(
-                  yaw: 0.6, pitch: 0.5))),
-          const SizedBox(width: 6),
-          Expanded(child: _viewBtn(widget.labelTop, Icons.vertical_align_top,
-              onPressed: usingFallback ? null : () => _applyView(
-                  yaw: 0.0, pitch: 1.3))),
-          const SizedBox(width: 6),
-          Expanded(child: _viewBtn(widget.labelFront, Icons.align_horizontal_center,
-              onPressed: usingFallback ? null : () => _applyView(
-                  yaw: 0.0, pitch: 0.0))),
-          const SizedBox(width: 6),
-          Expanded(child: _viewBtn(widget.labelOblique, Icons.threed_rotation,
-              onPressed: usingFallback ? null : () => _applyView(
-                  yaw: 0.6, pitch: 0.5))),
+          Row(
+            children: [
+              Expanded(child: _viewBtn(widget.labelResetView,
+                  Icons.center_focus_strong,
+                  onPressed: usingFallback ? null : () => _applyView(
+                      yaw: 0.6, pitch: 0.5))),
+              const SizedBox(width: 6),
+              Expanded(child: _viewBtn(widget.labelTop,
+                  Icons.vertical_align_top,
+                  onPressed: usingFallback ? null : () => _applyView(
+                      yaw: 0.0, pitch: 1.3))),
+              const SizedBox(width: 6),
+              Expanded(child: _viewBtn(widget.labelFront,
+                  Icons.align_horizontal_center,
+                  onPressed: usingFallback ? null : () => _applyView(
+                      yaw: 0.0, pitch: 0.0))),
+              const SizedBox(width: 6),
+              Expanded(child: _viewBtn(widget.labelOblique,
+                  Icons.threed_rotation,
+                  onPressed: usingFallback ? null : () => _applyView(
+                      yaw: 0.6, pitch: 0.5))),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(child: _viewBtn(widget.labelZoomOut, Icons.zoom_out,
+                  onPressed: usingFallback ? null : () => _nudgeZoom(1.25))),
+              const SizedBox(width: 6),
+              Expanded(child: _viewBtn(widget.labelZoomIn, Icons.zoom_in,
+                  onPressed: usingFallback ? null : () => _nudgeZoom(0.8))),
+            ],
+          ),
         ],
       ),
     );

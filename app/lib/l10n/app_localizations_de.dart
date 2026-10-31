@@ -131,6 +131,12 @@ class AppLocalizationsDe extends AppLocalizations {
   String get plateViewOblique => 'Schräg';
 
   @override
+  String get plateViewZoomIn => 'Einzoomen';
+
+  @override
+  String get plateViewZoomOut => 'Auszoomen';
+
+  @override
   String get projectZOffset =>
       'Z-Offset pro Seite (wird beim Slicen angewendet)';
 

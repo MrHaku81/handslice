@@ -129,6 +129,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get plateViewOblique => 'Oblique';
 
   @override
+  String get plateViewZoomIn => 'Zoom in';
+
+  @override
+  String get plateViewZoomOut => 'Zoom out';
+
+  @override
   String get projectZOffset => 'Z-offset per plate (applied at slice time)';
 
   @override

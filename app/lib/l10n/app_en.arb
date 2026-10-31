@@ -46,6 +46,8 @@
   "plateViewTop": "Top",
   "plateViewFront": "Front",
   "plateViewOblique": "Oblique",
+  "plateViewZoomIn": "Zoom in",
+  "plateViewZoomOut": "Zoom out",
   "projectZOffset": "Z-offset per plate (applied at slice time)",
   "projectZOffsetDecrement": "Decrease Z-offset by 0.01 mm",
   "projectZOffsetIncrement": "Increase Z-offset by 0.01 mm",

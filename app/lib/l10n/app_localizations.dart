@@ -320,6 +320,18 @@ abstract class AppLocalizations {
   /// **'Oblique'**
   String get plateViewOblique;
 
+  /// No description provided for @plateViewZoomIn.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom in'**
+  String get plateViewZoomIn;
+
+  /// No description provided for @plateViewZoomOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Zoom out'**
+  String get plateViewZoomOut;
+
   /// No description provided for @projectZOffset.
   ///
   /// In en, this message translates to:

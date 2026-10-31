@@ -42,6 +42,10 @@ class ProjectScreen extends StatefulWidget {
 
 class _ProjectScreenState extends State<ProjectScreen> {
   List<SavedProfile> _profiles = const [];
+  // True while a finger is on the plate-view viewport; the outer
+  // ListView disables its own scroll physics in that state so
+  // pinch-to-zoom and drag-to-rotate are not stolen by it.
+  bool _plateInteracting = false;
 
   @override
   void initState() {
@@ -252,6 +256,9 @@ class _ProjectScreenState extends State<ProjectScreen> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: ListView(
+        physics: _plateInteracting
+            ? const NeverScrollableScrollPhysics()
+            : null,
         children: [
           Row(
             crossAxisAlignment: CrossAxisAlignment.end,
@@ -329,6 +336,10 @@ class _ProjectScreenState extends State<ProjectScreen> {
           _PlateViewCard(
             projectState: state,
             printerState: widget.printerState,
+            onInteractionChanged: (v) {
+              if (v == _plateInteracting) return;
+              setState(() => _plateInteracting = v);
+            },
           ),
 
           const SizedBox(height: 12),
@@ -388,9 +399,11 @@ class _PlateViewCard extends StatelessWidget {
   const _PlateViewCard({
     required this.projectState,
     required this.printerState,
+    required this.onInteractionChanged,
   });
   final ProjectState projectState;
   final PrinterState printerState;
+  final ValueChanged<bool> onInteractionChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -413,12 +426,12 @@ class _PlateViewCard extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.only(top: 4, bottom: 6),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Text(l.projectPlateViewHeading,
-                      style: theme.textTheme.bodySmall),
-                ),
+                Text(l.projectPlateViewHeading,
+                    style: theme.textTheme.titleSmall),
+                const SizedBox(height: 2),
                 Text(
                   l.projectPlateViewSimplifyNote(
                       projectState.previewSimplifyTarget),
@@ -456,12 +469,15 @@ class _PlateViewCard extends StatelessWidget {
               fallbackImagePath:
                   projectState.previewThumbnailPath,
               filamentColor: color,
+              onInteractionChanged: onInteractionChanged,
               labelResetView: l.plateViewReset,
               labelTop: l.plateViewTop,
               labelFront: l.plateViewFront,
               labelOblique: l.plateViewOblique,
+              labelZoomIn: l.plateViewZoomIn,
+              labelZoomOut: l.plateViewZoomOut,
               labelEmpty: l.projectPlateViewEmpty,
-              labelBuilding: 'Building preview mesh…',
+              labelBuilding: l.projectPlateViewBuilding,
             ),
         ],
       ),

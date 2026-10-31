@@ -18,6 +18,45 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 22:40 UTC – Pflicht 7a fixes: layout, pinch, chamber-light state
+
+Device test (`e8234d1`) uncovered four issues; all fixed below.
+
+- `_PlateViewCard` header: heading and simplify-note were in a
+  Row; the note was unflexed and ate the heading's horizontal
+  space, so "Druckplatten-Ansicht" rendered as a vertical stack
+  of single letters and the note was cut off. Stacked them
+  vertically in a Column; note is allowed to wrap. Heading now
+  uses `titleSmall`, note stays `bodySmall · muted`.
+- Pinch-zoom was lost to the outer `ListView` scroll gesture.
+  Rewrote PlateView gestures with `Listener` + manual pointer
+  tracking (`_pointers` map, centroid pan, pairwise distance for
+  zoom) so the arena is not involved at all; the project screen
+  additionally switches its `ListView.physics` to
+  `NeverScrollableScrollPhysics` while a finger is on the
+  viewport, via the new `PlateView.onInteractionChanged`
+  callback. Added two zoom buttons (+ / −) in a second button
+  row so the operation is focus-navigable.
+- Chamber-light state: read from `_liveState['led']['status']`
+  (match Daniel's upstream models.py:176–182, confirmed on our
+  2026-10-31 capture — the CC2 does push
+  `{"method":6000,"result":{"led":{"status":N}}}` on
+  `api_status`). The last user-set value stays as a fallback for
+  the gap between the 1029 response and the next 6000 delta,
+  but the printer is now the authority.
+- Label-squeeze audit: extracted the chamber-light row into the
+  new `LabeledSwitchRow` widget. Pattern: Expanded(Column(label,
+  optional-subtitle)) + Switch. Switch stays right of the column
+  regardless of subtitle length. Replaced the inline Row in
+  print_screen with this widget. Added a widget test
+  (`narrow_screen_labels_test.dart`) that renders the row at
+  320 px with a long subtitle and asserts the label stays on one
+  line, > 60 px wide, and the Switch sits to the right.
+- Also: `PlateView._scene` is now constructed lazily inside
+  `_initScene` with a try/catch so flutter_test (no Impeller)
+  degrades to the empty-state card instead of taking down the
+  whole screen.
+
 ## 2026-10-31 22:10 UTC – Pflicht 7a: 3D view in the project tab
 
 Not yet device-tested — Klaus runs that pass.

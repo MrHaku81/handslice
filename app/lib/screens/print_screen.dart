@@ -10,6 +10,7 @@ import '../net/elegoo_cc2_client.dart';
 import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
+import '../widgets/labeled_switch_row.dart';
 import '../widgets/workshop_card.dart';
 import '../widgets/workshop_row.dart';
 
@@ -648,38 +649,24 @@ class _PrintControlsState extends State<_PrintControls> {
             ),
           ]),
           const Divider(height: 20),
-          Row(children: [
-            Expanded(
-              child: Text(l.printControlLightLabel,
-                  style: Theme.of(context).textTheme.bodyMedium),
-            ),
-            if (p.lightOn == null) ...[
-              Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Text(
-                  l.printControlLightUnknown,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: WorkshopTokens.textMuted),
-                ),
-              ),
-            ],
-            Switch(
-              value: p.lightOn ?? false,
-              onChanged: canLight
-                  ? (v) async {
-                      setState(() { _lastError = null; _lastHint = null; });
-                      final ok = await p.setLight(v);
-                      if (!mounted) return;
-                      if (!ok) {
-                        setState(() {
-                          _lastError = mapControlErrorToText(l, p.lastError)
-                              ?? p.lastError ?? '—';
-                        });
-                      }
+          LabeledSwitchRow(
+            label: l.printControlLightLabel,
+            subtitle: p.lightOn == null ? l.printControlLightUnknown : null,
+            value: p.lightOn ?? false,
+            onChanged: canLight
+                ? (v) async {
+                    setState(() { _lastError = null; _lastHint = null; });
+                    final ok = await p.setLight(v);
+                    if (!mounted) return;
+                    if (!ok) {
+                      setState(() {
+                        _lastError = mapControlErrorToText(l, p.lastError)
+                            ?? p.lastError ?? '—';
+                      });
                     }
-                  : null,
-            ),
-          ]),
+                  }
+                : null,
+          ),
           if (_lastHint != null) ...[
             const SizedBox(height: 8),
             _InfoBox(

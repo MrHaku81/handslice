@@ -39,6 +39,8 @@
   "plateViewTop": "Oben",
   "plateViewFront": "Vorne",
   "plateViewOblique": "Schräg",
+  "plateViewZoomIn": "Einzoomen",
+  "plateViewZoomOut": "Auszoomen",
   "projectZOffset": "Z-Offset pro Seite (wird beim Slicen angewendet)",
   "projectZOffsetDecrement": "Z-Offset um 0,01 mm verringern",
   "projectZOffsetIncrement": "Z-Offset um 0,01 mm erhöhen",

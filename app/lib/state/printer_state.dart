@@ -318,14 +318,22 @@ class PrinterState extends ChangeNotifier {
 
   // --- Licht-Zustand ---
   //
-  // Die CC2-Firmware pusht KEIN `light`/`chamber_light`-Feld
-  // auf `api_status` – im Block-A-Mitschnitt und in allen frueheren
-  // Capture-Logs: 0 Treffer. Deshalb halten wir den zuletzt vom
-  // Nutzer gesetzten Wert hier lokal; `lightOn` ist `null`, bis zum
-  // ersten `setLight(...)`-Aufruf (UI zeigt dann "unbekannt" an).
-
+  // Pflicht 7a-Nacharbeit: die CC2 pusht sehr wohl `led.status` auf
+  // `api_status` (method=6000). Der Mitschnitt
+  // logs/cc2-sniff-2026-10-31.jsonl zeigt
+  //   {"method":6000,"result":{"led":{"status":1}}}
+  // sowohl nach einem Nutzer-Toggle als auch im Verbindungsaufbau.
+  // Konvention nach Daniels upstream models.py:176–182: status > 0
+  // = Licht an. Der zuletzt vom Nutzer gesendete Wert wird noch
+  // als sofortiger Fallback gehalten (zwischen dem 1029-Response
+  // und dem naechsten 6000-Delta), reicht aber ab dem ersten
+  // Status-Push nicht mehr aus.
   bool? _lightOn;
-  bool? get lightOn => _lightOn;
+  bool? get lightOn {
+    final s = _getInt(['led', 'status']);
+    if (s != null) return s > 0;
+    return _lightOn;
+  }
 
   // Zeitraffer-Capability. Reihenfolge der Belege:
   //  - `external_device.chassis_camera.configured == 1` → unterstuetzt
