@@ -1031,6 +1031,17 @@ Reihenfolge in `docs/roadmap.md` Phase 2: **LAN (MVP) → VPN
 
 ### Nachweislauf 2026-10-25: method 1047 DELETE_FILE am echten CC2
 
+> **ÜBERHOLT durch Block A am 2026-10-31** (siehe Abschnitt "Block A
+> device test – results" am Ende dieses Dokuments). Das 1003 kam
+> **nicht** daher, dass 1047 auf dieser Firmware generell nichts
+> loescht, sondern daher, dass sowohl Key (`filename` statt
+> `file_path`) als auch Typ (String statt Liste) nicht passten. Die
+> damals akzeptierte Shape ist `{"storage_media":"local","file_path":
+> ["<name>"]}` – damit kam `error_code=0` und 1044 zeigt die Datei
+> anschliessend als geloescht. Der Rohbefund-Teil unten bleibt der
+> Nachvollziehbarkeit halber stehen; die *Deutung* in diesem
+> Abschnitt ist widerlegt.
+
 Fuer upstream Issue
 [danielcherubini/elegoo-homeassistant#432](https://github.com/danielcherubini/elegoo-homeassistant/issues/432)
 gemessen. Firmware OTA 02.01.01.07, MCU/SOC-Version leer (wie bisher).
@@ -1347,7 +1358,10 @@ Semantik aus dem Code.
 | 2005 | req  | GET_CANVAS (bekannt) |
 
 **Fehlercodes** (`machine.ts:68-87`): `1003 = invalid_parameters`
-(bestaetigt die bisherige Vermutung aus dem 1047-Nachweislauf),
+(am 2026-10-31 im Block A **direkt bestaetigt**: mit der richtigen
+`1047`-Shape antwortet dieselbe Firmware `error_code=0`, die 1003
+war also im wortsinn ein Parameter-Fehler, nicht die frueher
+vermutete generische "not available"-Antwort),
 `1009 = busy`, `1012 = task_not_found`.
 
 ### Zeitraffer-Status in `history_task_list` (Community-Code, hart belegt)
@@ -1541,10 +1555,13 @@ explizit:
 - Speicher: nur eine 488-MB-Partition (`/opt/usr`), 90 MB belegt
   (unser `method 1048`-Lauf). Rohframes bleiben dort liegen, bis
   Composite oder History-Delete sie entfernt. Fuer die App ist
-  Speicheranzeige/Hinweis sinnvoll, zumal `method 1047`
-  (DELETE_FILE) auf 02.01.01.07 **nichts loescht** (siehe
-  Nachweislauf 2026-10-25). Delete-Pfad fuer Zeitraffer ist
-  `method 1038` auf dem History-Task.
+  Speicheranzeige/Hinweis sinnvoll. (**Korrektur 2026-10-31,
+  Block A**: `method 1047` loescht auf 02.01.01.07 sehr wohl –
+  mit der richtigen Shape `{"storage_media":"local","file_path":
+  [<name>]}`. Die frueheren 1003-Antworten lagen am Params-
+  Format, nicht an der Methode. Fuer G-Code-Dateien im local-
+  Storage ist 1047 damit der korrekte Delete-Pfad; `method 1038`
+  bleibt der Pfad fuer History-Eintraege / Zeitraffer-Rohframes.)
 - `method 1044` listet keine Videos; `method 1048` zeigt nur
   die eine Partition – deckt sich mit dem Code (video/ wird nur
   ueber 1036 exponiert, nicht ueber 1044).
@@ -1767,10 +1784,24 @@ Index aus dem Hauptprozess aufgerufen wird.
   dokumentiert, aber reproduzierbar und stabil.
 - `method 1036/1051` stehen damit auch auf Stock 02.01.01.07
   erwiesenermaßen zur Verfuegung (nicht nur im Community-Image).
-  Ihre Verhalten weicht angenehm von `method 1045/1047` ab, die
-  auf dieser FW nur `error_code 1003` liefern.
+  Ihre Verhalten unterscheidet sich damals von `method 1045/1047`,
+  die auf dieser FW nur `error_code 1003` lieferten – **fuer
+  1047 am 2026-10-31 (Block A) widerlegt**: 1047 funktioniert
+  mit der richtigen Shape (`file_path` als Liste); 1045 wurde
+  nicht erneut gegen Orcas Shape (`file_name` statt `filename`)
+  gegengeprueft und bleibt offen.
 
 ## Test E 2026-10-26: method 1047 Parameter-Shape-Probe (danielcherubini#432)
+
+> **ÜBERHOLT durch Block A am 2026-10-31** (siehe "Block A device
+> test – results" am Ende dieses Dokuments). Alle 11 Varianten
+> von Test E hatten `filename`/`file_name` als Key und einen
+> **String** als Wert; keine davon traf die akzeptierte Form
+> `{"storage_media":"local","file_path":[<name>]}` (Key
+> `file_path`, Wert **Liste**). Das Probe-Ergebnis ("1047 nicht
+> served") war im Rahmen der getesteten Shapes korrekt, als
+> Gesamt-Aussage ueber die Methode aber falsch. Rohdaten unten
+> bleiben zur Nachvollziehbarkeit.
 
 Lesender Beitrag zu Issue #432 des HA-Integration-Repos
 `danielcherubini/elegoo-homeassistant`. Repo-Tag `v2.16.0-beta.2`,
@@ -1823,10 +1854,20 @@ Zitat (anonymisiert, aus `scripts/cc2_probe_20261026_092850.json`):
 > available / not handled' answer. The key-name hypothesis is not
 > supported by this capture.
 
-**Konsequenz fuer die App:** `method 1047` auf dieser Firmware fuer
-nichts verwenden. Zum Entfernen von Zeitraffer-/G-Code-Dateien
-bleibt der Display-Pfad die einzige Option; History-Entries werden
-ueber `method 1038` entfernt (siehe Test D) – ohne Datei-Loeschung.
+**Konsequenz fuer die App** (urspruengliche Fassung, inzwischen
+revidiert): `method 1047` auf dieser Firmware fuer nichts
+verwenden. Zum Entfernen von Zeitraffer-/G-Code-Dateien bleibt
+der Display-Pfad die einzige Option; History-Entries werden ueber
+`method 1038` entfernt (siehe Test D) – ohne Datei-Loeschung.
+
+**Revision 2026-10-31 (Block A):** 1047 ist auf fw 02.01.01.07
+sehr wohl benutzbar, nur mit der Shape
+`{"storage_media":"local","file_path":[<name>]}` (Key `file_path`,
+Wert als Liste). Fuer G-Code-Dateien im local-Storage ist 1047
+damit der richtige Delete-Pfad in der App. Zeitraffer-Videos
+blieben untouched von diesem Test – fuer die bleibt der 1038+
+Display-Weg vorlaeufig gueltig, bis jemand eine 1047-Shape mit
+`storage_media=video` o. ae. nachtestet.
 
 ### Leftovers am Drucker nach dem Lauf
 
@@ -2687,7 +2728,7 @@ braechte es Zugriff auf `/opt/usr/picture/`; haben wir nicht.
 ## Abnahmedruck 2026-10-26: MQTT-Zeitachse (Sniff-Mitschnitt)
 
 Mitschnitt: `logs/cc2-sniff-2026-10-26-152237.jsonl` (Start 14:22
-UTC, Ende 16:43 UTC). Drucker SN **<cc2-sn>**, Fach A4
+UTC, Ende 16:43 UTC). Drucker SN **`<cc2-sn>`**, Fach A4
 (ELEGOO Rapid PLA+). Nur `subscribe` auf `elegoo/#`, kein PUBLISH.
 
 ### Zeitachse (alle Zeiten UTC)
@@ -2742,3 +2783,291 @@ die Düsentemperatur** war im Mitschnitt zu beobachten – weder in den
 Klaus einen Override setzen *wollte* und keine Abweichung sieht, war
 der Override identisch zum Preset-Default (oder wurde vor dem
 Abnahme-Druck zurueckgenommen).
+
+---
+
+## Print control commands – sources (Orca ElegooLink, Elegoo method.h, elegoo-homeassistant)
+
+**Scope.** This section documents the exact MQTT request/response shape
+each printer-control command uses, with the source each shape comes
+from. Written in English on purpose — this is the material we will
+link to from the upstream issue trackers (OrcaSlicer #13934, PR
+\#14024, danielcherubini#432).
+
+**Sources audited** (read-only, no device commands sent):
+
+- `engine/OrcaSlicer` submodule at tag `v2.4.2` (commit `8500fcdcca`):
+  - `src/slic3r/Utils/ElegooLink.{cpp,hpp}` – native C++ host glue.
+  - `resources/web/elegoolink/lan_service_web/index.html` – bundled
+    Vue/MQTT client UI (minified, single file, ~3.5 MB).
+- `elegooofficial/CentauriCarbon2` (GPL):
+  `elegoo/common/method.h` – enum values only, no implementation.
+- `danielcherubini/elegoo-homeassistant` v2.16.0-beta.2 (lesender
+  Clone unter `~/upstream/elegoo-homeassistant/`, nicht im Repo):
+  `custom_components/elegoo_printer/cc2/{client.py,const.py}`.
+
+**Caveat.** PR \#14024 was already merged into v2.4.2 – the full
+ElegooLink/CC2 code path is present. Orca `main` was **not** pulled
+in this pass; a later ElegooLink refactor could change the enum
+layout or add new methods, but the method IDs 1007/1021–23/1029/
+1031/1042/1044–48/1054 covered here are all unambiguously present
+in v2.4.2 and match `method.h`.
+
+### Transport
+
+Orca's embedded web UI connects to the printer with MQTT over
+**WebSocket on port 9001**:
+
+- `resources/web/elegoolink/lan_service_web/index.html` @1119975:
+  `` `ws://${Ni.ip}:9001` `` – mqtt.js `.connect(url, options)` where
+  `options = {clientId, clean: true, reconnectPeriod: 1000, username,
+  password}`.
+- Default LAN credentials: `username: "elegoo"`, `password:
+  <access_code>` (same `access_code` the panel displays and that
+  Orca passes to the Vue UI via query string).
+
+Daniel's Python client uses **MQTT over plain TCP on port 1883**
+(`~/upstream/.../cc2/const.py:23  CC2_MQTT_PORT = 1883`). Our
+previous MQTT-sniff captures confirm the printer's broker **listens
+on both** – no change needed to our native MQTT client. Port 9001
+is only relevant if we later ship a WebView-based control panel.
+
+### Registration + request topic layout
+
+Both Orca and Daniel use the same topic layout (brief said
+`_register`; actual string in both sources is `api_register`):
+
+```
+elegoo/<sn>/api_register                                 (publish)
+elegoo/<sn>/<request_id>/register_response               (subscribe)
+elegoo/<sn>/<client_id>/api_request                      (publish)
+elegoo/<sn>/<client_id>/api_response                     (subscribe)
+elegoo/<sn>/api_status                                   (subscribe)
+```
+
+- Orca UI @1118284..1118690: topic-template functions `lbe`, `OX`,
+  `cbe`, `ube`, `dbe` emit exactly those strings.
+- Orca UI @1122139: `register` payload is `{...registerParams,
+  client_id: this.clientId}` published to `api_register`; the UI
+  then awaits a reply on `register_response` keyed by the same
+  `request_id`.
+- Daniel @client.py:1216, :1311 publishes to the identical topics.
+
+The native C++ side (`src/slic3r/Utils/ElegooLink.cpp:343..369`)
+only prepares the WebView: it HTTP-GETs `/system/info` to fetch
+the SN, then opens the local file `.../lan_service_web/index.html`
+with query string `?access_code=…&ip=…&sn=…&id=elegoo_123456`. All
+MQTT traffic is driven from the JS inside the WebView; the C++
+host never speaks MQTT itself.
+
+### Per-method request/response shapes
+
+All UI calls build an object `{method: Pt.<Name>, params: {...}}`
+and dispatch it through `N0.request()` (@1118690 and following).
+`Pt` is the full method enum, declared at
+`resources/web/elegoolink/lan_service_web/index.html` @738000..738400.
+
+Table columns:
+
+- **ID** – numeric method id (what hits the wire).
+- **Enum name** – from Orca's `Pt.*` (matches `method.h` names).
+- **Params (Orca UI)** – exact JS object literal published to
+  `api_request`.
+- **Response fields read (Orca UI)** – fields the UI reads back
+  from `api_response`.
+- **Source** – file:line in the Orca v2.4.2 submodule.
+
+| ID   | Enum name          | Params (Orca UI)                                        | Response fields read                                                                 | Orca source (`resources/web/elegoolink/lan_service_web/index.html` @offset) |
+|------|--------------------|---------------------------------------------------------|---------------------------------------------------------------------------------------|-----|
+| 1007 | UrgentStop         | *(none)*                                                | `error_code`                                                                          | @2521985 |
+| 1020 | StartPrint         | `{storage_media, filename, ...}` (full print config)    | `error_code`                                                                          | @2510067 |
+| 1021 | PausePrint         | *(none)*                                                | `error_code`                                                                          | @2510582 (UI uses 60 s timeout) |
+| 1022 | CancelPrint        | *(none)*                                                | `error_code`                                                                          | @2511241 (UI uses 60 s timeout) |
+| 1023 | ResumePrint        | *(none)*                                                | `error_code`                                                                          | @2510915 (UI uses 60 s timeout) |
+| 1028 | TemperatureControl | passthrough object (`params: Ie`)                       | `error_code`                                                                          | @2523515 |
+| 1029 | LightSwitch        | `{power: 1\|0}` **only** – no `brightness`              | `error_code`                                                                          | @2517873 |
+| 1030 | FanControl         | `{fan?, box_fan?, aux_fan?}` – only set fans provided   | `error_code`                                                                          | @2518247 |
+| 1031 | PrintSpeedControl  | `{mode: <int>}`                                         | `error_code`                                                                          | @2518790 |
+| 1042 | GetLivingVideoUrl  | *(none)*                                                | `error_code`, `url`                                                                   | @2516866 |
+| 1044 | GetFileList        | `{storage_media, dir?, offset, limit}`                  | `error_code`, `offset`, `total`, `file_list[]`                                        | @2512171 |
+| 1045 | GetFileThumbnail   | `{storage_media, file_name}` *(underscore)*             | `error_code`, `thumbnail`                                                             | @2511727 |
+| 1046 | GetFileDetail      | `{storage_media, filename, dir?}` *(no underscore)*     | `error_code`, `filename`, `print_time`, `layer`, `size`, `create_time`, `total_filament_used`, … | @2514037 |
+| 1047 | DeleteFile         | `{storage_media, file_path}` *(NOT `filename`)*         | `error_code`                                                                          | @2514470 |
+| 1048 | GetCapacity        | declared only – no call site in UI                      | –                                                                                     | enum @738200; dispatcher @1127576 |
+| 1054 | StartVideoStream   | declared only – no call site in UI                      | –                                                                                     | enum @738324 |
+
+Error code 1003 (`InvalidParameter`) is emitted when `params` is
+rejected – confirmed by the UI's own error enum at @583400 and by
+Klaus's Test E capture (2026-10-26 09:30 UTC, PROGRESS.md).
+
+### Points of agreement / disagreement vs method.h and elegoo-homeassistant
+
+| ID   | `method.h` name          | Orca `Pt.*` name     | Daniel's shape                                             | Verdict |
+|------|--------------------------|----------------------|------------------------------------------------------------|---------|
+| 1007 | EMERGENCY_STOP           | UrgentStop           | —                                                          | names differ, semantics identical |
+| 1021 | PAUSE_PRINT              | PausePrint           | no params                                                  | **agree** |
+| 1022 | CANCEL_PRINT             | CancelPrint          | no params                                                  | **agree** |
+| 1023 | RESUME_PRINT             | ResumePrint          | no params; Daniel says reply arrives after ~122 s and does not wait | Orca UI uses 60 s timeout but ignores a late reply; semantics compatible |
+| 1029 | CTRL_LED                 | LightSwitch          | `{brightness: 0\|255, power: 0\|1}`                        | **mismatch** – Orca sends `power` only; Daniel's comment says some firmwares expect `brightness`. Not reconciled. |
+| 1031 | CTRL_PRINT_SPEED         | PrintSpeedControl    | `{mode: int}`                                              | **agree** |
+| 1042 | GET_MONITOR_VIDENO_URL *(sic)* | GetLivingVideoUrl | `{enable: 0\|1}` sent as toggle                        | **mismatch** – method.h and Orca treat 1042 as a URL getter with no params; Daniel sends `{enable}`. The response Daniel reads is `error_code` only (no `url` field used), so his toggle may happen to work only as a side effect, or the firmware ignores unknown params. |
+| 1044 | GET_FILE_LIST            | GetFileList          | `{storage_media: "local", path: "/"}`                      | **naming mismatch** – Daniel uses `path`, Orca uses `dir`+`offset`+`limit`. The CC2's capture Klaus already recorded confirms **Daniel's `path`-shaped 1044 does return `file_list`**, so the firmware accepts both or ignores unknown keys. |
+| 1045 | GET_FILE_THUMBNAIL       | GetFileThumbnail     | *(not inspected)*                                          | Orca uses `file_name` (underscore); verify Daniel's shape before mixing. |
+| 1046 | GET_FILE_INFO            | GetFileDetail        | *(not inspected)*                                          | names differ in both repos; semantics appear identical. |
+| 1047 | DEL_FILE                 | DeleteFile           | `{storage_media, filename}`                                | **mismatch – this is the Test-E answer.** Orca sends `file_path`, Daniel sends `filename`. method.h is silent on the param name. All 11 shape variants Klaus's `cc2_probe_delete.py` tried on 2026-10-26 included `filename`, `file_name`, `file_path` **inside a wrapper `params`** that different clients spell differently (`local_file_name`, `sd_card_filename`, …) – but **not** a plain `{storage_media, file_path}`. Likely the printer accepted neither Daniel's shape nor Klaus's probe shapes; Orca's `file_path` is the one shape not yet tested. |
+| 1048 | GET_DISK_VALUME *(sic)*  | GetCapacity          | `{}` (empty)                                               | agree on no params; Orca UI never invokes it, so this is the only confirmation we have. |
+| 1054 | CTRL_LIVE_STREAM         | StartVideoStream     | *(not used – aliased to 1042 in Daniel's const)*           | **unverified** – method.h says 1054 is the switch; Orca declared it but never calls it; Daniel calls 1042 instead. The real switch has never been exercised in a captured session. |
+
+### Methods we must verify on the real printer before building App features
+
+In priority order (first two are blocking the control-panel UI,
+last three are nice-to-have before shipping):
+
+1. **1047 DeleteFile with `{storage_media, file_path}`** (Orca's
+   shape). Target: delete one of the 12 probe files Klaus has
+   queued and watch for `error_code == 0` + disappearance from
+   the next 1044 listing. If it still returns 1003, the correct
+   shape is neither Orca's nor Daniel's.
+2. **1054 StartVideoStream `{enable: 0|1}` vs 1042 as toggle.**
+   Current hypotheses: (a) 1054 is the real on/off switch and
+   returns `error_code` only, (b) 1042 is a getter and the stream
+   is implicitly started by requesting the URL, (c) a different
+   method entirely. Decide by sending 1054 with
+   `{enable: 1}` first and watching the HLS/RTSP URL that 1042
+   returns before/after.
+3. **1029 LightSwitch – `{power}` alone sufficient?** Orca says
+   yes; Daniel's comment implies some firmwares want
+   `brightness`. Test on fw 02.01.01.07 (= the firmware we have).
+4. **1031 PrintSpeedControl – valid `mode` values.** Neither
+   source documents the integer range; Orca's UI binds it to a
+   dropdown whose option list is not in this file. Try 0/1/2/3
+   and record which trigger `error_code != 0`.
+5. **1023 ResumePrint reply timing.** Daniel documents a ~122 s
+   wait; Orca uses a 60 s timeout. Measure once at the real
+   printer so we size our client's timeout correctly (and do not
+   mistakenly resend).
+
+Everything else in the table above is **either confirmed by Orca's
+own code and Elegoo's enum or already matches what we've captured
+on the wire**, and can be implemented without further probing.
+
+
+---
+
+## Block A device test – results (CC2 fw 02.01.01.07, 2026-10-31)
+
+Hands-on verification of the five open points from the previous
+section. Klaus physically next to the printer, idle, no job queued.
+MQTT traffic captured in `logs/cc2-sniff-2026-10-31.jsonl` (gitignored).
+No credential ever written to disk or stdout.
+
+### Idle check (step 0)
+
+- UDP 52700 discovery: `lan_status=1`, `token_status=1`.
+- MQTT CONNACK rc=0, subscriptions ok.
+- `api_status` push rate during idle: `method=6000` deltas carrying
+  only `result.extruder.temperature`. The firmware **does not push
+  `machine_status.status`** between state changes, so an idle
+  reading requires either a wait for an actual transition or an
+  active 1002/1003 query. Idle confirmed visually at the panel.
+
+### 1047 DeleteFile – only the array form works (step 2)
+
+Upload of a 112-byte comment-only file first (`PUT
+http://<cc2-ip>:80/upload`, headers per
+`src/slic3r/Utils/ElegooLink.cpp:909..919`): HTTP 200,
+`{"error_code":0,"offset":111}`. 1044 verified name
+`cc2_probe_delete_test.gcode` in the listing (`total 27→28`).
+
+Then two 1047 attempts with that exact filename:
+
+| Attempt | `params`                                                                   | Response (full) |
+|---|---|---|
+| **Orca-UI shape (string)** | `{"storage_media":"local","file_path":"cc2_probe_delete_test.gcode"}`       | `{"id":…,"method":1047,"result":{"error_code":1003}}` – file **still present** |
+| **Array shape**            | `{"storage_media":"local","file_path":["cc2_probe_delete_test.gcode"]}`      | `{"id":…,"method":1047,"result":{"error_code":0}}`    – 1044 then shows file **gone**, total back to 27 |
+
+**Verdict.** On fw 02.01.01.07 the accepted shape for method 1047
+on `storage_media=local` is a **list of filenames** under
+`file_path`:
+
+```json
+{"storage_media":"local","file_path":["<name>"]}
+```
+
+- The Orca Vue bundle's `Mte(Ie, Be)` builder (minified
+  `index.html` @2514419) sets `file_path: Ie` from a parameter
+  that the enclosing composable has already turned into a
+  one-element array via `Ve = []; Ve.push(De); n.deletePrintFile(Ve, ze)`
+  (@2618738). The static analysis correctly recorded the
+  single-string shape visible at Mte itself; the array wrap at
+  the upper caller is what reaches the wire. **The static
+  recommendation ("Orca sends `file_path` as a plain string") was
+  wrong — the wire form is a list.**
+- `danielcherubini/elegoo-homeassistant` v2.16.0-beta.2 uses
+  `{"storage_media":…,"filename":<string>}` (`cc2/client.py:2634–2636`).
+  Not retested today, but the 11×1003 Klaus already captured on
+  2026-10-26 (`cc2_probe_delete_20261026_092850.json.scrubbed`)
+  rejected every string-valued key tried, including `filename`.
+  Both the key name (`file_path` ≠ `filename`) and the value
+  type (list ≠ string) diverge from Daniel's; **either divergence
+  alone is enough to cause 1003.**
+
+### 1042/1054 camera – stream is always-on, 1054 rejects `{enable}` (step 3)
+
+| Phase | Call | `error_code` | HTTP `:8080/?action=stream` |
+|---|---|---:|---|
+| Baseline (nothing done)        | –                      | –    | `HTTP/1.1 200 OK`, `multipart/x-mixed-replace; boundary=frame`, JPEG SOI `\xff\xd8` in body prefix |
+| after `1054 {"enable":0}`      | 1054                   | 1003 | **unchanged** – still 200, multipart, JPEG SOI |
+| after `1054 {"enable":1}`      | 1054                   | 1003 | **unchanged** – still 200, multipart, JPEG SOI |
+
+- `method 1042` with no params: `error_code=0`, response carries
+  only `url` (`http://<cc2-ip>:8080/?action=stream`). No `enable`
+  / `active` / `state` field. Pure URL getter, matches
+  `method.h`'s name `GET_MONITOR_VIDENO_URL` and the Orca enum
+  `Pt.GetLivingVideoUrl`.
+- `method 1054` with `{"enable": 0|1}` is **rejected** with
+  `error_code=1003`. Daniel's shape (`{"enable": int(enable)}` on
+  his `CC2_CMD_SET_VIDEO_STREAM = 1042` alias, `cc2/client.py:2362`)
+  does not work on 1054 either. Whether 1054 accepts a different
+  shape (`{"state":…}`, `{"on":…}`, …) was not re-probed per
+  Klaus's rules.
+- The MJPEG server on port 8080 ran continuously throughout the
+  test, unaffected by any MQTT call. Klaus (device-side
+  observation, same session): the CC2 has **no camera indicator
+  LED** at the printer – a camera state is visible only during a
+  print with active timelapse. There is thus no non-protocol way
+  to tell whether `1054` ever did anything from the outside.
+
+**App consequence.** For the camera panel, call `method 1042` to
+discover the URL and open an MJPEG decoder on it. **Do not call
+`method 1054` with `{enable}` on this firmware** – it only returns
+1003 and the stream server is already running.
+
+### 1029 LightSwitch – minimal `{"power"}` is sufficient (step 4)
+
+| Call | `error_code` | Hardware |
+|---|---:|---|
+| `1029 {"power":1}` | 0 | **chamber LED turned on**, confirmed visually by Klaus at the panel |
+| `1029 {"power":0}` | 0 | chamber LED turned off, confirmed visually – baseline restored |
+
+- Orca's minimal shape (no `brightness` key) is accepted on fw
+  02.01.01.07. Daniel's extra `brightness: 0|255` key
+  (`cc2/client.py:2431–2434`) is therefore unnecessary for this
+  firmware, though it is harmless when the printer ignores extra
+  keys (as seen in the 1003 shape probes, missing or wrong keys
+  trigger 1003 only when a *required* one is bad).
+
+### Verification backlog cleared vs. still open
+
+| Topic                                   | Status after Block A |
+|---|---|
+| 1047 delete – which param shape?        | **Decided**: `{"storage_media":…,"file_path":[<names>]}` |
+| 1054 vs 1042 camera toggle              | **1054 rejects `{enable}`**; `1042` is the URL getter; stream is always-on. Toggle, if any, uses a different (unknown) shape. |
+| 1029 light – `{power}` alone enough?    | **Yes** on fw 02.01.01.07. |
+| 1023 ResumePrint reply latency          | Not covered (would require a running print; Block A was idle-only). |
+| 1031 PrintSpeedControl `mode` range     | Not covered (same reason). |
+
+Both remaining items are *print-time* behaviours and cannot be
+tested on an idle machine; they belong to a later block with a
+running job.
+

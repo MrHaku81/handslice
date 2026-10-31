@@ -18,6 +18,191 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 12:40 UTC – Block A am Drucker: 1047/1042/1054/1029 geklaert, Doku ergaenzt
+
+Hands-on-Test am CC2 (fw 02.01.01.07), Klaus daneben, Drucker idle.
+Nur die vier Methoden aus dem Auftrag; MQTT-Mitschnitt
+`logs/cc2-sniff-2026-10-31.jsonl` (gitignored, 356 Zeilen Payload).
+Nichts committed, nichts gepusht.
+
+**Hinweis zu aelteren Eintraegen (nicht umgeschrieben, bleiben zur
+Historie stehen):** Die Aussagen aus dem 1047-Nachweislauf vom
+2026-10-25 und aus Test E (2026-10-26 09:30 UTC), `method 1047`
+loesche auf fw 02.01.01.07 nichts, sind **ueberholt**. Beide
+testeten `filename`-Keys mit String-Wert; die akzeptierte Form
+ist `{"storage_media":"local","file_path":[<name>]}` (Key
+`file_path`, Wert als Liste). Die Rohbefunde beider Laeufe (jeweils
+`error_code=1003`) sind damit konsistent – es waren wirklich
+Parameter-Fehler, nicht "nicht serviert". Korrektur-Hinweise sind
+in-place in `docs/networking-cc2.md` eingezogen (an den
+Nachweislauf-Abschnitten + an der "fuer die App"-Konsequenz).
+
+### Nachweislich
+
+- **1047 DeleteFile – Shape entschieden.**
+  Vorstufe: 112-B-Testdatei `cc2_probe_delete_test.gcode` per
+  `PUT http://<cc2-ip>:80/upload` hochgeladen (HTTP 200,
+  `error_code=0`, `offset=111`); in 1044 verifiziert (total 27→28).
+  Dann zwei 1047-Versuche auf exakt diese Datei:
+  - **Orca-Form** `{"storage_media":"local","file_path":"<name>"}`
+    (String) → `error_code=1003`, Datei bleibt. **Verworfen.**
+  - **Array-Form** `{"storage_media":"local","file_path":["<name>"]}`
+    (Liste) → `error_code=0`, 1044 danach ohne die Datei (total
+    28→27). **Akzeptiert.**
+  Der obere Caller im Orca-Vue-Bundle (`onDeletePrintFile` @2622179)
+  packt den String ja genau in ein Ein-Element-Array, bevor er die
+  composable-Methode aufruft; die Statik-Analyse hatte diesen Wrap
+  gesehen, aber die beiden Formen offen gelassen. Heute entschieden.
+  Daniels Shape (`filename` als String, `cc2/client.py:2634–2636`)
+  ist auf dieser FW nach wie vor nicht die richtige (sowohl Key
+  als auch Typ divergieren).
+- **1042 ist URL-Getter, Stream always-on.**
+  `method 1042` ohne Params → `error_code=0`,
+  `url=http://<cc2-ip>:8080/?action=stream`.
+  GET auf diese URL liefert durchgehend `HTTP 200`,
+  `multipart/x-mixed-replace; boundary=frame`, JPEG-SOI im Body —
+  **vor** jedem 1054-Call genauso wie **nach** jedem. Der
+  MJPEG-Server laeuft kontinuierlich; keine 1054-Variante hat
+  daran etwas veraendert.
+- **1054 `{"enable":0|1}` → `error_code=1003`.**
+  Beide Richtungen abgewiesen; Daniels Shape passt also nicht auf
+  diese FW. Welche Shape 1054 akzeptiert, bleibt offen (per
+  Auftrag heute nicht weiter sondiert).
+- **1029 `{"power":1}` schaltet die Kammer-LED EIN**, Klaus
+  visuell am Panel bestaetigt. `1029 {"power":0}` schaltet sie
+  wieder AUS, Ausgangszustand restauriert. **Orcas Minimal-Form
+  reicht**, Daniels zusaetzlicher `brightness`-Key ist auf dieser
+  FW nicht noetig.
+- **Klaus-Beobachtung fuer die Doku** (Kamera):
+  Der CC2 hat **keine Anzeige-LED fuer die Kamera**. Eine
+  Rueckmeldung "Kamera an" gibt es nur im Druckbetrieb mit
+  aktivem Zeitraffer. **Im Leerlauf ist der Stream-Zustand nur
+  ueber HTTP-Probe pruefbar**, nicht am Geraet.
+- Englischer Abschnitt
+  "Block A device test – results (CC2 fw 02.01.01.07, 2026-10-31)"
+  in `docs/networking-cc2.md` (+120 Zeilen).
+
+### Ungeprueft
+
+- **1054 mit anderer Params-Shape** (`{"state":…}`, `{"on":…}`,
+  `{"storage_media":…}`, usw.) — nicht angetastet, waere eine
+  separate Shape-Probe wert.
+- **1023 ResumePrint Reply-Latenz** und **1031 Mode-Range**
+  bleiben offen; beide brauchen einen laufenden Druck und
+  gehoeren damit in einen spaeteren Block, nicht in Block A
+  (idle-only).
+- Ob `1047` auf `storage_media=udisk` dasselbe Array-Shape braucht
+  und ob dort ein fuehrender Slash erforderlich ist — nicht
+  getestet (kein USB-Stick angeschlossen).
+
+### Geht nicht
+
+- (keine offenen Blocker; `docs/blockers.md` unveraendert.)
+
+### Konsequenz fuer den App-Einbau
+
+- **Delete-Flow**: `method 1047` mit
+  `{"storage_media":"local","file_path":[<name>]}` — Liste, nicht
+  String; Key `file_path`, nicht `filename`.
+- **Kamera-Flow**: Nur `method 1042` fuer die URL, dann MJPEG-
+  Decoder auf `:8080/?action=stream`. **Kein `1054` beim Oeffnen
+  des Panels** (bringt nur 1003).
+- **Licht-Flow**: `method 1029 {"power": 0|1}` — kein
+  `brightness`, keine Range.
+- `tools/cc2-block-a.py` bleibt als Repro-Script fuer kuenftige
+  Shape-Probes im Repo (Subcommands: `status`, `list`, `upload`,
+  `delete [--as-array]`, `camera-get`, `camera-set 0|1`,
+  `light-set 0|1`).
+
+---
+
+## 2026-10-31 11:00 UTC – CC2-Steuerbefehle: Orca-Belege gelesen, Diffs zu Daniel/method.h festgehalten
+
+Nur lesen; nichts an den Drucker gesendet. Neuer englischer Abschnitt
+"Print control commands – sources (Orca ElegooLink, Elegoo method.h,
+elegoo-homeassistant)" in `docs/networking-cc2.md`.
+
+### Nachweislich
+
+- **PR #14024 ist in v2.4.2 drin.** `src/slic3r/Utils/ElegooLink.cpp`
+  (1293 Zeilen) + `resources/web/elegoolink/lan_service_web/`
+  (3,6 MB minified Vue-Bundle) vollstaendig vorhanden auf Commit
+  `8500fcdcca`. Kein zusaetzlicher Clone noetig.
+- **Transport**: Orcas eingebette WebView redet MQTT ueber
+  **WebSocket Port 9001**
+  (`index.html @1119975: ws://${Ni.ip}:9001`), Daniel + unser
+  Client reden MQTT ueber **Plain TCP 1883**
+  (`const.py:23 CC2_MQTT_PORT = 1883`). Broker hoert auf beiden –
+  **kein Umbau unseres MQTT-Clients noetig**.
+- **Topics**: `elegoo/<sn>/api_register`,
+  `elegoo/<sn>/<req_id>/register_response`,
+  `elegoo/<sn>/<client_id>/api_request`,
+  `elegoo/<sn>/<client_id>/api_response`,
+  `elegoo/<sn>/api_status`. Brief sagte `_register`, tatsaechlich
+  ist es `api_register` – Orca und Daniel sind sich hier einig.
+- **Vollstaendige Params/Response-Tabelle** fuer die Pflichtliste
+  (1007 / 1021 / 1022 / 1023 / 1028 / 1029 / 1030 / 1031 / 1042 /
+  1044 / 1045 / 1046 / 1047 / 1048 / 1054) mit Datei+Offset in
+  `docs/networking-cc2.md` → neuer Abschnitt.
+- **Drei konkrete Divergenzen zu Daniel aufgedeckt**:
+  - **1047 DeleteFile**: Orca schickt `{storage_media, file_path}`,
+    Daniel schickt `{storage_media, filename}`. Erklaert vermutlich
+    das 11×1003 aus Test E (2026-10-26 09:30 UTC) – Klaus' Probe
+    hat `file_path` nicht getestet.
+  - **1029 LightSwitch**: Orca schickt nur `{power: 0|1}`, Daniel
+    schickt zusaetzlich `{brightness: 0|255}`.
+  - **1042 vs 1054 (Kamera)**: Orca-UI nutzt 1042 **als URL-Getter**
+    (ohne Params, liest `.url`), **1054 ist deklariert, wird aber
+    nirgends aufgerufen**. Daniel nutzt 1042 als Toggle
+    (`{enable}`). method.h steht hier auf Orcas Seite.
+- **Native C++ Seite** (`ElegooLink.cpp:343..369`) redet selbst
+  **kein MQTT**. Sie macht nur HTTP-GET auf `/system/info` zum
+  SN-Holen und oeffnet dann `file://.../lan_service_web/index.html?
+  access_code=…&ip=…&sn=…&id=elegoo_123456`. Das heisst: wenn wir
+  Orca-Verhalten 1:1 nachbilden wollen, muessen wir die Logik aus
+  dem Vue-Bundle lesen, nicht aus dem C++.
+
+### Ungeprueft
+
+- **1048 GetCapacity** und **1054 StartVideoStream**: in Orcas Enum
+  deklariert, aber **in der UI nie aufgerufen**. Params-Form
+  unbekannt. Vermutung (klar als solche gekennzeichnet in der Doku):
+  1048 ohne Params; 1054 analog zu Daniels 1042-Toggle
+  `{enable: 0|1}`.
+- **Orca `main` nicht gezogen.** Da PR #14024 bereits in v2.4.2 ist
+  und alle angefragten Method-IDs im v2.4.2-Bundle unmissverstaendlich
+  belegt sind, kein zusaetzlicher Shallow-Clone. Eine spaetere
+  ElegooLink-Refaktorierung in Orca-main koennte Enums umbenennen –
+  die Method-IDs 10xx bleiben per method.h stabil.
+
+### Geht nicht / Konsequenz
+
+- (keine offenen Blocker; `docs/blockers.md` unveraendert.)
+
+### Vor App-Einbau noch am echten Drucker gegenpruefen (Prioritaet)
+
+1. **1047 `{storage_media, file_path}`** – ist das die Form, die der
+   CC2 akzeptiert? Eine der 12 Probe-Dateien von Klaus (2026-10-26)
+   damit loeschen und 1044 vorher/nachher vergleichen.
+2. **1054 `{enable: 1}` vs. 1042 als Toggle** – welchen Pfad nutzt
+   die Firmware tatsaechlich fuer den Kamera-Schalter? 1054 testen,
+   dann 1042-URL vorher/nachher pruefen.
+3. **1029 nur `{power}` vs. `{power, brightness}`** – ob
+   Orcas minimale Form auf fw 02.01.01.07 reicht.
+4. **1031 PrintSpeedControl mode-Range** – gueltige Integer-Werte
+   nicht dokumentiert; 0/1/2/3 durchtesten.
+5. **1023 ResumePrint Reply-Latenz** – Daniel misst ~122 s, Orcas
+   UI setzt 60 s Timeout. Einmal messen, damit unser Client den
+   richtigen Timeout waehlt (nicht erneut sendet).
+
+### Artefakte
+
+- `docs/networking-cc2.md` – neuer Abschnitt "Print control
+  commands – sources" (englisch, +168 Zeilen).
+- Nichts committed, nichts gepusht.
+
+---
+
 ## 2026-10-26 14:40 UTC – Phase 4.4-Nacharbeit: Filament-Save + Material-Picker + Ueberschrift
 
 Zwei Befunde aus der Poco-Abnahme (APK 5699b13) adressiert.
