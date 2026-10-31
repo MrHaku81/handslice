@@ -19,6 +19,7 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   crypto: ^3.0.7
   share_plus: ^13.3.1
+  connectivity_plus: ^7.3.2
 
 dev_dependencies:
   flutter_test:

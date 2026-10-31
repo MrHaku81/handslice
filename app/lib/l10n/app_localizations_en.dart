@@ -585,7 +585,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get printPhaseCancelled => 'Cancelled';
 
   @override
-  String get printPhasePreparing => 'Preparing (heating/levelling)';
+  String get printPhasePreparing => 'Preparing';
 
   @override
   String get machineStatusUnknown => 'unknown';

@@ -210,7 +210,7 @@
   "@printControlFailedLight": {"placeholders": {"detail": {"type": "String"}}},
   "printPhaseCancelling": "Cancelling…",
   "printPhaseCancelled": "Cancelled",
-  "printPhasePreparing": "Preparing (heating/levelling)",
+  "printPhasePreparing": "Preparing",
 
   "machineStatusUnknown": "unknown",
   "machineStatusInitializing": "initializing",

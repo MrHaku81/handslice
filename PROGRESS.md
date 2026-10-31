@@ -18,6 +18,72 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 16:15 UTC – M7-Nachbesserungen: OS-Netz-Signal, Preparing-Text, Reconnect-Flow-Test
+
+Klaus hat Pflicht 3 am Geraet (App 0c469228e5) durchgespielt:
+- WLAN aus: Banner sofort, Countdown wie geplant.
+- WLAN wieder an: Reconnect **nach ~30 s** (volle Backoff-Wartezeit).
+- App im Hintergrund 2–3 min, dann Resume: in ~2 s wieder verbunden.
+- Fehler-Banner am Geraet nicht ausloesbar → bleibt "ungeprueft".
+
+Drei Nachbesserungen vor dem naechsten Live-Test:
+
+### Nachweislich
+
+- **Netzwerk-Signal vom OS triggert Sofort-Reconnect.**
+  `connectivity_plus: ^7.3.2` als Dep aufgenommen. Im `main.dart`
+  wird `Connectivity().onConnectivityChanged` auf einen bool-Strom
+  (`.distinct()`) reduziert und als `networkAvailability` an
+  `PrinterState` uebergeben. In `PrinterState` neuer Subscriber:
+  wenn `_reconnecting==true` und das Signal `true` eintrifft,
+  bricht `_triggerImmediateReconnect()` den Backoff-Timer ab und
+  ruft sofort `connectAndLoad()`. **Attempt-Counter wird NICHT
+  zurueckgesetzt** – scheitert der Sofort-Versuch, laeuft die
+  2→5→10→20→30-Progression weiter.
+- **Preparing-Label gekuerzt.** `printPhasePreparing` ist jetzt
+  "Preparing" / "Vorbereitung". Grund: `sub_status 1066` ist eine
+  Pre-Print Hotend-Stabilisierung, weder Aufheizen noch
+  Nivellieren – der Zusatz in Klammern war irrefuehrend.
+- **Volle Reconnect-Flow-Tests** in `app/test/reconnect_flow_test.dart`:
+  - `_FakeCc2Client extends ElegooCc2Client` mit Zaehlern fuer
+    `discover/connect/disconnect/getCanvas/getStatus/ping` und
+    fuer die Steuerbefehle `pause/resume/cancel/setLight`.
+  - **Trennung → Banner → Reconnect → neuer Vollstatus-Zyklus**:
+    `connectAndLoad()` einmal; `fake.dropConnection()` +
+    `triggerReconnectForTest()`; `state.reconnecting==true`;
+    nach 3 s warten → `connectCalls==2`, `canvasCalls==2`,
+    `statusCalls==2`. Hart gesichert: `pauseCalls=resumeCalls=
+    cancelCalls=setLightCalls=0` – kein Command-Replay.
+  - **Netzwerk-wieder-da-Signal bricht Backoff ab**:
+    `netCtrl.add(true)` waehrend `_reconnecting==true` → nach
+    100 ms Micro-Yield ist `connectCalls==2` erreicht, ohne die
+    2-s-Backoff-Wartezeit.
+  - **Idle-Fall**: Netzwerk-Signal bei bestehender Verbindung
+    loest **keinen** zusaetzlichen Reconnect aus.
+- Tests gesamt: **99/99 gruen** (+3 ggue M7-Basis).
+- Scrub-Check (strict): 0 Treffer.
+- Englischer Doku-Abschnitt
+  "M7 device test – reconnect behaviour (CC2 fw 02.01.01.07,
+  2026-10-31)" in `docs/networking-cc2.md`.
+
+### Ungeprueft
+
+- **Live-Verifikation der neuen Nachbesserungen** am Geraet:
+  Klaus muss den WLAN-Toggle erneut durchspielen und schauen, ob
+  der Reconnect jetzt im Sekunden- statt im 30-Sekunden-Rhythmus
+  passiert.
+- **Fehler-Banner am echten Drucker**: unveraendert ungeprueft
+  (kein 1243-Trigger-Pfad in Reichweite).
+
+### Geht nicht
+
+- **APK-Installation per adb kann heute fehlschlagen** – der
+  WLAN-ADB wurde durch den WLAN-Toggle moeglicherweise
+  verloren. Falls `adb install` nicht durchkommt, meldet
+  Claude das zurueck statt herumzuprobieren (Klaus-Vorgabe).
+
+---
+
 ## 2026-10-31 15:30 UTC – M7: Fehlermeldungen + Reconnect-Behandlung
 
 Pflicht 3 der Pflichtliste in zwei Teilen umgesetzt. Kein Befehl

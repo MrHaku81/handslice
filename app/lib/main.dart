@@ -1,3 +1,4 @@
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -52,9 +53,19 @@ Future<void> main() async {
   final projectState = ProjectState(prefs);
   // flutter_secure_storage 11.x: AndroidOptions nutzt EncryptedSharedPreferences
   // als Default-Backend (JetSec); kein eigener Flag mehr noetig.
+  // Pflicht-3-Nachbesserung: Netzwerk-Hochkommen vom OS triggert
+  // sofort einen Reconnect, statt die Backoff-Wartezeit abzustehen.
+  // connectivity_plus liefert `List<ConnectivityResult>`; wir
+  // reduzieren auf einen reinen bool-Strom und entdoppeln identische
+  // Folgewerte.
+  final availabilityStream =
+      Connectivity().onConnectivityChanged.map((results) {
+    return results.any((r) => r != ConnectivityResult.none);
+  }).distinct();
   final printerState = PrinterState(
     prefs: prefs,
     secure: const FlutterSecureStorage(aOptions: AndroidOptions.defaultOptions),
+    networkAvailability: availabilityStream,
   );
   // Phase 4.2: Einstellungs-Schema aus Asset laden. Schlaegt fehl, wenn
   // der Asset-Bundle nicht da ist (etwa im Test ohne pumpAsset) – dann

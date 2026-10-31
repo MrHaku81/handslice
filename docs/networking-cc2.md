@@ -3235,3 +3235,53 @@ That method:
 - If either fails, resets the backoff attempt counter to 0 (so a
   user who just unlocked the phone doesn't wait 30 s) and
   schedules an immediate reconnect.
+
+---
+
+## M7 device test – reconnect behaviour (CC2 fw 02.01.01.07, 2026-10-31)
+
+App commit `0c469228e5` installed on the Poco X3 Pro.
+
+### Verified by Klaus on the device
+
+| Scenario                                               | Observation |
+|---|---|
+| Phone Wi-Fi off                                        | "Connection lost" banner appears almost immediately; backoff countdown ticks as designed. |
+| Phone Wi-Fi back on                                    | Auto-reconnect after ~30 s (the full remaining backoff was sat out). Broadcast-discovery was **not** the obstacle. |
+| App in background, screen off, 2–3 min                 | On resume: reconnected in ~2 s (lifecycle hook via `WidgetsBindingObserver.didChangeAppLifecycleState`). |
+| Error banner trigger                                   | Not reproducible on the device during this test — stays "unverified at device". The table itself remains verified against the Orca source. |
+
+### Follow-up fixes (new commit after the device test)
+
+- **OS-level network-up signal triggers an immediate reconnect.**
+  Previously the backoff ran to completion even when Android had
+  already notified that Wi-Fi was back. Added
+  `package:connectivity_plus` and plumbed its stream into
+  `PrinterState` as a `Stream<bool>` (true = any network
+  available). While `reconnecting`, a `true` emission cancels the
+  pending backoff timer and triggers an immediate
+  `connectAndLoad()`. The attempt counter is **not** reset – if
+  the immediate attempt fails, the normal 2 → 5 → 10 → 20 → 30 s
+  progression continues from where it was.
+- **Preparing-phase label shortened.** `printPhasePreparing` is
+  now just "Preparing" / "Vorbereitung". `sub_status 1066` turned
+  out to be a pre-print hotend-stabilisation phase (not heating,
+  not levelling), so the earlier parenthetical
+  "(heating/levelling)" was misleading.
+- **Full reconnect flow test.** New `reconnect_flow_test.dart`
+  exercises the complete reconnect sequence against a
+  `_FakeCc2Client` that extends `ElegooCc2Client` and counts
+  calls:
+  1. First `connectAndLoad()` → `discover`+`connect`+`getCanvas`+
+     `getStatus` each called once.
+  2. `fake.dropConnection()` + `triggerReconnectForTest()` →
+     `state.reconnecting == true`, banner countdown active.
+  3. Wait for the 2-s backoff → verify counts moved to 2 each
+     (second `connect` represents a fresh `api_register` +
+     subscribe + full-status fetch, same path the real client
+     runs).
+  4. Hard-asserted invariants: `pauseCalls == 0`,
+     `resumeCalls == 0`, `cancelCalls == 0`, `setLightCalls == 0`
+     — the reconnect must **not** replay any user command.
+  Separate cases cover the connectivity-up-signal shortcut and
+  the "spurious up-signal while connected" idle path.

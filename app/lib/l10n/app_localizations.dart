@@ -1079,7 +1079,7 @@ abstract class AppLocalizations {
   /// No description provided for @printPhasePreparing.
   ///
   /// In en, this message translates to:
-  /// **'Preparing (heating/levelling)'**
+  /// **'Preparing'**
   String get printPhasePreparing;
 
   /// No description provided for @machineStatusUnknown.

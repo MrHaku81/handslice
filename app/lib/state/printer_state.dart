@@ -42,11 +42,26 @@ class PrinterState extends ChangeNotifier {
     required this.prefs,
     required this.secure,
     ElegooCc2Client? client,
-  }) : _client = client ?? ElegooCc2Client();
+    Stream<bool>? networkAvailability,
+  }) : _client = client ?? ElegooCc2Client() {
+    // Pflicht-3-Nachbesserung: wenn das OS „Netzwerk ist wieder da"
+    // meldet, nicht die restliche Backoff-Wartezeit abstehen – sofort
+    // reconnecten. Nur relevant waehrend wir im reconnecting-Zustand
+    // sind UND bereits gekoppelt waren (keine erste Verbindung).
+    if (networkAvailability != null) {
+      _netSub = networkAvailability.listen((available) {
+        if (!available) return;
+        if (_state == CanvasConnection.disconnected) return;
+        if (!_reconnecting) return;
+        _triggerImmediateReconnect(reason: 'network available');
+      });
+    }
+  }
 
   final SharedPreferences prefs;
   final FlutterSecureStorage secure;
   final ElegooCc2Client _client;
+  StreamSubscription<bool>? _netSub;
 
   static const _kIp = 'printer.cc2.ip';
   static const _kSn = 'printer.cc2.sn';
@@ -107,6 +122,9 @@ class PrinterState extends ChangeNotifier {
     _reconnectDueAt = due;
     notifyListeners();
   }
+
+  @visibleForTesting
+  void triggerReconnectForTest() => _scheduleReconnect();
 
   // Status-Watchdog: haertet die Verbindungserkennung, falls der
   // Broker die TCP-Verbindung still kappt (keine CONNACK-Fehlerspur,
@@ -789,8 +807,25 @@ class PrinterState extends ChangeNotifier {
     }
   }
 
+  // Bricht die laufende Backoff-Wartezeit ab und startet sofort
+  // einen Reconnect-Versuch. Setzt den Attempt-Zaehler NICHT zurueck;
+  // scheitert der Sofort-Versuch, laeuft die normale Progression
+  // weiter. Rufende Pfade: OS-Netzwerk-Signal, App-Resume.
+  void _triggerImmediateReconnect({required String reason}) {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _reconnecting = false;
+    _reconnectDueAt = null;
+    notifyListeners();
+    // Keine _scheduleReconnect()-Rekursion: direkt verbinden.
+    () async {
+      await connectAndLoad();
+    }();
+  }
+
   @override
   void dispose() {
+    _netSub?.cancel();
     _stopPing();
     _stopStatusSub();
     _stopWatchdog();
