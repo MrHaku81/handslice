@@ -505,11 +505,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
           ],
-          if (kDebugMode) ...[
+          if (kDebugMode || kProfileMode) ...[
             const SizedBox(height: 24),
             TextButton.icon(
               icon: const Icon(Icons.bug_report),
-              label: const Text('Open plate-view benchmark (debug)'),
+              label: Text('Open plate-view benchmark '
+                  '(${kProfileMode ? "profile" : "debug"})'),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const PlateBenchScreen()),
               ),
