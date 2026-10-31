@@ -18,6 +18,40 @@ import 'package:handslice/l10n/app_localizations.dart';
 import 'package:handslice/theme/workshop_theme.dart';
 import 'package:handslice/widgets/labeled_switch_row.dart';
 
+/// Reusable mimic of the "heading on its own line, tab control
+/// below" layout used by the project 3D-view card. We extract it
+/// so the layout rule can be regression-tested without pulling in
+/// the whole project screen.
+Widget headingWithTabsLayout({
+  required String heading,
+  required String subtitle,
+  required List<String> tabs,
+}) {
+  return Builder(builder: (context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(heading, style: theme.textTheme.titleSmall),
+        const SizedBox(height: 2),
+        Text(subtitle, style: theme.textTheme.bodySmall),
+        const SizedBox(height: 6),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: SegmentedButton<int>(
+            segments: [
+              for (var i = 0; i < tabs.length; ++i)
+                ButtonSegment(value: i, label: Text(tabs[i])),
+            ],
+            selected: const {0},
+            onSelectionChanged: (_) {},
+          ),
+        ),
+      ],
+    );
+  });
+}
+
 Widget _wrap(Widget child, {double width = 320}) => MaterialApp(
       theme: buildWorkshopTheme(),
       localizationsDelegates: const [
@@ -74,6 +108,28 @@ void main() {
       // Subtitle may wrap over multiple lines on 320 px — that's OK;
       // we only require the label itself to stay horizontal.
       expect(find.textContaining('unbekannt'), findsOneWidget);
+    });
+
+    testWidgets('project-card heading stays on one line beside the tab',
+        (tester) async {
+      // Repro for the 7b device-test wrap "Schichtvorsch-au": the
+      // heading used to share a Row with the SegmentedButton,
+      // which pushed the title text into a narrow column. The
+      // new layout stacks heading, subtitle and tabs vertically.
+      await tester.pumpWidget(_wrap(
+        headingWithTabsLayout(
+          heading: 'Schichtvorschau',
+          subtitle: 'G-Code-Wege · der Slice selbst bleibt unverändert',
+          tabs: const ['Modell', 'Schichten'],
+        ),
+      ));
+      await tester.pumpAndSettle();
+      final headingSize = tester.getSize(find.text('Schichtvorschau'));
+      expect(headingSize.height, lessThan(32),
+          reason: 'heading wrapped — layout regression.');
+      expect(headingSize.width, greaterThan(80),
+          reason: 'heading width ${headingSize.width} suggests it was '
+              'squeezed by the tab control.');
     });
 
     testWidgets('switch stays on the right at 320 px with a subtitle',

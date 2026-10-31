@@ -35,6 +35,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_scene/scene.dart' as fscene;
 import 'package:vector_math/vector_math.dart' as vm;
 
+import 'orbit_scene_bed.dart';
+
 // -------- .hspm parser (duplicated small, see plate_bench_screen) --------
 
 class HspmVolume {
@@ -327,25 +329,8 @@ class _PlateViewState extends State<PlateView> {
   }
 
   void _addPlate(fscene.Scene scene) {
-    final gb = fscene.GeometryBuilder(deduplicate: false);
-    final n = vm.Vector3(0, 0, 1);
-    const a = _ambient;
-    const b = 1.0 - a;
-    final dot = (n.x * _keyLight.x + n.y * _keyLight.y + n.z * _keyLight.z).abs();
-    final k = a + b * dot;
-    final c = vm.Vector4(0.18 * k, 0.19 * k, 0.21 * k, 1.0);
-    gb.normal(n);
-    gb.color(c);
-    final i0 = gb.addVertex(vm.Vector3(0,   0,   0));
-    final i1 = gb.addVertex(vm.Vector3(256, 0,   0));
-    final i2 = gb.addVertex(vm.Vector3(256, 256, 0));
-    final i3 = gb.addVertex(vm.Vector3(0,   256, 0));
-    gb.addTriangle(i0, i1, i2);
-    gb.addTriangle(i0, i2, i3);
-    final geom = gb.build();
-    final mat = fscene.UnlitMaterial()
-      ..baseColorFactor = vm.Vector4(1, 1, 1, 1);
-    scene.add(fscene.Node(name: 'bed', mesh: fscene.Mesh(geom, mat)));
+    // Shared bed quad; same geometry PlateView and LayerView use.
+    addBedToScene(scene);
   }
 
   // -------- gestures --------

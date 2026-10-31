@@ -193,6 +193,20 @@ Future<GcodeGeometry> _parseFile(
   bool haveLastPos = false;
   double lastX = 0, lastY = 0, lastZ = 0;
   double lastReportedZ = -1e30;
+  // Layer boundaries. We trust Orca's `;LAYER:<N>` markers first;
+  // on files that lack them we fall back to z-step detection
+  // (every strictly larger Z begins a new layer). Pure z-step on
+  // Orca g-code would over-count — each travel-with-z-hop looks
+  // like a layer step.
+  bool pendingLayerStart = false;
+  bool sawExplicitLayerMarker = false;
+  // Orca also writes `SET_PRINT_STATS_INFO TOTAL_LAYER=<N>` with
+  // the authoritative extruding-layer count. We clamp the layer
+  // array to that number at the end so the trailing post-print
+  // `;LAYER:<TOTAL>` sentinel does not add a phantom layer
+  // (seen on `thumbnail-cube.gcode`: TOTAL_LAYER=100 but
+  // ;LAYER:0..;LAYER:100 means 101 markers).
+  int? totalLayerHint;
   // E in Orca-emitted g-code is absolute; `extruded` tracks the
   // monotonically-growing delta so the stats field reflects actual
   // filament usage, not the cumulative sum of absolute positions.
@@ -225,16 +239,40 @@ Future<GcodeGeometry> _parseFile(
     if (line.isEmpty) continue;
     final c = line.codeUnitAt(0);
     if (c == 0x3B /* ';' */) {
-      // ;TYPE:...  ;Z_HEIGHT:... (and ;LAYER_CHANGE is a layer tick)
       if (line.length > 6 && line.startsWith(';TYPE:')) {
         currentType = _typeCodeFor(line.substring(6));
-      } else if (line.startsWith(';Z_HEIGHT:') ||
-                 line.startsWith(';LAYER_HEIGHT:') ||
-                 line == ';LAYER_CHANGE') {
-        // Z-change is also inferred from G1 Z moves below; this
-        // comment is a redundant hint on Orca-emitted g-code.
+      } else if (line.startsWith(';LAYER:')) {
+        // Orca emits `;LAYER:<N>` at the start of each physical
+        // layer. The next move becomes the first segment of a
+        // new layer; z-hops in between (travel-with-raise) do
+        // not fire layer boundaries.
+        pendingLayerStart = true;
+        sawExplicitLayerMarker = true;
+      } else if (line == ';LAYER_CHANGE') {
+        // Appears BETWEEN layers in Orca output (N-1 occurrences
+        // for N layers). Not strong enough to pin a boundary on
+        // its own — the following `;LAYER:<N>` is what we key
+        // on. But its presence tells us the file carries
+        // explicit markers, so z-step detection stays off.
+        sawExplicitLayerMarker = true;
       }
       continue;
+    }
+    // Klipper-style macro call carrying Orca's `TOTAL_LAYER=<N>`
+    // hint. Cheap substring probe before the full starts-with
+    // check so the hot path (pure G1 moves) is not touched.
+    if (totalLayerHint == null && line.contains('TOTAL_LAYER=')) {
+      final idx = line.indexOf('TOTAL_LAYER=');
+      int j = idx + 12;
+      final start = j;
+      while (j < line.length) {
+        final ch = line.codeUnitAt(j);
+        if (ch < 0x30 || ch > 0x39) break;
+        j++;
+      }
+      if (j > start) {
+        totalLayerHint = int.tryParse(line.substring(start, j));
+      }
     }
     if (c == 0x54 /* 'T' */) {
       // Tool change: `T0` / `T1` / … — the digit becomes the
@@ -294,10 +332,15 @@ Future<GcodeGeometry> _parseFile(
     final isExtrude = eDelta > 1e-6;
     final segType = isExtrude ? currentType : PathType.travel.code;
     if (haveLastPos) {
-      // New layer when Z strictly increases.
-      if (z > lastReportedZ + 1e-6) {
+      // Layer boundary: an explicit `;LAYER:<N>` pending, OR
+      // (legacy fallback) a strictly larger Z while we have not
+      // yet seen any explicit marker.
+      final triggerLayer = pendingLayerStart ||
+          (!sawExplicitLayerMarker && z > lastReportedZ + 1e-6);
+      if (triggerLayer) {
         layerStarts.add(segCount);
         lastReportedZ = z;
+        pendingLayerStart = false;
       }
       grow(segCount + 1);
       final o = segCount * 6;
@@ -338,6 +381,14 @@ Future<GcodeGeometry> _parseFile(
   // seen (every move at the same Z), count the whole thing as a
   // single layer so downstream UI still has something to show.
   if (layerStarts.isEmpty && segCount > 0) layerStarts.add(0);
+  // Trim trailing phantom layers announced by a terminal
+  // `;LAYER:<TOTAL>` sentinel; Orca writes TOTAL_LAYER=<N> but
+  // emits ;LAYER:N as well, which would be an extra entry.
+
+  final hint = totalLayerHint;
+  if (hint != null && layerStarts.length > hint) {
+    layerStarts.removeRange(hint, layerStarts.length);
+  }
   final finalLayers = Uint32List.fromList(layerStarts);
   onProgress(GcodeProgress(
     bytesRead: totalBytes,

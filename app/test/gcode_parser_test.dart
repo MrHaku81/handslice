@@ -99,6 +99,42 @@ G1 X0 Y10 Z0.2 E3
       expect(g.filaments[2], 2);
     });
 
+    test('Z-hops between layers do not fake extra layers', () async {
+      // Two real layers at Z=0.2 and Z=0.4, with a travel-with-
+      // z-hop in between. Without the explicit-marker trust this
+      // would count as three layers.
+      final s = '''
+;LAYER:0
+G1 X0 Y0 Z0.2 E0
+G1 X10 Y0 Z0.2 E1
+G1 X10 Y10 Z0.2 E2
+;LAYER_CHANGE
+;Z:0.4
+;WIPE_START
+G0 X10 Y10 Z1.0 F30000
+G0 X0 Y0 Z1.0
+;LAYER:1
+G1 X0 Y0 Z0.4 E3
+G1 X10 Y0 Z0.4 E4
+G1 X10 Y10 Z0.4 E5
+''';
+      final g = await _parseString(s);
+      expect(g.layerCount, 2);
+    });
+
+    test('legacy g-code without ;LAYER: markers falls back to Z-step',
+        () async {
+      final s = '''
+G1 X0 Y0 Z0.2 E0
+G1 X10 Y0 Z0.2 E1
+G1 X10 Y10 Z0.4 E2
+G1 X0 Y10 Z0.4 E3
+G1 X0 Y0 Z0.6 E4
+''';
+      final g = await _parseString(s);
+      expect(g.layerCount, 3);
+    });
+
     test('normal types map correctly', () async {
       final cases = {
         'Outer wall': PathType.outerWall.code,
@@ -131,24 +167,36 @@ G1 X0 Y10 Z0.2 E3
     });
   });
 
-  group('parseGcode on the real Auryn g-code', () {
+  group('parseGcode on real g-code samples', () {
     final auryn = File('../local-test/auryn-x86.gcode');
+    final cube  = File('../local-test/thumbnail-cube.gcode');
+
     test('Auryn: layers, segments, AABB look sane',
         () async {
-          if (!auryn.existsSync()) {
-            // local-test is not in the repo; skip on CI.
-            return;
-          }
+          if (!auryn.existsSync()) return; // local-test not in repo
           final g = await parseGcodeInline(auryn.path);
           expect(g.segmentCount, greaterThan(1000000));
-          expect(g.layerCount, greaterThan(1000));
+          // Auryn's "TOTAL_LAYER=1046" header matches what we see.
+          expect(g.layerCount, inInclusiveRange(1040, 1050));
           expect(g.maxZ, greaterThan(100.0));
-          // Every segment carries a known type.
           const maxCode = 13;   // Unknown
           for (int i = 0; i < g.segmentCount; ++i) {
             expect(g.types[i], lessThanOrEqualTo(maxCode));
           }
         },
         timeout: const Timeout(Duration(seconds: 30)));
+
+    test('notched cube: 100 layers (20 mm / 0.2 mm)', () async {
+      if (!cube.existsSync()) return;
+      final g = await parseGcodeInline(cube.path);
+      // Prior bug counted ~399 layers because every z-hop looked
+      // like a new layer. The physical cube is 100 layers.
+      expect(g.layerCount, 100);
+      // maxZ reflects every Z the toolhead visited, including the
+      // post-print park-head-up move (G1 Z80 at the end), so we
+      // check that the model-height range is in there, not an
+      // exact value.
+      expect(g.maxZ, greaterThanOrEqualTo(19.8));
+    });
   });
 }

@@ -415,18 +415,53 @@ class _PlateViewCard extends StatefulWidget {
 
 class _PlateViewCardState extends State<_PlateViewCard> {
   _SceneCardTab _tab = _SceneCardTab.model;
+  bool _sawGeometry = false;
+  String? _trackedModelPath;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.projectState.addListener(_onStateChanged);
+    _sawGeometry = widget.projectState.sliceGeometry != null;
+    _trackedModelPath = widget.projectState.modelPath;
+  }
+
+  @override
+  void dispose() {
+    widget.projectState.removeListener(_onStateChanged);
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(covariant _PlateViewCard old) {
     super.didUpdateWidget(old);
-    // When a new slice geometry arrives, switch automatically.
-    if (old.projectState.sliceGeometry == null &&
-        widget.projectState.sliceGeometry != null) {
-      _tab = _SceneCardTab.layers;
+    if (!identical(old.projectState, widget.projectState)) {
+      old.projectState.removeListener(_onStateChanged);
+      widget.projectState.addListener(_onStateChanged);
     }
-    // When the user picks a different model, reset to the model tab.
-    if (old.projectState.modelPath != widget.projectState.modelPath) {
-      _tab = _SceneCardTab.model;
+  }
+
+  // Switch to the Layers tab the first time the parser emits a
+  // geometry after a slice. Earlier version compared
+  // old.projectState vs widget.projectState in didUpdateWidget,
+  // but the project screen reuses the same ProjectState instance,
+  // so `old.projectState.sliceGeometry` already carried the new
+  // value — the comparison never fired. We now listen to the
+  // state directly and track the edge.
+  void _onStateChanged() {
+    final ps = widget.projectState;
+    final hasGeom = ps.sliceGeometry != null;
+    if (hasGeom && !_sawGeometry && mounted) {
+      setState(() {
+        _tab = _SceneCardTab.layers;
+        _sawGeometry = true;
+      });
+    } else if (!hasGeom && _sawGeometry) {
+      _sawGeometry = false;
+    }
+    if (ps.modelPath != _trackedModelPath) {
+      _trackedModelPath = ps.modelPath;
+      if (mounted) setState(() { _tab = _SceneCardTab.model; });
     }
   }
 
@@ -463,30 +498,15 @@ class _PlateViewCardState extends State<_PlateViewCard> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(_tab == _SceneCardTab.model
-                              ? l.projectPlateViewHeading
-                              : l.projectLayerViewHeading,
-                          style: theme.textTheme.titleSmall),
-                    ),
-                    if (layersAvailable)
-                      SegmentedButton<_SceneCardTab>(
-                        segments: [
-                          ButtonSegment(
-                              value: _SceneCardTab.model,
-                              label: Text(l.projectSceneTabModel)),
-                          ButtonSegment(
-                              value: _SceneCardTab.layers,
-                              label: Text(l.projectSceneTabLayers)),
-                        ],
-                        selected: {_tab},
-                        onSelectionChanged: (s) =>
-                            setState(() { _tab = s.first; }),
-                      ),
-                  ],
-                ),
+                // Heading on its own line so a long translation
+                // never has to share horizontal space with the
+                // tab control (regression caught on the 7b device
+                // test: "Schichtvorsch-au" wrapped). Tab control
+                // sits on the row below, right-aligned.
+                Text(_tab == _SceneCardTab.model
+                        ? l.projectPlateViewHeading
+                        : l.projectLayerViewHeading,
+                    style: theme.textTheme.titleSmall),
                 const SizedBox(height: 2),
                 Text(
                   _tab == _SceneCardTab.model
@@ -496,6 +516,25 @@ class _PlateViewCardState extends State<_PlateViewCard> {
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: WorkshopTokens.textMuted),
                 ),
+                if (layersAvailable) ...[
+                  const SizedBox(height: 6),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SegmentedButton<_SceneCardTab>(
+                      segments: [
+                        ButtonSegment(
+                            value: _SceneCardTab.model,
+                            label: Text(l.projectSceneTabModel)),
+                        ButtonSegment(
+                            value: _SceneCardTab.layers,
+                            label: Text(l.projectSceneTabLayers)),
+                      ],
+                      selected: {_tab},
+                      onSelectionChanged: (s) =>
+                          setState(() { _tab = s.first; }),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),

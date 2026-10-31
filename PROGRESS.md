@@ -18,6 +18,44 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 00:20 UTC – Pflicht 7b fixes: layer count, bed, auto-switch, highlight, header
+
+Five issues surfaced by the device test on `b48863d`.
+
+- Layer count was 399 instead of 100 on a 20 mm cube. The parser
+  counted every z-hop as a layer. Fixed by trusting Orca's
+  `;LAYER:<N>` comments (and `;LAYER_CHANGE` as a weaker
+  "explicit markers present" signal); z-step detection is now
+  only a legacy fallback for g-code without those markers. Also
+  honour `TOTAL_LAYER=<N>` so the trailing `;LAYER:<TOTAL>`
+  sentinel (seen on the cube: 101 markers for 100 real layers)
+  does not add a phantom layer. New parser tests pin the
+  behaviour on the real cube and auryn g-code and on a synthetic
+  z-hop sample.
+- Current layer highlight was too subtle: dim stacks dropped to
+  0.55 × brightness, same line width. Dim now 0.35 × brightness
+  and current layer draws with 1.1 vs 0.5 line width so the
+  slider's position reads cleanly on dense layers.
+- Auto-switch to the Layers tab after a slice did not fire — the
+  previous didUpdateWidget compared `old.projectState` vs
+  `widget.projectState`, both the same `ProjectState` instance,
+  so the geometry change never looked like an edge. Replaced
+  with a listener that tracks the geometry-null → non-null
+  transition.
+- Bed plate was missing in LayerView, and the camera was framed
+  on the model AABB alone, so the viewer could end up above or
+  outside the bed. Extracted the shared bed quad into a new
+  `widgets/orbit_scene_bed.dart` (`addBedToScene` +
+  `hullWithBed`); both PlateView and LayerView now use it.
+  Camera frames the AABB joined with the 256 × 256 bed.
+- Project-card header: title and tab-control were in a Row; the
+  tab control ate horizontal space and "Schichtvorschau" wrapped
+  into "Schichtvorsch-au" on narrow screens. Stacked vertically
+  (title, subtitle, then tabs). Narrow-screen widget test
+  extended with a case that renders the title + subtitle +
+  tabs at 320 px and asserts the title stays on one line
+  > 80 px wide.
+
 ## 2026-10-31 23:40 UTC – Pflicht 7b: layer preview + path-type legend
 
 Device test is Klaus' pass.

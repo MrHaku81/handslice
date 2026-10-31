@@ -28,6 +28,7 @@ import 'package:flutter_scene/scene.dart' as fscene;
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../engine/gcode_parser.dart';
+import 'orbit_scene_bed.dart';
 
 /// Palette used both by the 3D line-segments material and the 2D
 /// painter. Shaded a touch darker than Orca's defaults so the
@@ -161,13 +162,18 @@ class _LayerViewState extends State<LayerView> {
   }
 
   void _frameCamera() {
+    // Same framing logic as PlateView: AABB of the content joined
+    // with the CC2 bed, orbit around its centre, start distance
+    // = radius / sin(fovY/2) * 1.3.
     final g = widget.geometry;
-    final cx = (g.minXY + g.maxXY) * 0.5;
-    final cy = (g.minXY + g.maxXY) * 0.5;
-    final cz = (g.minZ + g.maxZ) * 0.5;
-    final radius = math.max(
-        math.max(g.maxXY - g.minXY, g.maxZ - g.minZ) * 0.6, 50.0);
-    _orbitCentre = vm.Vector3(cx, cy, cz);
+    final modelAabb = vm.Aabb3.minMax(
+        vm.Vector3(g.minXY, g.minXY, g.minZ),
+        vm.Vector3(g.maxXY, g.maxXY, g.maxZ));
+    final aabb = hullWithBed(modelAabb);
+    final centre = (aabb.min + aabb.max) * 0.5;
+    final extent = aabb.max - aabb.min;
+    final radius = math.max(extent.length * 0.5, 50.0);
+    _orbitCentre = centre;
     _orbitRadius = radius;
     _distance = radius / math.sin(_fovY / 2) * 1.3;
     _panOffset.setZero();
@@ -185,6 +191,8 @@ class _LayerViewState extends State<LayerView> {
     final scene = _scene;
     if (scene == null || !_sceneReady) return;
     scene.root.children.clear();
+    // CC2 bed — same shared quad PlateView uses.
+    addBedToScene(scene);
     final g = widget.geometry;
     if (g.segmentCount == 0 || g.layerCount == 0) return;
     final maxLayer = _currentLayer.clamp(0, g.layerCount - 1);
@@ -193,15 +201,18 @@ class _LayerViewState extends State<LayerView> {
     for (final type in PathType.values) {
       if (!_visibleTypes.contains(type)) continue;
       final color = kPathTypeColors[type]!;
-      // Below-layer slice (dim).
+      // Below-layer slice (dim, thin).
       _emitSlice(scene,
           g: g, type: type, color: color,
           dim: true,
+          width: 0.5,
           from: 0, to: endOfBelow);
-      // Current-layer slice (bright).
+      // Current-layer slice (bright, thicker — so the slider's
+      // position reads clearly even on a packed cube top).
       _emitSlice(scene,
           g: g, type: type, color: color,
           dim: false,
+          width: 1.1,
           from: endOfBelow, to: endOfCurrent);
     }
   }
@@ -211,6 +222,7 @@ class _LayerViewState extends State<LayerView> {
     required PathType type,
     required Color color,
     required bool dim,
+    required double width,
     required int from,
     required int to,
   }) {
@@ -234,7 +246,7 @@ class _LayerViewState extends State<LayerView> {
       o += 6;
     }
     final data = fscene.LineSegmentData(positions: out);
-    final geom = fscene.LineSegmentsGeometry(data, width: 0.6);
+    final geom = fscene.LineSegmentsGeometry(data, width: width);
     final tint = dim ? _dimmed(color) : color;
     final mat = fscene.UnlitMaterial()
       ..baseColorFactor = vm.Vector4(
@@ -244,8 +256,11 @@ class _LayerViewState extends State<LayerView> {
         mesh: fscene.Mesh(geom, mat)));
   }
 
+  // Stronger dim factor than before (0.35 vs 0.55) so the bright
+  // current-layer tint pops against the stack. Picked by eye on
+  // the x86 host; Klaus can tune on the device run.
   Color _dimmed(Color c) => Color.from(
-      alpha: 1.0, red: c.r * 0.55, green: c.g * 0.55, blue: c.b * 0.55);
+      alpha: 1.0, red: c.r * 0.35, green: c.g * 0.35, blue: c.b * 0.35);
 
   // -------- gestures (same contract as PlateView) --------
   final Map<int, Offset> _pointers = {};
