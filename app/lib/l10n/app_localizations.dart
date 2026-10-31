@@ -332,6 +332,180 @@ abstract class AppLocalizations {
   /// **'Zoom out'**
   String get plateViewZoomOut;
 
+  /// No description provided for @projectSceneTabModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get projectSceneTabModel;
+
+  /// No description provided for @projectSceneTabLayers.
+  ///
+  /// In en, this message translates to:
+  /// **'Layers'**
+  String get projectSceneTabLayers;
+
+  /// No description provided for @projectLayerViewHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Layer preview'**
+  String get projectLayerViewHeading;
+
+  /// No description provided for @projectLayerViewEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Slice a model to see the layer preview.'**
+  String get projectLayerViewEmpty;
+
+  /// No description provided for @projectLayerViewParsing.
+  ///
+  /// In en, this message translates to:
+  /// **'Parsing G-code…'**
+  String get projectLayerViewParsing;
+
+  /// No description provided for @projectLayerViewSimplifyNote.
+  ///
+  /// In en, this message translates to:
+  /// **'G-code paths · the slice itself is unchanged'**
+  String get projectLayerViewSimplifyNote;
+
+  /// No description provided for @layerViewLayer.
+  ///
+  /// In en, this message translates to:
+  /// **'Layer'**
+  String get layerViewLayer;
+
+  /// No description provided for @layerViewOf.
+  ///
+  /// In en, this message translates to:
+  /// **'of'**
+  String get layerViewOf;
+
+  /// No description provided for @layerViewPathTypes.
+  ///
+  /// In en, this message translates to:
+  /// **'Path types'**
+  String get layerViewPathTypes;
+
+  /// No description provided for @layerViewFilamentColors.
+  ///
+  /// In en, this message translates to:
+  /// **'By filament'**
+  String get layerViewFilamentColors;
+
+  /// No description provided for @layerViewShowTravel.
+  ///
+  /// In en, this message translates to:
+  /// **'Show travel'**
+  String get layerViewShowTravel;
+
+  /// No description provided for @layerViewRenderer3d.
+  ///
+  /// In en, this message translates to:
+  /// **'3D'**
+  String get layerViewRenderer3d;
+
+  /// No description provided for @layerViewRenderer2d.
+  ///
+  /// In en, this message translates to:
+  /// **'2D top-down'**
+  String get layerViewRenderer2d;
+
+  /// No description provided for @layerViewDecrement.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous layer'**
+  String get layerViewDecrement;
+
+  /// No description provided for @layerViewIncrement.
+  ///
+  /// In en, this message translates to:
+  /// **'Next layer'**
+  String get layerViewIncrement;
+
+  /// No description provided for @layerTypeTravel.
+  ///
+  /// In en, this message translates to:
+  /// **'Travel'**
+  String get layerTypeTravel;
+
+  /// No description provided for @layerTypeOuterWall.
+  ///
+  /// In en, this message translates to:
+  /// **'Outer wall'**
+  String get layerTypeOuterWall;
+
+  /// No description provided for @layerTypeInnerWall.
+  ///
+  /// In en, this message translates to:
+  /// **'Inner wall'**
+  String get layerTypeInnerWall;
+
+  /// No description provided for @layerTypeInternalInfill.
+  ///
+  /// In en, this message translates to:
+  /// **'Infill'**
+  String get layerTypeInternalInfill;
+
+  /// No description provided for @layerTypeSolidInfill.
+  ///
+  /// In en, this message translates to:
+  /// **'Solid infill'**
+  String get layerTypeSolidInfill;
+
+  /// No description provided for @layerTypeTopSurface.
+  ///
+  /// In en, this message translates to:
+  /// **'Top surface'**
+  String get layerTypeTopSurface;
+
+  /// No description provided for @layerTypeBottomSurface.
+  ///
+  /// In en, this message translates to:
+  /// **'Bottom surface'**
+  String get layerTypeBottomSurface;
+
+  /// No description provided for @layerTypeBridge.
+  ///
+  /// In en, this message translates to:
+  /// **'Bridge'**
+  String get layerTypeBridge;
+
+  /// No description provided for @layerTypeSupport.
+  ///
+  /// In en, this message translates to:
+  /// **'Support'**
+  String get layerTypeSupport;
+
+  /// No description provided for @layerTypeSupportInterface.
+  ///
+  /// In en, this message translates to:
+  /// **'Support interface'**
+  String get layerTypeSupportInterface;
+
+  /// No description provided for @layerTypeSkirtBrim.
+  ///
+  /// In en, this message translates to:
+  /// **'Skirt / brim'**
+  String get layerTypeSkirtBrim;
+
+  /// No description provided for @layerTypePrimeTower.
+  ///
+  /// In en, this message translates to:
+  /// **'Prime tower'**
+  String get layerTypePrimeTower;
+
+  /// No description provided for @layerTypeCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom'**
+  String get layerTypeCustom;
+
+  /// No description provided for @layerTypeUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown'**
+  String get layerTypeUnknown;
+
   /// No description provided for @projectZOffset.
   ///
   /// In en, this message translates to:

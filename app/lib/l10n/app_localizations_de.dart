@@ -137,6 +137,95 @@ class AppLocalizationsDe extends AppLocalizations {
   String get plateViewZoomOut => 'Auszoomen';
 
   @override
+  String get projectSceneTabModel => 'Modell';
+
+  @override
+  String get projectSceneTabLayers => 'Schichten';
+
+  @override
+  String get projectLayerViewHeading => 'Schichtvorschau';
+
+  @override
+  String get projectLayerViewEmpty =>
+      'Slice ein Modell, um die Schichtvorschau zu sehen.';
+
+  @override
+  String get projectLayerViewParsing => 'G-Code wird gelesen…';
+
+  @override
+  String get projectLayerViewSimplifyNote =>
+      'G-Code-Wege · der Slice selbst bleibt unverändert';
+
+  @override
+  String get layerViewLayer => 'Schicht';
+
+  @override
+  String get layerViewOf => 'von';
+
+  @override
+  String get layerViewPathTypes => 'Wegtypen';
+
+  @override
+  String get layerViewFilamentColors => 'Nach Filament';
+
+  @override
+  String get layerViewShowTravel => 'Leerfahrten';
+
+  @override
+  String get layerViewRenderer3d => '3D';
+
+  @override
+  String get layerViewRenderer2d => '2D Draufsicht';
+
+  @override
+  String get layerViewDecrement => 'Vorherige Schicht';
+
+  @override
+  String get layerViewIncrement => 'Nächste Schicht';
+
+  @override
+  String get layerTypeTravel => 'Leerfahrt';
+
+  @override
+  String get layerTypeOuterWall => 'Außenwand';
+
+  @override
+  String get layerTypeInnerWall => 'Innenwand';
+
+  @override
+  String get layerTypeInternalInfill => 'Füllung';
+
+  @override
+  String get layerTypeSolidInfill => 'Volle Füllung';
+
+  @override
+  String get layerTypeTopSurface => 'Oberseite';
+
+  @override
+  String get layerTypeBottomSurface => 'Unterseite';
+
+  @override
+  String get layerTypeBridge => 'Brücke';
+
+  @override
+  String get layerTypeSupport => 'Stütze';
+
+  @override
+  String get layerTypeSupportInterface => 'Stützen-Kontakt';
+
+  @override
+  String get layerTypeSkirtBrim => 'Skirt / Brim';
+
+  @override
+  String get layerTypePrimeTower => 'Prime-Turm';
+
+  @override
+  String get layerTypeCustom => 'Benutzerdefiniert';
+
+  @override
+  String get layerTypeUnknown => 'Unbekannt';
+
+  @override
   String get projectZOffset =>
       'Z-Offset pro Seite (wird beim Slicen angewendet)';
 

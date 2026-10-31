@@ -18,6 +18,69 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 23:40 UTC – Pflicht 7b: layer preview + path-type legend
+
+Device test is Klaus' pass.
+
+- `app/lib/engine/gcode_parser.dart`: streaming line-by-line
+  parser in a background isolate. Reacts to `G0`/`G1` moves,
+  `;TYPE:<name>` comments (14-value `PathType` enum covering
+  Orca's current emission including Overhang wall, Gap infill,
+  Internal Bridge, Internal solid infill), `T<idx>` tool
+  changes. Compact result: `positions: Float32List` (6 floats
+  per segment), `types: Uint8List`, `filaments: Uint8List`,
+  `layers: Uint32List` (segment index per layer). No per-
+  segment Dart object. On the x86 host the Auryn `auryn-x86
+  .gcode` (67.5 MB, ~2.4 M G1 lines) parses in **2.8 s** to
+  2.0 M segments, 4180 layers, 46.6 MB positions + 1.9 MB
+  types.
+- `app/lib/widgets/layer_view.dart`: new `LayerView` widget.
+  One `flutter_scene.LineSegmentsGeometry` per visible path
+  type for the stacked below-layers (dim) and another for the
+  current layer (bright); legend is a `Wrap` of `FilterChip`s
+  for toggling each type (travel off by default). Camera /
+  orbit / pan / pinch mirror `PlateView`; the "3D / 2D top-
+  down" segmented control switches to a pure-Dart `CustomPaint`
+  renderer that only draws the current layer — used
+  automatically when `Scene.initializeStaticResources()` fails.
+  Slider + `± 1` buttons for layer navigation, all focus-
+  navigable (`OrderedTraversalPolicy`).
+- `ProjectState.parseSliceGeometry` is fired on every
+  successful slice (`parseSliceGeometry()` call next to
+  `_lastSlice = r`). Exposes `sliceGeometry`,
+  `sliceGeometryBuilding`, `sliceGeometryError`,
+  `sliceGeometryProgress`. The Project screen's new
+  `_PlateViewCard` carries a Model / Layers segmented tab;
+  Layers appears once a slice completes.
+- UI copy makes clear that path simplification is display-only
+  — subtitle under both the Model and Layers tabs.
+- l10n: 25 new ARB keys for layer-view labels + path-type
+  names in English and German.
+- Tests: `gcode_parser_test.dart` — synthetic 3-layer cube
+  (segment count, Z-step layer detection, incremental-E
+  bookkeeping, travel bucketing, tool-change filament index,
+  TYPE mapping across all 18 Orca spellings) plus a sanity run
+  on the real Auryn g-code when `local-test/auryn-x86.gcode`
+  is present on the host.
+- Doc: `docs/layer-view.md` covers the architecture, the
+  parser's compact result layout, the path-type palette table,
+  and the 2D fallback.
+
+## 2026-10-31 23:00 UTC – Pflicht 7a device test passed, pushed
+
+Klaus verified on the Poco with `98610b1`:
+
+- Plate-view card header and simplify-note render correctly on the
+  phone-portrait layout.
+- Pinch-zoom works in the project tab and the +/- buttons give
+  sensible steps.
+- Model loaded as a white Lambert-shaded cube with the notch
+  visible on the plate.
+- Chamber-light switch now mirrors the device state live, even when
+  the light is toggled directly at the printer.
+
+Pflicht 7a closed on the device. Pushed by Klaus.
+
 ## 2026-10-31 22:40 UTC – Pflicht 7a fixes: layout, pinch, chamber-light state
 
 Device test (`e8234d1`) uncovered four issues; all fixed below.

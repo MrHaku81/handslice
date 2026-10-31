@@ -14,7 +14,9 @@ import '../settings/settings_overrides.dart';
 import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
+import '../engine/gcode_parser.dart';
 import '../widgets/build_info_badge.dart';
+import '../widgets/layer_view.dart';
 import '../widgets/plate_view.dart';
 import '../widgets/printer_panel.dart';
 import '../widgets/workshop_card.dart';
@@ -395,7 +397,9 @@ class _ProjectScreenState extends State<ProjectScreen> {
 // colour. Shows a progress indicator while the CLI is building
 // the preview mesh; shows an error row (with retry) when the
 // build failed. The CC2 bed is drawn by the renderer itself.
-class _PlateViewCard extends StatelessWidget {
+enum _SceneCardTab { model, layers }
+
+class _PlateViewCard extends StatefulWidget {
   const _PlateViewCard({
     required this.projectState,
     required this.printerState,
@@ -404,6 +408,31 @@ class _PlateViewCard extends StatelessWidget {
   final ProjectState projectState;
   final PrinterState printerState;
   final ValueChanged<bool> onInteractionChanged;
+
+  @override
+  State<_PlateViewCard> createState() => _PlateViewCardState();
+}
+
+class _PlateViewCardState extends State<_PlateViewCard> {
+  _SceneCardTab _tab = _SceneCardTab.model;
+
+  @override
+  void didUpdateWidget(covariant _PlateViewCard old) {
+    super.didUpdateWidget(old);
+    // When a new slice geometry arrives, switch automatically.
+    if (old.projectState.sliceGeometry == null &&
+        widget.projectState.sliceGeometry != null) {
+      _tab = _SceneCardTab.layers;
+    }
+    // When the user picks a different model, reset to the model tab.
+    if (old.projectState.modelPath != widget.projectState.modelPath) {
+      _tab = _SceneCardTab.model;
+    }
+  }
+
+  ProjectState get projectState => widget.projectState;
+  PrinterState get printerState => widget.printerState;
+  ValueChanged<bool> get onInteractionChanged => widget.onInteractionChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -419,6 +448,11 @@ class _PlateViewCard extends StatelessWidget {
     final building = projectState.previewMeshBuilding;
     final err = projectState.previewMeshError;
     final hspm = projectState.previewMeshPath;
+    final layerBuilding = projectState.sliceGeometryBuilding;
+    final layerProgress = projectState.sliceGeometryProgress;
+    final layerError = projectState.sliceGeometryError;
+    final layerGeom = projectState.sliceGeometry;
+    final layersAvailable = layerGeom != null || layerBuilding;
 
     return WorkshopCard(
       child: Column(
@@ -429,59 +463,175 @@ class _PlateViewCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(l.projectPlateViewHeading,
-                    style: theme.textTheme.titleSmall),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(_tab == _SceneCardTab.model
+                              ? l.projectPlateViewHeading
+                              : l.projectLayerViewHeading,
+                          style: theme.textTheme.titleSmall),
+                    ),
+                    if (layersAvailable)
+                      SegmentedButton<_SceneCardTab>(
+                        segments: [
+                          ButtonSegment(
+                              value: _SceneCardTab.model,
+                              label: Text(l.projectSceneTabModel)),
+                          ButtonSegment(
+                              value: _SceneCardTab.layers,
+                              label: Text(l.projectSceneTabLayers)),
+                        ],
+                        selected: {_tab},
+                        onSelectionChanged: (s) =>
+                            setState(() { _tab = s.first; }),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 2),
                 Text(
-                  l.projectPlateViewSimplifyNote(
-                      projectState.previewSimplifyTarget),
+                  _tab == _SceneCardTab.model
+                      ? l.projectPlateViewSimplifyNote(
+                          projectState.previewSimplifyTarget)
+                      : l.projectLayerViewSimplifyNote,
                   style: theme.textTheme.bodySmall
                       ?.copyWith(color: WorkshopTokens.textMuted),
                 ),
               ],
             ),
           ),
-          if (building)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 8),
-              child: Row(
-                children: [
-                  SizedBox(width: 20, height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2)),
-                  SizedBox(width: 12),
-                  Text('Building preview mesh…'),
-                ],
-              ),
-            )
-          else if (err != null)
-            Row(
-              children: [
-                const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
-                const SizedBox(width: 8),
-                Expanded(child: Text(err,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                        color: Colors.redAccent))),
-              ],
-            )
+          if (_tab == _SceneCardTab.model)
+            _modelTab(context, l, color, hspm, building, err)
           else
-            PlateView(
-              hspmPath: hspm,
-              fallbackImagePath:
-                  projectState.previewThumbnailPath,
-              filamentColor: color,
-              onInteractionChanged: onInteractionChanged,
-              labelResetView: l.plateViewReset,
-              labelTop: l.plateViewTop,
-              labelFront: l.plateViewFront,
-              labelOblique: l.plateViewOblique,
-              labelZoomIn: l.plateViewZoomIn,
-              labelZoomOut: l.plateViewZoomOut,
-              labelEmpty: l.projectPlateViewEmpty,
-              labelBuilding: l.projectPlateViewBuilding,
-            ),
+            _layerTab(context, l, layerGeom, layerBuilding,
+                layerProgress, layerError),
         ],
       ),
     );
+  }
+
+  Widget _modelTab(BuildContext context, AppLocalizations l, Color color,
+      String? hspm, bool building, String? err) {
+    final theme = Theme.of(context);
+    if (building) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            const SizedBox(width: 20, height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 12),
+            Text(l.projectPlateViewBuilding),
+          ],
+        ),
+      );
+    }
+    if (err != null) {
+      return Row(
+        children: [
+          const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(err,
+              style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.redAccent))),
+        ],
+      );
+    }
+    return PlateView(
+      hspmPath: hspm,
+      fallbackImagePath: projectState.previewThumbnailPath,
+      filamentColor: color,
+      onInteractionChanged: onInteractionChanged,
+      labelResetView: l.plateViewReset,
+      labelTop: l.plateViewTop,
+      labelFront: l.plateViewFront,
+      labelOblique: l.plateViewOblique,
+      labelZoomIn: l.plateViewZoomIn,
+      labelZoomOut: l.plateViewZoomOut,
+      labelEmpty: l.projectPlateViewEmpty,
+      labelBuilding: l.projectPlateViewBuilding,
+    );
+  }
+
+  Widget _layerTab(BuildContext context, AppLocalizations l,
+      GcodeGeometry? geom, bool building,
+      GcodeProgress? progress, String? err) {
+    final theme = Theme.of(context);
+    if (building) {
+      final pct = progress == null
+          ? '…'
+          : '${(progress.fraction * 100).toStringAsFixed(0)} %';
+      final segs = progress == null ? '' : ' · ${progress.segmentsSoFar} seg';
+      final layers = progress == null ? '' : ' · ${progress.layersSoFar} L';
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          children: [
+            const SizedBox(width: 20, height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 12),
+            Expanded(child: Text('${l.projectLayerViewParsing} $pct$segs$layers',
+                overflow: TextOverflow.ellipsis)),
+          ],
+        ),
+      );
+    }
+    if (err != null) {
+      return Row(
+        children: [
+          const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(err,
+              style: theme.textTheme.bodySmall?.copyWith(
+                  color: Colors.redAccent))),
+        ],
+      );
+    }
+    if (geom == null) {
+      return Text(l.projectLayerViewEmpty,
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: WorkshopTokens.textMuted));
+    }
+    return LayerView(
+      geometry: geom,
+      onInteractionChanged: onInteractionChanged,
+      labels: LayerViewLabels(
+        layer: l.layerViewLayer,
+        of: l.layerViewOf,
+        resetView: l.plateViewReset,
+        top: l.plateViewTop,
+        front: l.plateViewFront,
+        oblique: l.plateViewOblique,
+        zoomIn: l.plateViewZoomIn,
+        zoomOut: l.plateViewZoomOut,
+        pathTypes: l.layerViewPathTypes,
+        filamentColors: l.layerViewFilamentColors,
+        showTravel: l.layerViewShowTravel,
+        renderer3d: l.layerViewRenderer3d,
+        renderer2d: l.layerViewRenderer2d,
+        decrementLayer: l.layerViewDecrement,
+        incrementLayer: l.layerViewIncrement,
+        typeLabel: (t) => _localizedType(l, t),
+      ),
+    );
+  }
+
+  String _localizedType(AppLocalizations l, PathType t) {
+    switch (t) {
+      case PathType.travel:           return l.layerTypeTravel;
+      case PathType.outerWall:        return l.layerTypeOuterWall;
+      case PathType.innerWall:        return l.layerTypeInnerWall;
+      case PathType.internalInfill:   return l.layerTypeInternalInfill;
+      case PathType.solidInfill:      return l.layerTypeSolidInfill;
+      case PathType.topSurface:       return l.layerTypeTopSurface;
+      case PathType.bottomSurface:    return l.layerTypeBottomSurface;
+      case PathType.bridge:           return l.layerTypeBridge;
+      case PathType.support:          return l.layerTypeSupport;
+      case PathType.supportInterface: return l.layerTypeSupportInterface;
+      case PathType.skirtBrim:        return l.layerTypeSkirtBrim;
+      case PathType.primeTower:       return l.layerTypePrimeTower;
+      case PathType.custom:           return l.layerTypeCustom;
+      case PathType.unknown:          return l.layerTypeUnknown;
+    }
   }
 
   Color? _parseHex(String? s) {

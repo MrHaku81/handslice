@@ -135,6 +135,94 @@ class AppLocalizationsEn extends AppLocalizations {
   String get plateViewZoomOut => 'Zoom out';
 
   @override
+  String get projectSceneTabModel => 'Model';
+
+  @override
+  String get projectSceneTabLayers => 'Layers';
+
+  @override
+  String get projectLayerViewHeading => 'Layer preview';
+
+  @override
+  String get projectLayerViewEmpty => 'Slice a model to see the layer preview.';
+
+  @override
+  String get projectLayerViewParsing => 'Parsing G-code…';
+
+  @override
+  String get projectLayerViewSimplifyNote =>
+      'G-code paths · the slice itself is unchanged';
+
+  @override
+  String get layerViewLayer => 'Layer';
+
+  @override
+  String get layerViewOf => 'of';
+
+  @override
+  String get layerViewPathTypes => 'Path types';
+
+  @override
+  String get layerViewFilamentColors => 'By filament';
+
+  @override
+  String get layerViewShowTravel => 'Show travel';
+
+  @override
+  String get layerViewRenderer3d => '3D';
+
+  @override
+  String get layerViewRenderer2d => '2D top-down';
+
+  @override
+  String get layerViewDecrement => 'Previous layer';
+
+  @override
+  String get layerViewIncrement => 'Next layer';
+
+  @override
+  String get layerTypeTravel => 'Travel';
+
+  @override
+  String get layerTypeOuterWall => 'Outer wall';
+
+  @override
+  String get layerTypeInnerWall => 'Inner wall';
+
+  @override
+  String get layerTypeInternalInfill => 'Infill';
+
+  @override
+  String get layerTypeSolidInfill => 'Solid infill';
+
+  @override
+  String get layerTypeTopSurface => 'Top surface';
+
+  @override
+  String get layerTypeBottomSurface => 'Bottom surface';
+
+  @override
+  String get layerTypeBridge => 'Bridge';
+
+  @override
+  String get layerTypeSupport => 'Support';
+
+  @override
+  String get layerTypeSupportInterface => 'Support interface';
+
+  @override
+  String get layerTypeSkirtBrim => 'Skirt / brim';
+
+  @override
+  String get layerTypePrimeTower => 'Prime tower';
+
+  @override
+  String get layerTypeCustom => 'Custom';
+
+  @override
+  String get layerTypeUnknown => 'Unknown';
+
+  @override
   String get projectZOffset => 'Z-offset per plate (applied at slice time)';
 
   @override

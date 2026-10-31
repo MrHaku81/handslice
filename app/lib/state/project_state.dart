@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../engine/bounds_check.dart';
+import '../engine/gcode_parser.dart';
 import '../engine/slicer.dart';
 import '../settings/settings_overrides.dart';
 
@@ -32,6 +33,18 @@ class ProjectState extends ChangeNotifier {
   // background by the arm64 CLI (--no-slice + --export-preview-mesh)
   // after a model is picked, cached per (modelPath, mtime, target)
   // so re-opening the same file is instant.
+  // Pflicht 7b — parsed g-code geometry for the layer view.
+  // Lives only in RAM (the g-code file on disk is the source of
+  // truth), rebuilt after every successful slice.
+  GcodeGeometry? _sliceGeometry;
+  bool _sliceGeometryBuilding = false;
+  String? _sliceGeometryError;
+  GcodeProgress? _sliceGeometryProgress;
+  GcodeGeometry? get sliceGeometry => _sliceGeometry;
+  bool get sliceGeometryBuilding => _sliceGeometryBuilding;
+  String? get sliceGeometryError => _sliceGeometryError;
+  GcodeProgress? get sliceGeometryProgress => _sliceGeometryProgress;
+
   String? _previewMeshPath;
   // Raw-RGBA 'HSPB' thumbnail built next to the HSPM, used by the
   // 3D view's fallback image when flutter_scene cannot start.
@@ -138,7 +151,37 @@ class ProjectState extends ChangeNotifier {
     _previewMeshPath = null;
     _previewThumbnailPath = null;
     _previewMeshError = null;
+    _sliceGeometry = null;
+    _sliceGeometryError = null;
+    _sliceGeometryProgress = null;
     notifyListeners();
+  }
+
+  // Pflicht 7b — parse the g-code produced by the last slice into
+  // the compact `GcodeGeometry` the layer view consumes. Spawns an
+  // isolate; emits progress on the main thread. Idempotent: if the
+  // last-parsed path matches the current slice output, a no-op.
+  Future<void> parseSliceGeometry() async {
+    final slice = _lastSlice;
+    if (slice == null) return;
+    if (_sliceGeometryBuilding) return;
+    _sliceGeometryBuilding = true;
+    _sliceGeometryError = null;
+    _sliceGeometry = null;
+    _sliceGeometryProgress = null;
+    notifyListeners();
+    try {
+      final g = await parseGcode(slice.gcodePath, onProgress: (p) {
+        _sliceGeometryProgress = p;
+        notifyListeners();
+      });
+      _sliceGeometry = g;
+    } catch (e) {
+      _sliceGeometryError = e.toString();
+    } finally {
+      _sliceGeometryBuilding = false;
+      notifyListeners();
+    }
   }
 
   // Pflicht 7a — fire-and-forget preview-mesh build. Caller is the
@@ -274,6 +317,11 @@ class ProjectState extends ChangeNotifier {
         },
       );
       _lastSlice = r;
+      // Pflicht 7b: start parsing the g-code into the layer-view
+      // geometry in the background. Fire-and-forget; the UI
+      // reacts via `sliceGeometryBuilding` / progress updates.
+      // ignore: discarded_futures
+      parseSliceGeometry();
       // Grenztest sofort nach dem Slice. Uploads werden spaeter
       // blockiert, wenn Verletzungen vorliegen (siehe PrintScreen,
       // M3-Upload-Logik).
