@@ -82,7 +82,10 @@ def default_targets() -> list[Path]:
         for p in sorted(docs.rglob("*")):
             if p.is_file() and p.suffix in {".md", ".txt", ".rst", ".json", ".yaml", ".yml"}:
                 targets.append(p)
-    targets.append(REPO / "PROGRESS.md")
+    # Textfiles im Repo-Root (README*.md, CLAUDE.md, PROGRESS.md, …)
+    for p in sorted(REPO.glob("*.md")):
+        if p.is_file():
+            targets.append(p)
     return [t for t in targets if t.is_file()]
 
 
