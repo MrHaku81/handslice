@@ -121,10 +121,15 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
   // Canvas fallback is still reachable for comparison.
   String? _sceneError;
   final fscene.Scene _scene = fscene.Scene();
-  double _yaw = 0.0;
-  double _pitch = -0.6;   // slightly down-tilted baseline
-  double _distance = 350.0;
-  Offset _pan = Offset.zero;
+  // Orbit around the AABB centre of the loaded scene (model +
+  // plate), not the world origin. Set after a .hspm is loaded.
+  vm.Vector3 _orbitCentre = vm.Vector3.zero();
+  double _orbitRadius = 100.0;
+  double _yaw = 0.6;          // azimuth around world +Z
+  double _pitch = 0.5;        // elevation above the XY plane
+  double _distance = 500.0;   // metres from orbit centre
+  // Pan offset in world units applied to orbit centre each frame.
+  vm.Vector3 _panOffset = vm.Vector3.zero();
   // FPS running stats via WidgetsBinding.addTimingsCallback.
   final List<int> _frameMicros = []; // last ~60 frames
   double _fpsAvg = 0.0;
@@ -229,12 +234,29 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
     final bytes = await File(path).readAsBytes();
     final mesh = parseHspm(bytes.buffer.asByteData());
     sw1.stop();
+    // Frame the camera on the mesh AABB joined with the plate.
+    // CC2 bed is 256×256 at z=0; AABB.center of model gives us the
+    // orbit target. Radius = half the diagonal of the joined box.
+    final aabb = _computeAabb(mesh);
+    aabb.hull(vm.Aabb3.minMax(vm.Vector3(0, 0, 0),
+                              vm.Vector3(256, 256, 0)));
+    final centre = (aabb.min + aabb.max) * 0.5;
+    final extent = aabb.max - aabb.min;
+    final radius = math.max(extent.length * 0.5, 1.0);
+    final fitDist = radius / math.sin(_fovY / 2) * 1.3;
+    _orbitCentre = centre;
+    _orbitRadius = radius;
+    _distance = fitDist;
+    _panOffset.setZero();
+    _yaw = 0.6;
+    _pitch = 0.5;
     final sw2 = Stopwatch()..start();
     await _rebuildScene(mesh);
     sw2.stop();
     _rssAfterMb = _currentRssMb();
-    // Rough VRAM estimate: positions + normals = 24 bytes/vertex × 3 verts/tri.
-    final vram = mesh.triangleCount * 3 * 24;
+    // Rough VRAM estimate: positions + normals + rgba vertex colours
+    // = 32 bytes/vertex × 3 verts/tri.
+    final vram = mesh.triangleCount * 3 * 32;
     if (!mounted) return;
     setState(() {
       _mesh = mesh;
@@ -243,6 +265,31 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
       _buildTime = sw2.elapsed;
       _vramEstimateBytes = vram;
     });
+  }
+
+  static const double _fovY = math.pi / 4;
+
+  vm.Aabb3 _computeAabb(HspmFile mesh) {
+    double minX = double.infinity, minY = double.infinity, minZ = double.infinity;
+    double maxX = -double.infinity, maxY = -double.infinity, maxZ = -double.infinity;
+    for (final vol in mesh.volumes) {
+      final p = vol.positions;
+      for (int i = 0; i < p.length; i += 3) {
+        final x = p[i], y = p[i + 1], z = p[i + 2];
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (z < minZ) minZ = z;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        if (z > maxZ) maxZ = z;
+      }
+    }
+    if (minX == double.infinity) {
+      return vm.Aabb3.minMax(vm.Vector3.zero(), vm.Vector3.zero());
+    }
+    return vm.Aabb3.minMax(
+      vm.Vector3(minX, minY, minZ),
+      vm.Vector3(maxX, maxY, maxZ));
   }
 
   Future<void> _rebuildScene(HspmFile mesh) async {
@@ -263,13 +310,25 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
   void _rebuildSceneUnsafe(HspmFile mesh) {
     _scene.root.children.clear();
     if (_mode == RendererMode.flutterScene) {
+      // 1. The bed plate (CC2: 256×256 at z=0). Flat grey, slight
+      //    key-light shading baked in so it reads as a surface,
+      //    not a flat sticker.
+      _addPlate();
+      // 2. Each volume's triangle soup, with Lambert shading
+      //    pre-computed per vertex into the per-vertex color
+      //    slot. UnlitMaterial (vertexColorWeight=1) multiplies
+      //    baseColorFactor * vertexColor, so flipping to a lit
+      //    look costs no extra render-time work.
       for (final vol in mesh.volumes) {
         final gb = fscene.GeometryBuilder(deduplicate: false);
+        final tint = _colorFor(vol.filamentIdx);
         for (int t = 0; t < vol.triangleCount; ++t) {
           final base = t * 9;
           final n = vm.Vector3(
               vol.normals[base], vol.normals[base + 1], vol.normals[base + 2]);
+          final litRgb = _lambertShade(tint, n);
           gb.normal(n);
+          gb.color(litRgb);
           final i0 = gb.addVertex(vm.Vector3(
               vol.positions[base],     vol.positions[base + 1], vol.positions[base + 2]));
           final i1 = gb.addVertex(vm.Vector3(
@@ -279,8 +338,10 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
           gb.addTriangle(i0, i1, i2);
         }
         final geom = gb.build();
+        // baseColor white: the per-vertex color already carries
+        // tint and shading, so UnlitMaterial just lets it pass.
         final mat = fscene.UnlitMaterial()
-          ..baseColorFactor = _colorFor(vol.filamentIdx);
+          ..baseColorFactor = vm.Vector4(1, 1, 1, 1);
         _scene.add(fscene.Node(name: 'vol_${vol.filamentIdx}',
             mesh: fscene.Mesh(geom, mat)));
       }
@@ -289,11 +350,54 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
     // `_mesh.volumes` directly in CustomPainter.
   }
 
+  // World-space key light (down-and-forward, Z-up world). Values
+  // chosen to match the thumbnail renderer so the plate view and
+  // the G-code thumbnail read the same way.
+  static final vm.Vector3 _keyLight =
+      vm.Vector3(0.3, -0.3, 0.9)..normalize();
+  static const double _ambient = 0.25;
+
+  vm.Vector4 _lambertShade(vm.Vector4 tint, vm.Vector3 normal) {
+    // Flip the normal to face the light so both sides of a
+    // non-manifold or flipped-winding mesh still read as "lit";
+    // same trick the thumbnail renderer uses, which is what the
+    // user compares to visually.
+    final dot = normal.dot(_keyLight).abs();
+    final k = _ambient + (1.0 - _ambient) * dot;
+    return vm.Vector4(tint.r * k, tint.g * k, tint.b * k, 1.0);
+  }
+
+  void _addPlate() {
+    final gb = fscene.GeometryBuilder(deduplicate: false);
+    final n = vm.Vector3(0, 0, 1);
+    final plateRgb = _lambertShade(vm.Vector4(0.18, 0.19, 0.21, 1), n);
+    gb.normal(n);
+    gb.color(plateRgb);
+    final a = gb.addVertex(vm.Vector3(0,   0,   0));
+    final b = gb.addVertex(vm.Vector3(256, 0,   0));
+    final c = gb.addVertex(vm.Vector3(256, 256, 0));
+    final d = gb.addVertex(vm.Vector3(0,   256, 0));
+    gb.addTriangle(a, b, c);
+    gb.addTriangle(a, c, d);
+    final geom = gb.build();
+    final mat = fscene.UnlitMaterial()
+      ..baseColorFactor = vm.Vector4(1, 1, 1, 1);
+    _scene.add(fscene.Node(name: 'bed', mesh: fscene.Mesh(geom, mat)));
+  }
+
   vm.Vector4 _colorFor(int idx) {
-    final hues = [0.08, 0.33, 0.58, 0.83];
-    final h = hues[idx % hues.length];
-    final c = HSVColor.fromAHSV(1.0, h * 360.0, 0.75, 0.95).toColor();
-    return vm.Vector4(c.r, c.g, c.b, 1.0);
+    // Vivid, filament-reel-style palette, so each volume reads
+    // distinctly even without a texture. First entry is a solid
+    // red because that is the most common "default" slot value
+    // on the CC2 after a factory reset.
+    const palette = <List<double>>[
+      [0.86, 0.17, 0.17],  // red
+      [0.11, 0.46, 0.90],  // blue
+      [0.18, 0.75, 0.37],  // green
+      [0.98, 0.78, 0.11],  // yellow
+    ];
+    final c = palette[idx % palette.length];
+    return vm.Vector4(c[0], c[1], c[2], 1.0);
   }
 
   // -------- gestures --------
@@ -312,7 +416,7 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
       final delta = d.focalPoint - (_dragStart ?? d.focalPoint);
       setState(() {
         _yaw   += delta.dx * 0.01;
-        _pitch += delta.dy * 0.01;
+        _pitch -= delta.dy * 0.01;
         _pitch = _pitch.clamp(-1.4, 1.4);
       });
       _dragStart = d.focalPoint;
@@ -320,8 +424,19 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
       _pinchStart ??= d.scale;
       setState(() {
         _distance = (_distStart ?? _distance) / d.scale;
-        _distance = _distance.clamp(50.0, 2000.0);
-        _pan += d.focalPointDelta;
+        _distance = _distance.clamp(_orbitRadius * 0.3,
+                                    _orbitRadius * 20.0);
+        // Pan in world units along the camera right / up axes so
+        // the user drags *the scene* not an abstract offset.
+        final k = _distance * 0.0025;
+        final right = vm.Vector3(math.cos(_yaw), math.sin(_yaw), 0);
+        // Screen-up in world ≈ Z-up tilted by pitch.
+        final up = vm.Vector3(
+            -math.sin(_pitch) * math.sin(_yaw),
+             math.sin(_pitch) * math.cos(_yaw),
+             math.cos(_pitch));
+        _panOffset += right * (-d.focalPointDelta.dx * k)
+                    + up    * ( d.focalPointDelta.dy * k);
       });
     }
   }
@@ -422,12 +537,16 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
           return const Center(child: CircularProgressIndicator());
         }
         try {
+          final target = _orbitCentre + _panOffset;
           return fscene.SceneView(
             _scene,
             camera: fscene.PerspectiveCamera(
-              position: _cameraPos(),
-              target: vm.Vector3(_pan.dx, 0, _pan.dy),
-              fovRadiansY: math.pi / 4,
+              position: _cameraPos(target),
+              target: target,
+              up: vm.Vector3(0, 0, 1),           // Z is up in printer world
+              fovRadiansY: _fovY,
+              fovNear: _distance * 0.01,
+              fovFar: _distance * 50.0,
             ),
           );
         } catch (e) {
@@ -442,7 +561,8 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
             yaw: _yaw,
             pitch: _pitch,
             distance: _distance,
-            pan: _pan,
+            orbitCentre: _orbitCentre + _panOffset,
+            colorFor: _colorFor,
           ),
         );
     }
@@ -486,12 +606,16 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
     );
   }
 
-  vm.Vector3 _cameraPos() {
-    final cy = math.cos(_pitch);
-    return vm.Vector3(
-      _distance * math.sin(_yaw) * cy,
-      _distance * math.sin(_pitch),
-      _distance * math.cos(_yaw) * cy,
+  vm.Vector3 _cameraPos(vm.Vector3 target) {
+    final cp = math.cos(_pitch);
+    final sp = math.sin(_pitch);
+    // Camera placed on a sphere around `target`. Z is world up.
+    // At yaw=0 the camera looks along +Y, matching the thumbnail
+    // renderer's "front view".
+    return target + vm.Vector3(
+      _distance * cp * math.sin(_yaw),
+      -_distance * cp * math.cos(_yaw),
+       _distance * sp,
     );
   }
 }
@@ -504,69 +628,91 @@ class _CanvasVertexPainter extends CustomPainter {
     required this.yaw,
     required this.pitch,
     required this.distance,
-    required this.pan,
+    required this.orbitCentre,
+    required this.colorFor,
   });
   final HspmFile mesh;
   final double yaw, pitch, distance;
-  final Offset pan;
+  final vm.Vector3 orbitCentre;
+  final vm.Vector4 Function(int) colorFor;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Project each triangle to screen with a simple
-    // perspective-ish projection (ortho + depth-sort).
-    final cx = size.width  / 2 + pan.dx;
-    final cy = size.height / 2 + pan.dy;
+    // Z-up orbit matched to the flutter_scene path. Simple ortho
+    // projection with painter's-algorithm depth sort.
+    final cx = size.width  / 2;
+    final cy = size.height / 2;
     final scale = size.shortestSide / (distance * 1.1);
     final cosY = math.cos(yaw),   sinY = math.sin(yaw);
     final cosP = math.cos(pitch), sinP = math.sin(pitch);
+    final ocx = orbitCentre.x, ocy = orbitCentre.y, ocz = orbitCentre.z;
 
-    // Collect triangles with their mean depth to resolve front/back.
-    final tris = <_Tri>[];
+    // World-space key light (same vector as flutter_scene path).
+    const double lx = 0.3, ly = -0.3, lz = 0.9;
+    final double lLen = math.sqrt(lx * lx + ly * ly + lz * lz);
+    final double lnx = lx / lLen, lny = ly / lLen, lnz = lz / lLen;
+
+    // Project a world point to screen + camera-space depth.
+    // World axes (x,y,z) → camera axes:
+    //   right = (cosY, sinY, 0)              (screen +x)
+    //   forward = (-sinY*cosP, cosY*cosP, sinP)  (into screen)
+    //   up    = (sinY*sinP, -cosY*sinP, cosP)    (screen +y)
+    void project(double x, double y, double z, List<double> out) {
+      final rx = x - ocx, ry = y - ocy, rz = z - ocz;
+      final sx = rx * cosY + ry * sinY;
+      final sy = rx * sinY * sinP - ry * cosY * sinP + rz * cosP;
+      final depth = -rx * sinY * cosP + ry * cosY * cosP + rz * sinP;
+      out[0] = cx + sx * scale;
+      out[1] = cy - sy * scale;
+      out[2] = depth;
+    }
+
+    final triangles = <_Tri>[];
+    final scratch = List<double>.filled(3, 0);
+
+    // Plate first.
+    final plateCol = _shade(0.18, 0.19, 0.21, 0, 0, 1,
+                            lnx, lny, lnz);
+    final plateCoords = <List<double>>[
+      [0,   0,   0], [256, 0,   0], [256, 256, 0], [0, 256, 0],
+    ];
+    final plateV = <Offset>[];
+    double plateDepth = 0;
+    for (final p in plateCoords) {
+      project(p[0], p[1], p[2], scratch);
+      plateV.add(Offset(scratch[0], scratch[1]));
+      plateDepth += scratch[2];
+    }
+    plateDepth /= 4;
+    triangles.add(_Tri(plateV[0], plateV[1], plateV[2], plateDepth, plateCol));
+    triangles.add(_Tri(plateV[0], plateV[2], plateV[3], plateDepth, plateCol));
+
+    // Model volumes.
     for (final vol in mesh.volumes) {
-      final col = HSVColor.fromAHSV(1.0, (vol.filamentIdx * 90) % 360.0,
-                                    0.75, 0.95).toColor();
+      final tint = colorFor(vol.filamentIdx);
       final nTri = vol.triangleCount;
       for (int t = 0; t < nTri; ++t) {
-        final base = t * 9;
-        final v = List<Offset>.filled(3, Offset.zero);
-        double meanZ = 0;
+        final b0 = t * 9;
+        final nx = vol.normals[b0], ny = vol.normals[b0 + 1], nz = vol.normals[b0 + 2];
+        final shade = _shade(tint.r, tint.g, tint.b, nx, ny, nz,
+                             lnx, lny, lnz);
+        final verts = <Offset>[];
+        double depth = 0;
         for (int i = 0; i < 3; ++i) {
-          final b = base + i * 3;
-          final x = vol.positions[b    ];
-          final y = vol.positions[b + 1];
-          final z = vol.positions[b + 2];
-          // Yaw around Z (vertical in printer frame), pitch around X.
-          final x1 = x * cosY - y * sinY;
-          final y1 = x * sinY + y * cosY;
-          final y2 = y1 * cosP - z * sinP;
-          final z2 = y1 * sinP + z * cosP;
-          v[i] = Offset(cx + x1 * scale, cy - y2 * scale);
-          meanZ += z2;
+          final bi = b0 + i * 3;
+          project(vol.positions[bi], vol.positions[bi + 1], vol.positions[bi + 2],
+                  scratch);
+          verts.add(Offset(scratch[0], scratch[1]));
+          depth += scratch[2];
         }
-        // Flat shading from triangle normal (rotate the normal
-        // the same way).
-        final nx = vol.normals[base], ny = vol.normals[base + 1], nz = vol.normals[base + 2];
-        final nx1 = nx * cosY - ny * sinY;
-        final ny1 = nx * sinY + ny * cosY;
-        final ny2 = ny1 * cosP - nz * sinP;
-        final nz2 = ny1 * sinP + nz * cosP;
-        // Light near-top-down + a tiny fill (same model as the
-        // thumbnail renderer, less-strict constants).
-        final cosL = (nx1 * 0.15 + ny2 * -0.35 + nz2 * 0.95).clamp(-1.0, 1.0);
-        final k = (0.2 + 0.8 * cosL.clamp(0.0, 1.0)).clamp(0.0, 1.0);
-        final shade = Color.fromARGB(
-          255,
-          (col.r * 255 * k).round(),
-          (col.g * 255 * k).round(),
-          (col.b * 255 * k).round(),
-        );
-        tris.add(_Tri(v[0], v[1], v[2], meanZ / 3, shade));
+        triangles.add(_Tri(verts[0], verts[1], verts[2],
+                           depth / 3, shade));
       }
     }
-    tris.sort((a, b) => b.depth.compareTo(a.depth));
+    triangles.sort((a, b) => b.depth.compareTo(a.depth));
 
     final paint = Paint()..style = PaintingStyle.fill;
-    for (final t in tris) {
+    for (final t in triangles) {
       final path = Path()
         ..moveTo(t.a.dx, t.a.dy)
         ..lineTo(t.b.dx, t.b.dy)
@@ -577,10 +723,21 @@ class _CanvasVertexPainter extends CustomPainter {
     }
   }
 
+  Color _shade(double r, double g, double b,
+               double nx, double ny, double nz,
+               double lnx, double lny, double lnz) {
+    final dot = (nx * lnx + ny * lny + nz * lnz).abs();
+    final k = (0.25 + 0.75 * dot).clamp(0.0, 1.0);
+    return Color.fromARGB(255,
+        (r * 255 * k).round(),
+        (g * 255 * k).round(),
+        (b * 255 * k).round());
+  }
+
   @override
   bool shouldRepaint(covariant _CanvasVertexPainter old) =>
       old.mesh != mesh || old.yaw != yaw || old.pitch != pitch ||
-      old.distance != distance || old.pan != pan;
+      old.distance != distance || old.orbitCentre != orbitCentre;
 }
 
 class _Tri {
