@@ -13,7 +13,11 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 MODE=debug
-if [[ "${1:-}" == "--release" ]]; then MODE=release; fi
+case "${1:-}" in
+    ""|--debug) MODE=debug ;;
+    --release)  MODE=release ;;
+    *) echo "Nutzung: $0 [--debug|--release]" >&2; exit 2 ;;
+esac
 
 export PATH="$HOME/flutter/bin:$HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools:$PATH"
 export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
@@ -89,31 +93,45 @@ APK="build/app/outputs/flutter-apk/app-$MODE.apk"
 APK_SHA=$(sha256sum "$APK" | awk '{print $1}')
 APK_SIZE=$(stat --printf='%s' "$APK")
 
-# Verifikation: libapp.so (Dart-AOT-Blob) muss den Commit-Hash als
+# Verifikation: der Dart-Code-Blob muss den Commit-Hash als
 # Byte-Sequenz enthalten. Die APK selbst ist DEFLATE-komprimiert,
-# deshalb kein grep auf dem Rohbyte-APK, sondern unzip -p auf die
-# arm64-Variante. Fehlt der Hash im Binary, wurde das --dart-define
-# nicht wirksam -> App faellt am Geraet in den Startup-Guard
-# (siehe app/lib/main.dart). Lieber hier abbrechen, damit solche
-# APKs gar nicht erst auf den Poco wandern.
+# deshalb kein grep auf dem Rohbyte-APK, sondern unzip -p auf das
+# jeweils relevante Entry.
+#   Release: lib/arm64-v8a/libapp.so (Dart-AOT-Blob)
+#   Debug:   assets/flutter_assets/kernel_blob.bin (JIT-Kernel)
+# Fehlt der Hash im Blob, wurde das --dart-define nicht wirksam ->
+# App faellt am Geraet in den Startup-Guard (siehe app/lib/main.dart).
+# Lieber hier abbrechen, damit solche APKs gar nicht erst auf den
+# Poco wandern.
 # `unzip -p … | grep -q` scheitert unter `set -euo pipefail`, weil
 # `grep -q` nach erstem Treffer schliesst → `unzip` bekommt SIGPIPE
 # → Pipe-Exit nicht-0. Deshalb vorher nach tmp extrahieren.
-tmp_libapp=$(mktemp)
-trap 'rm -f "$tmp_libapp"' EXIT
-unzip -p "$APK" lib/arm64-v8a/libapp.so > "$tmp_libapp" 2>/dev/null
-if ! grep -a -q "$COMMIT" "$tmp_libapp"; then
-    echo "ABBRUCH: lib/arm64-v8a/libapp.so in $APK enthaelt" >&2
+if [[ "$MODE" == "release" ]]; then
+    DART_ENTRY="lib/arm64-v8a/libapp.so"
+else
+    DART_ENTRY="assets/flutter_assets/kernel_blob.bin"
+fi
+tmp_blob=$(mktemp)
+trap 'rm -f "$tmp_blob"' EXIT
+unzip -p "$APK" "$DART_ENTRY" > "$tmp_blob" 2>/dev/null
+if [[ ! -s "$tmp_blob" ]]; then
+    echo "ABBRUCH: $DART_ENTRY aus $APK ist leer oder fehlt." >&2
+    exit 4
+fi
+if ! grep -a -q "$COMMIT" "$tmp_blob"; then
+    echo "ABBRUCH: $DART_ENTRY in $APK enthaelt" >&2
     echo "         den Commit-Hash $COMMIT nicht –" >&2
     echo "         --dart-define wurde offenbar nicht weitergegeben." >&2
     exit 4
 fi
 
-# Permission-Guard: Release-APK muss android.permission.INTERNET
-# enthalten. Debug-Overlay (android/app/src/debug/AndroidManifest.xml)
-# fuegt sie nur fuer Debug-Builds hinzu; eine Release-APK ohne diese
-# Zeile scheitert am Geraet mit "Failed to create datagram socket".
-# Beleg: 2026-10-26, Release-APK 785e5cb – siehe PROGRESS.md.
+# Permission-Guard: APK muss android.permission.INTERNET enthalten.
+# Debug-Overlay (android/app/src/debug/AndroidManifest.xml) fuegt
+# sie nur fuer Debug-Builds hinzu; eine Release-APK ohne diese Zeile
+# scheitert am Geraet mit "Failed to create datagram socket".
+# Pruefen wir hier fuer beide Modi, damit die Debug-APK dieselbe
+# Garantie mitbringt. Beleg: 2026-10-26, Release-APK 785e5cb –
+# siehe PROGRESS.md.
 AAPT_CANDIDATES=(
     "$ANDROID_HOME/build-tools/36.0.0/aapt2"
     "$ANDROID_HOME/build-tools/34.0.0/aapt2"

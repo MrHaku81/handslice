@@ -18,6 +18,34 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 18:40 UTC – build_apk.sh: expliziter --debug-Modus, selbe Prüfungen
+
+Beim ersten Debug-Build für Pflicht 7 wurde direkt `flutter build apk
+--debug` genutzt – ohne die `--dart-define`-Hashes. Startup-Guard
+blockte die App auf dem Poco ("Build-Metadaten fehlen"). Fix:
+
+- `app/scripts/build_apk.sh` akzeptiert jetzt explizit `--debug` und
+  `--release` (Default bleibt `--debug`). Unbekannte Argumente werden
+  mit Nutzungshinweis abgewiesen.
+- Verifikation gilt auch im Debug-Modus: der Commit-Hash wird im
+  entsprechenden Dart-Blob gesucht —
+  `assets/flutter_assets/kernel_blob.bin` (debug, JIT) bzw.
+  `lib/arm64-v8a/libapp.so` (release, AOT). Vorher gab es nur den
+  AOT-Pfad; auf einer Debug-APK wäre das stillschweigend
+  fehlgeschlagen oder gar nicht ausgeführt worden.
+- CLI-Guard (arm64 vs x86, Side-Car `*.commit`) und
+  INTERNET-Permission-Check bleiben unverändert, laufen jetzt für
+  beide Modi.
+- Startup-Guard in `main.dart` nicht angefasst.
+
+Benchmark-APK neu gebaut (`2f96c68edc`, SHA
+`cbfb40e618626df7bf61b235bea6385823fef2a77c7162d1f9875576592386c2`,
+~138 MB) und installiert. CLI-Hash im Side-Car ist noch
+`7fc19b07eb` (vor dem --export-preview-mesh-Commit) – auf dem
+Poco macht das für den Bench-Screen keinen Unterschied, aber vor
+der ersten Nutzung von `--export-preview-mesh` auf dem Rechner
+muss die x86-CLI nachgezogen werden.
+
 ## 2026-10-31 18:30 UTC – Pflicht 7 scaffolding: CLI export + bench screen + Canvas fallback
 
 Benchmark scaffolding for the plate renderer is in place. Numbers
