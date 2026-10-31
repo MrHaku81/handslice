@@ -69,8 +69,15 @@ eines vierten Versuchs.
 - UI vollständig per Fokus-Navigation (Tastatur, D-Pad, Controller)
   bedienbar; keine Touch-only-Elemente außerhalb des 3D-Viewports. Grund:
   Barrierefreiheit und Nebeneffekt Android TV / Tablets mit Tastatur.
-- Commits klein und beschreibend, deutsch oder englisch – egal, aber
-  konsistent pro Commit. Jeder Commit baut.
+- Commits klein und beschreibend. **Ab 2026-10-31 ist Englisch die
+  Projektsprache** fuer **neue** Commit-Messages, **neue**
+  PROGRESS.md-Eintraege und **neue** Doku-Dateien bzw. -Abschnitte.
+  Grund: die internationale Community soll mitlesen und beitragen
+  koennen. Bestehende deutsche Commits und PROGRESS-Eintraege
+  bleiben wie sie sind – keine History-Rewrites fuer die
+  Sprachumstellung. CLAUDE.md und die handgeschriebenen deutschen
+  Doku-Teile bleiben deutsch, bis Klaus sie selbst umstellt.
+  Jeder Commit baut.
 
 ## 6. Bei Unsicherheit
 

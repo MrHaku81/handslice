@@ -117,6 +117,18 @@ handslice/
   profiles/            bundled printer profiles (CC2 …)
 ```
 
+## Language note
+
+Handslice was developed and documented in German until
+2026-10-31. From that date on, English is the project language
+for **new** commit messages, PROGRESS entries, and
+documentation, so the international community can read along
+and contribute. Older commits and parts of the docs are
+therefore still in German; they will **not** be rewritten.
+`CLAUDE.md` (the day-to-day working rules) stays in German
+until the maintainer switches it; `README.de.md` is kept
+in sync in parallel.
+
 ## Acknowledgements
 
 OrcaSlicer (SoftFever and team), Bambu Studio, PrusaSlicer, Slic3r —

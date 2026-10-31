@@ -116,6 +116,17 @@ handslice/
   profiles/            gebündelte Druckerprofile (CC2 …)
 ```
 
+## Hinweis zur Sprache
+
+Handslice wurde bis zum 31.10.2026 auf Deutsch entwickelt und
+dokumentiert. Ab dann ist **Englisch die Projektsprache** für
+**neue** Commit-Messages, PROGRESS-Einträge und Doku, damit die
+internationale Community mitlesen und beitragen kann. Ältere
+Commits und Teile der Doku bleiben deutsch; sie werden **nicht**
+umgeschrieben. `CLAUDE.md` (die Arbeitsregeln) bleibt deutsch,
+bis der Maintainer es selbst umstellt; diese Datei
+(`README.de.md`) wird parallel zum englischen README gepflegt.
+
 ## Danksagung
 
 OrcaSlicer (SoftFever und Team), Bambu Studio, PrusaSlicer, Slic3r – die
