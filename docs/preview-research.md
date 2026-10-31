@@ -226,3 +226,115 @@ From `engine/OrcaSlicer/src/libslic3r/`:
   bewegliches Ziel, `three_js` plant Umstieg auf Flutter GPU.
   **Mitigation**: nicht die neueste `-dev`-Version pinnen,
   Minor-Updates manuell nachziehen.
+
+---
+
+## Follow-up: three questions before we commit (2026-10-31)
+
+### 1. Thumbnail Variant C — CLI-side software rasterizer
+
+Weighed against Variant B (Flutter renders, Dart splices the
+`THUMBNAIL_BLOCK` into the G-code before upload):
+
+| | **Variant B** (Dart splice) | **Variant C** (CLI rasterizer) |
+|---|---|---|
+| Effort | 2–3 d | **4–6 d** (≈300–400 LOC C++ rasterizer + libpng + base64 + `thumbnail_cb` wiring) |
+| Depends on Pflicht 7 | **yes** — needs the 3D renderer to exist | **no** — ships independently |
+| Testable | only through the app | **yes** — compare x86 CLI output byte-for-byte against the GUI reference PNG, deterministic in CI |
+| Who writes the block | Dart text-splice (own code path) | Orca's own `export_thumbnails_to_file` — identical formatting, no splice edge-cases |
+| Visual quality | matches whatever we build for Pflicht 7 | flat-shaded, same style as Orca's own thumbnails (which are also flat; the Elegoo reference uses a 144×144 PNG with simple directional light) |
+| Reusable | only for thumbnails | rasterizer could later back a CPU preview inside the app (e.g. while a Flutter GPU scenegraph warms up or fails) |
+
+Risk comparison: B chains two risks (3D-package choice + splice
+format precision); C isolates a single risk (rasterizer
+quality), and that risk is testable without the device.
+
+Given the F-Droid blocker on `three_js` (see Q2 below) which
+pushes the Flutter-side renderer onto the less mature
+`flutter_scene`, **Variant C becomes the lower-risk choice**:
+thumbnails don't block on an evolving GPU API, and the
+C++ renderer is end-to-end testable on CI.
+
+**Updated recommendation: Variant C.** Keep B as a fallback
+only if the Pflicht-7 renderer ships before we get to Pflicht 6.
+
+### 2. three_js vs. flutter_scene — F-Droid-eligibility
+
+- **`three_js` is NOT F-Droid-eligible as published.** It
+  depends on `three_js_angle_renderer ^0.0.1` →
+  `flutter_angle ^0.4.0`, whose Android backend consists of
+  committed prebuilt blobs
+  (`libEGL_angle.so` ≈ 308 kB, `libGLESv2_angle.so` ≈ 6.1 MB
+  under `android/src/release/jniLibs/arm64-v8a/`). No
+  CMake/build.gradle hook rebuilds ANGLE from source during
+  `flutter build`; the thin JNI wrapper links against the
+  committed `.so`s. F-Droid's inclusion policy rejects
+  prebuilt native libraries, so `three_js` would need a
+  Handslice-specific `flutter_angle` fork that builds ANGLE
+  from source — a substantial side-project, not a one-day fix.
+- **`flutter_scene` is on Flutter-GPU, which our Flutter
+  3.47.8 does carry.** The package pins `flutter: ">=3.47.0"`
+  explicitly; our installed `3.47.8 stable` meets that. BUT
+  two caveats:
+  - `flutter_scene` is 0.24.3 (pre-1.0, documents that minor
+    releases may break APIs).
+  - `package:flutter_gpu` is a Flutter-SDK stub and is still
+    labelled "early preview, no API stability guarantee" in
+    the engine docs. Impeller must be on; it already is on
+    Android API ≥ 29 (our `minSdk` = 29).
+
+**Consequence.** `three_js` drops from the shortlist for
+Handslice. **New primary 3D path for Pflicht 7a is
+`flutter_scene`**, with a known reservation that we pin an
+exact minor version and read the changelog before each bump.
+Fallback stack: **DIY Dart `Canvas.drawVertices`** for the
+baseline/thumbnail preview path (also the rasterizer from
+Variant C above is reusable here as a server-side preview
+renderer for huge meshes).
+
+### 3. libslic3r already has Quadric Edge Collapse
+
+Fundstellen:
+
+- `engine/OrcaSlicer/src/libslic3r/QuadricEdgeCollapse.hpp`
+- `engine/OrcaSlicer/src/libslic3r/QuadricEdgeCollapse.cpp`,
+  public entry at line 160:
+  `void Slic3r::its_quadric_edge_collapse(
+      indexed_triangle_set &its,
+      uint32_t target_triangle_count,
+      float *max_error = nullptr,
+      ThrowOnCancel throw_on_cancel = nullptr,
+      StatusFn status_fn = nullptr);`
+
+Called by Orca's "Simplify model" GUI action. Operates in-place
+on an `indexed_triangle_set`.
+
+**Consequence for the plan.** Dart-side decimator is **dropped**.
+Add a CLI switch `--simplify <target_triangles>` (optionally
+`--simplify-max-error <float>`) to `handslice-cli`, which:
+
+1. Loads the STL/3MF as today.
+2. If `--simplify` present: runs
+   `its_quadric_edge_collapse(its, target, &max_err)` on each
+   object's mesh before `arrange_objects()`/slicing.
+3. (For Pflicht 7a) can also run **once** at a smaller target
+   (e.g. 50 000 triangles) and dump the decimated STL to a
+   side-car file for the plate-view renderer.
+
+Effort: **1–2 d** — flag parsing, mesh-iteration, output
+sidecar. The algorithm itself is already linked into our CLI
+through libslic3r.
+
+### Revised effort + risk summary
+
+| Teil | Vorher | **Jetzt** | Grund |
+|---|---|---|---|
+| Pflicht 6 Thumbnail | 2–3 d (B) | **4–6 d (C)** | eigenständig, testbar, F-Droid-neutral |
+| Pflicht 7a 3D-Plattenansicht | 5–8 d (`three_js`) | **6–10 d (`flutter_scene`)** | `three_js` fällt aus, `flutter_scene` ist weniger reif |
+| Pflicht 7b Schichtvorschau | 2 d (Dart v1) | 2 d — unverändert | |
+| Pflicht 7c Arrange + Gizmos | 3–4 d | 3–4 d — unverändert | |
+| **Decimation (Pre-Pflicht-7a)** | war Dart-Port 1–2 d | **CLI `--simplify` 1–2 d** | libslic3r hat QuadricEdgeCollapse schon |
+
+Net-net: Pflicht 6 wird robuster (keine Pflicht-7-Kopplung),
+Pflicht 7a wird vorsichtiger geplant (API-Instabilität von
+`flutter_scene`), Decimation ist jetzt billig gelöst.
