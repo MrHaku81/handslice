@@ -18,6 +18,68 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 22:10 UTC – Pflicht 7a: 3D view in the project tab
+
+Not yet device-tested — Klaus runs that pass.
+
+CLI changes (bumps the arm64 and x86 sidecars):
+
+- `--no-slice`: stop after step 6a (arrange + preview-mesh
+  export). `--output` is optional in this mode. Guards: at
+  least one of `--export-preview-mesh` or
+  `--export-thumbnail-raw` must be given.
+- `--export-thumbnail-raw <path>` + `--thumbnail-size WxH`:
+  render a standalone thumbnail with the Pflicht 6 software
+  rasterizer and dump it as raw-RGBA `HSPB` (magic + u32
+  version + u32 w + u32 h + rgba bytes). Only valid with
+  `--no-slice`. Used by the project 3D view as the fallback
+  image when Flutter GPU does not initialise on a device.
+
+App:
+
+- `SlicerService.exportPreviewMesh` wraps the CLI's `--no-slice`
+  path (optionally also writing the HSPB thumbnail).
+  `SlicerService.totalMemoryBytes` reads
+  `ActivityManager.MemoryInfo.totalMem` through the engine
+  method channel.
+- `ProjectState` gained `ensurePreviewMesh(slicer)` + fields
+  `previewMeshPath` / `previewThumbnailPath` / `previewMeshError`
+  / `previewMeshBuilding`. Fire-and-forget from the project
+  screen right after a model is picked. Cache keyed on
+  `sha256(abs path | mtime | simplifyTarget)` in
+  `applicationCacheDirectory/preview-meshes/`.
+- `app/lib/widgets/plate_view.dart` is the shared plate-view
+  renderer: orbit + pan + pinch like the benchmark, four
+  focus-navigable buttons (Reset / Top / Front / Oblique
+  wrapped in an `OrderedTraversalPolicy`), bed quad baked in.
+  On flutter_scene failure it falls back to the HSPB
+  thumbnail via `ui.decodeImageFromPixels`.
+- Project tab shows a new `_PlateViewCard` under the model-
+  info card. Filament colour comes from the slot assigned to
+  tool 0; the heading row carries the "preview ≤ N triangles ·
+  display only · slicing uses the full mesh" subtitle.
+- `src/main/AndroidManifest.xml` opts in to Flutter GPU for
+  release builds. Debug and profile overlays unchanged.
+- ARB: 7 new keys for the plate-view UI, English source +
+  German translation.
+- Tests: `preview_mesh_test.dart` (HSPM parser roundtrip +
+  rejection, `previewTargetForTotalRam` thresholds) and a new
+  `android_manifest_test.dart` case for the GPU opt-in.
+
+Benchmark screen stays `kDebugMode || kProfileMode` only — not
+touched in this pass.
+
+## 2026-10-31 21:20 UTC – Pflicht 7 device test passed, pushed
+
+Klaus verified on the Poco:
+
+- First model after launch: 101 fps (vs. 46 before the warm-up
+  fix). No perceptible stutter on the first draw.
+- All movement axes correct: single-finger rotate L/R and U/D,
+  two-finger pan L/R and U/D, pinch zoom.
+
+Pflicht 7 closed on the device. Pushed by Klaus.
+
 ## 2026-10-31 21:00 UTC – Pflicht 7: shader warm-up, vertical gesture fix, LOD/system-req updates
 
 Pass-2 numbers on the Poco (profile):

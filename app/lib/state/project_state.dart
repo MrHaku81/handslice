@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../engine/bounds_check.dart';
@@ -24,6 +27,31 @@ class ProjectState extends ChangeNotifier {
   Process? _activeProc;
   DateTime? _sliceStartedAt;
   List<BoundsViolation> _boundsViolations = const [];
+
+  // Pflicht 7a — plate-view preview mesh (.hspm). Built in the
+  // background by the arm64 CLI (--no-slice + --export-preview-mesh)
+  // after a model is picked, cached per (modelPath, mtime, target)
+  // so re-opening the same file is instant.
+  String? _previewMeshPath;
+  // Raw-RGBA 'HSPB' thumbnail built next to the HSPM, used by the
+  // 3D view's fallback image when flutter_scene cannot start.
+  String? _previewThumbnailPath;
+  bool _previewMeshBuilding = false;
+  String? _previewMeshError;
+  int _previewSimplifyTarget = 300000;   // overridden by device RAM at init
+  Process? _previewProc;
+
+  String? get previewMeshPath => _previewMeshPath;
+  String? get previewThumbnailPath => _previewThumbnailPath;
+  bool get previewMeshBuilding => _previewMeshBuilding;
+  String? get previewMeshError => _previewMeshError;
+  int get previewSimplifyTarget => _previewSimplifyTarget;
+
+  void setPreviewSimplifyTarget(int target) {
+    if (target == _previewSimplifyTarget) return;
+    _previewSimplifyTarget = target;
+    notifyListeners();
+  }
 
   // Keys fuer die z-offset-Persistenz
   static const _kZOffsetA = 'project.z_offset.A_mm';
@@ -107,7 +135,87 @@ class ProjectState extends ChangeNotifier {
     _modelPath = path;
     _lastSlice = null;
     _lastError = null;
+    _previewMeshPath = null;
+    _previewThumbnailPath = null;
+    _previewMeshError = null;
     notifyListeners();
+  }
+
+  // Pflicht 7a — fire-and-forget preview-mesh build. Caller is the
+  // project screen right after setModel(). If a cached HSPM for
+  // (path, mtime, simplifyTarget) is already on disk, we attach it
+  // and return without touching the CLI. The returned future
+  // resolves when the build has either succeeded, failed, or hit
+  // the cache.
+  Future<void> ensurePreviewMesh(SlicerService slicer) async {
+    final path = _modelPath;
+    if (path == null) return;
+    if (_previewMeshBuilding) return;
+    final file = File(path);
+    if (!await file.exists()) return;
+    final stat = await file.stat();
+    final key = sha256
+        .convert(utf8.encode(
+            '$path|${stat.modified.microsecondsSinceEpoch}|$_previewSimplifyTarget'))
+        .toString()
+        .substring(0, 16);
+    final cacheDir = Directory(
+        '${(await getApplicationCacheDirectory()).path}/preview-meshes');
+    await cacheDir.create(recursive: true);
+    final cachePath = '${cacheDir.path}/$key.hspm';
+    final thumbCachePath = '${cacheDir.path}/$key.hspb';
+    if (await File(cachePath).exists()) {
+      _previewMeshPath = cachePath;
+      _previewThumbnailPath =
+          await File(thumbCachePath).exists() ? thumbCachePath : null;
+      _previewMeshError = null;
+      notifyListeners();
+      return;
+    }
+    _previewMeshBuilding = true;
+    _previewMeshError = null;
+    _previewMeshPath = null;
+    _previewThumbnailPath = null;
+    notifyListeners();
+    try {
+      await slicer.exportPreviewMesh(
+        modelPath: path,
+        bedType: _bedType,
+        outputHspmPath: cachePath,
+        simplifyTarget: _previewSimplifyTarget,
+        outputThumbnailPath: thumbCachePath,
+        onProcessStarted: (p) { _previewProc = p; },
+      );
+      // Confirm the model/bed/target has not changed under us
+      // while the CLI ran. If the user picked a different model
+      // mid-build the result is for the old one; drop it.
+      if (_modelPath == path) {
+        _previewMeshPath = cachePath;
+        if (await File(thumbCachePath).exists()) {
+          _previewThumbnailPath = thumbCachePath;
+        }
+      } else {
+        try { await File(cachePath).delete(); } catch (_) {}
+        try { await File(thumbCachePath).delete(); } catch (_) {}
+      }
+    } on SliceProcessException catch (e) {
+      _previewMeshPath = null;
+      _previewMeshError = e.killedBySignal
+          ? 'preview.oom'
+          : 'preview.error:${e.exitCode}:${e.stderr.trim()}';
+    } catch (e) {
+      _previewMeshPath = null;
+      _previewMeshError = e.toString();
+    } finally {
+      _previewMeshBuilding = false;
+      _previewProc = null;
+      notifyListeners();
+    }
+  }
+
+  Future<void> cancelPreviewMesh() async {
+    final p = _previewProc;
+    if (p != null) p.kill();
   }
 
   void setBedType(BedType b) {

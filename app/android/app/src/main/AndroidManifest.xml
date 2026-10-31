@@ -40,6 +40,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Pflicht 7a: Flutter GPU opt-in for the project-tab 3D view
+             (flutter_scene). Debug and profile already enabled this via
+             their overlays; release now follows after the Pflicht 7
+             benchmark result cleared it on an Adreno-640 Vulkan-
+             denylisted baseline device (108 fps @ 500 k tris, see
+             docs/plate-view-benchmark.md). The widget guards itself and
+             falls back to an HSPB thumbnail if a given device still
+             refuses to initialise Flutter GPU. -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableFlutterGPU"
+            android:value="true" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

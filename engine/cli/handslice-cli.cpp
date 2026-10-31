@@ -109,6 +109,19 @@ struct Args {
     // AFTER centring / drop-to-bed so the mesh is in the same
     // world frame the slicer sees. Slicing is unaffected.
     std::string preview_mesh_path;
+    // --no-slice: run only up to step 6a (arrange + preview-mesh
+    // export) and exit 0. Used by the app's "open model" path
+    // (Pflicht 7a) to produce a plate-view HSPM without paying
+    // the full slice. --output is not required with --no-slice.
+    bool no_slice = false;
+    // --export-thumbnail-raw <path>: render a standalone thumbnail
+    // via the Pflicht 6 software rasterizer and write it as
+    // 'HSPB' + u32 version=1 + u32 w + u32 h + RGBA bytes. Used
+    // by the project 3D view as a fallback when flutter_scene
+    // cannot start on a device. Only valid with --no-slice.
+    std::string thumbnail_raw_path;
+    uint32_t thumbnail_w = 512;
+    uint32_t thumbnail_h = 512;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -160,7 +173,21 @@ void usage(std::ostream& os) {
         "             debug screen (Pflicht 7). Honours --simplify. Does\n"
         "             NOT change the slicing path. Format: 'HSPM' + u32\n"
         "             version=1 + per-object/per-volume flat vertex streams\n"
-        "             (position + normal, 24 bytes each, three per triangle).\n";
+        "             (position + normal, 24 bytes each, three per triangle).\n"
+        "\n"
+        "--no-slice   Stop after the preview-mesh export (step 6a) and\n"
+        "             exit 0. --output is not required in this mode.\n"
+        "             Used by the app's 'open model' flow (Pflicht 7a) to\n"
+        "             produce a plate-view HSPM in the background without\n"
+        "             paying the full slice.\n"
+        "\n"
+        "--export-thumbnail-raw <path>  (requires --no-slice)\n"
+        "             Render a standalone thumbnail with the Pflicht 6\n"
+        "             software rasterizer and write it as 'HSPB' + u32\n"
+        "             version=1 + u32 w + u32 h + RGBA bytes. Used by the\n"
+        "             project-tab 3D view as a fallback when flutter_scene\n"
+        "             cannot start on a device.\n"
+        "--thumbnail-size WxH    Thumbnail resolution; defaults to 512x512.\n";
 }
 
 Args parse_args(int argc, char** argv) {
@@ -192,6 +219,26 @@ Args parse_args(int argc, char** argv) {
         else if (arg == "--overrides") a.overrides_json = need_val("--overrides");
         else if (arg == "--export-preview-mesh") {
             a.preview_mesh_path = need_val("--export-preview-mesh");
+        }
+        else if (arg == "--no-slice") a.no_slice = true;
+        else if (arg == "--export-thumbnail-raw") {
+            a.thumbnail_raw_path = need_val("--export-thumbnail-raw");
+        }
+        else if (arg == "--thumbnail-size") {
+            const std::string v = need_val("--thumbnail-size");
+            const auto xpos = v.find('x');
+            if (xpos == std::string::npos)
+                die("--thumbnail-size expects WxH, got: " + v);
+            try {
+                const long long w = std::stoll(v.substr(0, xpos));
+                const long long h = std::stoll(v.substr(xpos + 1));
+                if (w <= 0 || h <= 0 || w > 4096 || h > 4096)
+                    die("--thumbnail-size out of range: " + v);
+                a.thumbnail_w = uint32_t(w);
+                a.thumbnail_h = uint32_t(h);
+            } catch (const std::exception&) {
+                die("--thumbnail-size needs integers, got: " + v);
+            }
         }
         else if (arg == "--simplify") {
             const std::string v = need_val("--simplify");
@@ -250,10 +297,19 @@ Args parse_args(int argc, char** argv) {
     // libslic3r-Options-Definitionen. Alle anderen Argumente werden
     // ignoriert.
     if (a.dump_schema) return a;
+    const bool output_optional = a.no_slice;
     if (a.machine.empty() || a.process.empty() || a.filaments.empty()
-        || a.resources_dir.empty() || a.output_path.empty() || a.input_path.empty()) {
+        || a.resources_dir.empty() || a.input_path.empty()
+        || (!output_optional && a.output_path.empty())) {
         usage(std::cerr);
         die("missing required argument");
+    }
+    if (a.no_slice && a.preview_mesh_path.empty() && a.thumbnail_raw_path.empty()) {
+        die("--no-slice requires --export-preview-mesh and/or "
+            "--export-thumbnail-raw (nothing to produce)");
+    }
+    if (!a.thumbnail_raw_path.empty() && !a.no_slice) {
+        die("--export-thumbnail-raw requires --no-slice");
     }
     return a;
 }
@@ -901,6 +957,49 @@ static int run(int argc, char** argv) {
             std::cerr << "handslice-cli: wrote preview mesh ("
                       << total_tris << " triangles) to "
                       << args.preview_mesh_path << "\n";
+    }
+
+    // --no-slice short-circuit (Pflicht 7a): the preview-mesh
+    // export is the entire goal of this invocation, so we skip
+    // step 6b (thumbnail prep) and step 7 (slice + G-code
+    // emission). An optional standalone thumbnail (--export-
+    // thumbnail-raw) is rendered here with the same preview
+    // meshes we built in step 6a, written as raw-RGBA 'HSPB'.
+    if (args.no_slice) {
+        if (!args.thumbnail_raw_path.empty()) {
+            Slic3r::ThumbnailsParams tp{
+                .sizes = { Slic3r::Vec2d(double(args.thumbnail_w),
+                                         double(args.thumbnail_h)) },
+                .printable_only = true,
+                .parts_only = false,
+                .show_bed = true,
+                .transparent_background = false,
+                .plate_id = 0,
+                .use_plate_box = true,
+            };
+            auto thumbs = handslice::render_handslice_thumbnails(
+                model, cfg, tp, preview_meshes);
+            if (thumbs.empty() || !thumbs.front().is_valid())
+                die("thumbnail render returned no data");
+            const auto& th = thumbs.front();
+            std::ofstream f(args.thumbnail_raw_path, std::ios::binary);
+            if (!f) die("cannot open thumbnail output: " + args.thumbnail_raw_path);
+            auto w32 = [&](uint32_t v) {
+                f.write(reinterpret_cast<const char*>(&v), 4);
+            };
+            f.write("HSPB", 4);
+            w32(1u);
+            w32(uint32_t(th.width));
+            w32(uint32_t(th.height));
+            f.write(reinterpret_cast<const char*>(th.pixels.data()),
+                    std::streamsize(th.pixels.size()));
+            if (!args.quiet)
+                std::cerr << "handslice-cli: wrote thumbnail "
+                          << th.width << "x" << th.height
+                          << " to " << args.thumbnail_raw_path << "\n";
+        }
+        std::cout << "{\"preview_only\":true}\n" << std::flush;
+        return 0;
     }
 
     // 6b. Thumbnail-Vorbereitung.

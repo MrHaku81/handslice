@@ -15,6 +15,7 @@ import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
 import '../widgets/build_info_badge.dart';
+import '../widgets/plate_view.dart';
 import '../widgets/printer_panel.dart';
 import '../widgets/workshop_card.dart';
 import '../widgets/workshop_row.dart';
@@ -47,6 +48,18 @@ class _ProjectScreenState extends State<ProjectScreen> {
     super.initState();
     widget.projectState.addListener(_onStateChanged);
     _reloadProfiles();
+    _initPreviewTarget();
+  }
+
+  // Pflicht 7a — set the preview triangle budget from the device's
+  // total RAM. Falls back to 300 k on hosts without the channel
+  // (desktop tests, flutter_test).
+  Future<void> _initPreviewTarget() async {
+    final total = await widget.slicer.totalMemoryBytes();
+    if (total != null) {
+      widget.projectState.setPreviewSimplifyTarget(
+          previewTargetForTotalRam(total));
+    }
   }
 
   @override
@@ -175,6 +188,10 @@ class _ProjectScreenState extends State<ProjectScreen> {
     );
     if (!mounted || f == null || f.path == null) return;
     widget.projectState.setModel(f.path!);
+    // Fire-and-forget preview-mesh build. The 3D-view panel below
+    // listens to projectState and shows a progress spinner until
+    // the .hspm is on disk.
+    unawaited(widget.projectState.ensurePreviewMesh(widget.slicer));
   }
 
   Future<void> _slice() async {
@@ -309,6 +326,12 @@ class _ProjectScreenState extends State<ProjectScreen> {
           ),
 
           const SizedBox(height: 12),
+          _PlateViewCard(
+            projectState: state,
+            printerState: widget.printerState,
+          ),
+
+          const SizedBox(height: 12),
           PrinterPanel(printer: widget.printerState),
 
           if (state.isSlicing) ...[
@@ -353,6 +376,108 @@ class _ProjectScreenState extends State<ProjectScreen> {
         ],
       ),
     );
+  }
+}
+
+// Pflicht 7a — 3D plate view card for the project tab. Reflects
+// `ProjectState.previewMeshPath` and the active tray's filament
+// colour. Shows a progress indicator while the CLI is building
+// the preview mesh; shows an error row (with retry) when the
+// build failed. The CC2 bed is drawn by the renderer itself.
+class _PlateViewCard extends StatelessWidget {
+  const _PlateViewCard({
+    required this.projectState,
+    required this.printerState,
+  });
+  final ProjectState projectState;
+  final PrinterState printerState;
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final tray = printerState.trayAssignmentForTool0;
+    final slot = printerState.slots
+        .where((s) => s.trayId == tray)
+        .toList();
+    final color = slot.isNotEmpty
+        ? _parseHex(slot.first.filamentColor) ?? const Color(0xFFB03A2E)
+        : const Color(0xFFB03A2E);
+    final building = projectState.previewMeshBuilding;
+    final err = projectState.previewMeshError;
+    final hspm = projectState.previewMeshPath;
+
+    return WorkshopCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 4, bottom: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(l.projectPlateViewHeading,
+                      style: theme.textTheme.bodySmall),
+                ),
+                Text(
+                  l.projectPlateViewSimplifyNote(
+                      projectState.previewSimplifyTarget),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: WorkshopTokens.textMuted),
+                ),
+              ],
+            ),
+          ),
+          if (building)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  SizedBox(width: 20, height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 12),
+                  Text('Building preview mesh…'),
+                ],
+              ),
+            )
+          else if (err != null)
+            Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.redAccent, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text(err,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                        color: Colors.redAccent))),
+              ],
+            )
+          else
+            PlateView(
+              hspmPath: hspm,
+              fallbackImagePath:
+                  projectState.previewThumbnailPath,
+              filamentColor: color,
+              labelResetView: l.plateViewReset,
+              labelTop: l.plateViewTop,
+              labelFront: l.plateViewFront,
+              labelOblique: l.plateViewOblique,
+              labelEmpty: l.projectPlateViewEmpty,
+              labelBuilding: 'Building preview mesh…',
+            ),
+        ],
+      ),
+    );
+  }
+
+  Color? _parseHex(String? s) {
+    if (s == null || s.isEmpty) return null;
+    var h = s.startsWith('#') ? s.substring(1) : s;
+    if (h.length == 6) h = 'FF$h';
+    if (h.length != 8) return null;
+    try {
+      return Color(int.parse(h, radix: 16));
+    } catch (_) {
+      return null;
+    }
   }
 }
 

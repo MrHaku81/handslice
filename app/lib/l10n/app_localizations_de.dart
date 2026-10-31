@@ -104,6 +104,33 @@ class AppLocalizationsDe extends AppLocalizations {
   String get projectFilaments => 'Filamente / Slot-Zuordnung';
 
   @override
+  String get projectPlateViewHeading => 'Druckplatten-Ansicht';
+
+  @override
+  String get projectPlateViewEmpty =>
+      'Modell öffnen, um die Druckplatten-Ansicht zu sehen.';
+
+  @override
+  String projectPlateViewSimplifyNote(int target) {
+    return 'Vorschau ≤ $target Dreiecke · nur Anzeige · gesliced wird das volle Modell';
+  }
+
+  @override
+  String get projectPlateViewBuilding => 'Vorschau-Netz wird erzeugt…';
+
+  @override
+  String get plateViewReset => 'Zurücksetzen';
+
+  @override
+  String get plateViewTop => 'Oben';
+
+  @override
+  String get plateViewFront => 'Vorne';
+
+  @override
+  String get plateViewOblique => 'Schräg';
+
+  @override
   String get projectZOffset =>
       'Z-Offset pro Seite (wird beim Slicen angewendet)';
 

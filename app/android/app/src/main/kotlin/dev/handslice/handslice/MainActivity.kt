@@ -1,7 +1,9 @@
 package dev.handslice.handslice
 
+import android.app.ActivityManager
 import android.content.ActivityNotFoundException
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -31,6 +33,7 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channel).setMethodCallHandler { call, result ->
             when (call.method) {
                 "nativeLibraryDir" -> result.success(applicationInfo.nativeLibraryDir)
+                "totalMemoryBytes" -> result.success(totalMemoryBytes())
                 "saveVideoToGallery" -> saveVideoToGallery(call, result)
                 "saveGcodeToDownloads" -> saveGcodeToDownloads(call, result)
                 "openUri" -> openUri(call, result)
@@ -57,6 +60,16 @@ class MainActivity : FlutterActivity() {
     //
     // Aufruf: args = { "uri": String, "mime": String? }
     // Rueckgabe: true = Intent gestartet, false = kein Handler gefunden.
+    // One-shot query of the device's total physical memory, used to
+    // pick the preview-mesh simplify target for the project 3D view
+    // (Pflicht 7a). ActivityManager.MemoryInfo.totalMem is bytes.
+    private fun totalMemoryBytes(): Long {
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val mi = ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        return mi.totalMem
+    }
+
     private fun openUri(call: io.flutter.plugin.common.MethodCall,
                         result: MethodChannel.Result) {
         val uriStr = call.argument<String>("uri")

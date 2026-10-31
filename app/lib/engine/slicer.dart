@@ -6,6 +6,20 @@ import 'package:path_provider/path_provider.dart';
 
 import 'bounds_check.dart';
 
+// Preview-triangle budget derived from the device's total RAM. Used
+// by the project-tab 3D view (Pflicht 7a) so a 4 GB phone does not
+// try to render a 500 k-triangle plate view. Thresholds grounded in
+// the Pass-2 benchmark (see docs/plate-view-benchmark.md): ~0.28 KB
+// per preview triangle on the Dart heap during load, ~90 B on the
+// GPU. The budget is bounded by slicing head-room, not by renderer
+// saturation.
+int previewTargetForTotalRam(int totalBytes) {
+  const gb = 1024 * 1024 * 1024;
+  if (totalBytes >= 8 * gb) return 500000;
+  if (totalBytes >= 4 * gb) return 300000;
+  return 100000;
+}
+
 // Fehler aus der handslice-cli. `killedBySignal=true` bedeutet,
 // dass der Prozess per Signal beendet wurde – auf Android der
 // LMK/OOM-Killer bei zu wenig Speicher (siehe docs/blockers.md).
@@ -246,5 +260,80 @@ class SlicerService {
     // UI genuegt der Zeitwert. Fuer M2 geben wir 0 zurueck und ziehen
     // die Layer-Zahl nach, wenn der CLI das Feld expandiert.
     return 0;
+  }
+
+  // Pflicht 7a — fast preview-mesh path. Invokes the CLI with
+  // --no-slice + --export-preview-mesh + --simplify, which stops
+  // after the arranged-model export (step 6a) and skips the full
+  // slice. The resulting .hspm is what the project-tab 3D view
+  // loads. Returns the number of triangles the CLI reported it
+  // wrote.
+  Future<void> exportPreviewMesh({
+    required String modelPath,
+    required BedType bedType,
+    required String outputHspmPath,
+    required int simplifyTarget,
+    // Optional: also render a 2D fallback thumbnail (raw-RGBA
+    // 'HSPB' format) at outputThumbnailPath. The project 3D view
+    // uses it when flutter_scene cannot start on a device.
+    String? outputThumbnailPath,
+    int thumbnailSize = 512,
+    String? filamentProfileRelative,
+    void Function(Process proc)? onProcessStarted,
+  }) async {
+    if (!isReady) {
+      throw StateError('SlicerService.init() wurde nicht aufgerufen');
+    }
+    final resources = _resourcesDir!;
+    final profiles = '$resources/profiles/Elegoo';
+    final filamentPath = (filamentProfileRelative == null ||
+            filamentProfileRelative.isEmpty)
+        ? '$profiles/filament/ECC2/Elegoo PLA @ECC2.json'
+        : '$resources/$filamentProfileRelative';
+    final args = <String>[
+      '--machine', '$profiles/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json',
+      '--process', '$profiles/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json',
+      '--filament', filamentPath,
+      '--resources', resources,
+      '--bed-type', bedType.cliArg,
+      '--simplify', simplifyTarget.toString(),
+      '--export-preview-mesh', outputHspmPath,
+      if (outputThumbnailPath != null) ...[
+        '--export-thumbnail-raw', outputThumbnailPath,
+        '--thumbnail-size', '${thumbnailSize}x$thumbnailSize',
+      ],
+      '--no-slice',
+      '--quiet',
+      modelPath,
+    ];
+    final proc = await Process.start(_binaryPath!, args);
+    if (onProcessStarted != null) onProcessStarted(proc);
+    final stdoutFut = proc.stdout.transform(utf8.decoder).join();
+    final stderrFut = proc.stderr.transform(utf8.decoder).join();
+    final exitCode  = await proc.exitCode;
+    final stderrStr = await stderrFut;
+    await stdoutFut;  // drain
+    if (exitCode != 0) {
+      final killed = exitCode < 0 || exitCode == 137 || exitCode == 143;
+      throw SliceProcessException(
+        exitCode: exitCode,
+        killedBySignal: killed,
+        stderr: stderrStr,
+        args: args,
+        binary: _binaryPath!,
+      );
+    }
+  }
+
+  // Platform-channel one-shot: Android ActivityManager.MemoryInfo
+  // .totalMem. Returns null on hosts without the channel (desktop
+  // tests, flutter_test).
+  Future<int?> totalMemoryBytes() async {
+    try {
+      final v = await _channel.invokeMethod<int>('totalMemoryBytes');
+      return v;
+    } catch (_) {
+      return null;
+    }
   }
 }

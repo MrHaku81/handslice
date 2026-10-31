@@ -103,6 +103,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectFilaments => 'Filaments / Slot assignment';
 
   @override
+  String get projectPlateViewHeading => 'Plate view';
+
+  @override
+  String get projectPlateViewEmpty => 'Open a model to see the plate view.';
+
+  @override
+  String projectPlateViewSimplifyNote(int target) {
+    return 'Preview ≤ $target triangles · display only · slicing uses the full mesh';
+  }
+
+  @override
+  String get projectPlateViewBuilding => 'Building preview mesh…';
+
+  @override
+  String get plateViewReset => 'Reset';
+
+  @override
+  String get plateViewTop => 'Top';
+
+  @override
+  String get plateViewFront => 'Front';
+
+  @override
+  String get plateViewOblique => 'Oblique';
+
+  @override
   String get projectZOffset => 'Z-offset per plate (applied at slice time)';
 
   @override

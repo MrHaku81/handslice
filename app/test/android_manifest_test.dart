@@ -24,4 +24,24 @@ void main() {
             'erben die Debug-Overlay-Permission NICHT; die App scheitert '
             'am Geraet mit "Failed to create datagram socket".');
   });
+
+  test('main AndroidManifest.xml enthaelt EnableFlutterGPU=true (Pflicht 7a)',
+      () {
+    final f = File('android/app/src/main/AndroidManifest.xml');
+    final xml = f.readAsStringSync();
+    expect(
+      xml.contains('io.flutter.embedding.android.EnableFlutterGPU'),
+      isTrue,
+      reason:
+          'Flutter-GPU opt-in fehlt im main-Manifest. Ohne diese Zeile '
+          'startet flutter_scene auf Release-Builds nicht und die '
+          'Projekt-3D-Ansicht faellt auf den HSPB-Thumbnail zurueck. '
+          'Entscheidung dokumentiert in docs/plate-view-benchmark.md.',
+    );
+    final idx = xml.indexOf('EnableFlutterGPU');
+    expect(idx, greaterThan(0));
+    final window = xml.substring(idx, (idx + 160).clamp(0, xml.length));
+    expect(window.contains('android:value="true"'), isTrue,
+        reason: 'EnableFlutterGPU meta-data value muss true sein');
+  });
 }

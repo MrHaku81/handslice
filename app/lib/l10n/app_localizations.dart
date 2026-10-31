@@ -272,6 +272,54 @@ abstract class AppLocalizations {
   /// **'Filaments / Slot assignment'**
   String get projectFilaments;
 
+  /// No description provided for @projectPlateViewHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Plate view'**
+  String get projectPlateViewHeading;
+
+  /// No description provided for @projectPlateViewEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Open a model to see the plate view.'**
+  String get projectPlateViewEmpty;
+
+  /// No description provided for @projectPlateViewSimplifyNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview ≤ {target} triangles · display only · slicing uses the full mesh'**
+  String projectPlateViewSimplifyNote(int target);
+
+  /// No description provided for @projectPlateViewBuilding.
+  ///
+  /// In en, this message translates to:
+  /// **'Building preview mesh…'**
+  String get projectPlateViewBuilding;
+
+  /// No description provided for @plateViewReset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get plateViewReset;
+
+  /// No description provided for @plateViewTop.
+  ///
+  /// In en, this message translates to:
+  /// **'Top'**
+  String get plateViewTop;
+
+  /// No description provided for @plateViewFront.
+  ///
+  /// In en, this message translates to:
+  /// **'Front'**
+  String get plateViewFront;
+
+  /// No description provided for @plateViewOblique.
+  ///
+  /// In en, this message translates to:
+  /// **'Oblique'**
+  String get plateViewOblique;
+
   /// No description provided for @projectZOffset.
   ///
   /// In en, this message translates to:

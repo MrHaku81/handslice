@@ -211,7 +211,33 @@ Consequences for the rest of the app:
   device's triangle budget. The next section proposes a draft
   for picking that budget automatically.
 
-## Draft — automatic LOD by device RAM
+## Pflicht 7a — status
+
+The decision above was implemented as the project-tab 3D view
+(see `app/lib/widgets/plate_view.dart` and `_PlateViewCard` in
+`app/lib/screens/project_screen.dart`):
+
+- `handslice-cli` gained `--no-slice` (stop after step 6a) and
+  `--export-thumbnail-raw` + `--thumbnail-size`. The app runs the
+  arm64 CLI with those three flags right after a model is picked
+  and caches both artefacts under `applicationCacheDirectory/
+  preview-meshes/<key>.(hspm|hspb)`. Cache key =
+  sha256(absPath|mtime|simplifyTarget)[:16]; re-opening the same
+  model is instant.
+- `MainActivity.kt` exposes `totalMemoryBytes` via the engine
+  method channel, consumed by `SlicerService.totalMemoryBytes()`
+  and mapped through `previewTargetForTotalRam` (the thresholds
+  below).
+- Flutter-GPU opt-in now lives in `src/main/AndroidManifest.xml`
+  so release builds get it too. If a device still refuses to
+  initialise Flutter GPU, `PlateView` catches the exception and
+  shows the HSPB thumbnail (CLI software rasterizer, 512 × 512)
+  — no empty area, no crash.
+- `OrderedTraversalPolicy` wraps the four view-direction buttons
+  (Reset / Top / Front / Oblique) so they walk cleanly with
+  D-pad / Tab, per the project's focus-navigation rule.
+
+## Automatic LOD by device RAM
 
 Baseline cost on the Poco X3 Pro (Pass 2 numbers):
 
@@ -226,9 +252,11 @@ With the auto-LOD table below the plate view's working-set is
 bounded at 500 k × 0.37 KB ≈ 180 MB extra on top of the baseline,
 which leaves slicing enough room on a 4 GB device.
 
-- At app start, read `MemoryInfo.totalMem` via a `PlatformChannel`
-  one-shot (one `ActivityManager.MemoryInfo` call), cache it.
-- Pick a default preview triangle budget `preview_simplify_target`:
+- `MainActivity.kt` method channel method `totalMemoryBytes`
+  wraps `ActivityManager.getMemoryInfo().totalMem`. Called
+  once per screen when `_ProjectScreenState.initState` runs.
+- `previewTargetForTotalRam()` in `app/lib/engine/slicer.dart`
+  maps it to a triangle budget:
 
   | Device totalMem | Budget   | Rationale                                                 |
   |-----------------|----------|-----------------------------------------------------------|
@@ -236,10 +264,14 @@ which leaves slicing enough room on a 4 GB device.
   | 4 – 8 GB        | 300 000  | Keeps peak plate-view RSS under 150 MB; slicing has room  |
   | < 4 GB          | 100 000  | Keeps peak plate-view RSS under 50 MB; still 60+ fps      |
 
-  The Poco X3 Pro reports 6 GB, so it would land on 300 k. It
-  cleared 108 fps at 500 k, which is why the ≥ 8 GB band keeps
-  the upper limit — the budget is set by *slicing head-room*,
-  not by renderer saturation.
+  The Poco X3 Pro reports 6 GB and lands on 300 k. It cleared
+  108 fps at 500 k, which is why the ≥ 8 GB band keeps the
+  upper limit — the budget is set by *slicing head-room*, not
+  by renderer saturation.
+
+  Expert override: not shipped yet; the preview-mesh cache
+  key includes the simplify target, so a future setting can
+  bump the number without invalidating the slicing path.
 - Expose an override under **Settings → Expert**:
   `preview_simplify_target` as an integer, with the auto-value
   shown as default and a `Reset to auto` button. Default is
