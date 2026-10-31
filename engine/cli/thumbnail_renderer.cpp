@@ -267,9 +267,14 @@ std::vector<std::vector<PreviewMesh>> build_preview_meshes(
                 // original already has <= target.
                 if (target_triangles > 0 &&
                     its.indices.size() > target_triangles) {
-                    float max_err = 0.0f;
+                    // its_quadric_edge_collapse reads *max_error as
+                    // the error budget and returns early if <= 0 –
+                    // so passing nullptr (= float::max) is what we
+                    // want here. The earlier `float max_err = 0.0f`
+                    // silently no-op'd simplification for every
+                    // caller that supplied an in/out slot.
                     Slic3r::its_quadric_edge_collapse(
-                        its, target_triangles, &max_err, nullptr, nullptr);
+                        its, target_triangles, nullptr, nullptr, nullptr);
                 }
                 // Bake transform.
                 for (auto& v : its.vertices) {
