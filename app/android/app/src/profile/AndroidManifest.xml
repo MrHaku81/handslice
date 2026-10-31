@@ -4,4 +4,17 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Profile-only opt-in for Flutter GPU (used by flutter_scene). Needed
+         so the hidden plate-view benchmark can run on profile builds, where
+         we actually get representative numbers (debug AOT-less builds are
+         ~24 fps on an empty scene). Kept out of the release manifest for
+         now — whether to flip the switch for release is a decision we
+         make after the benchmark results come in. See
+         docs/plate-view-benchmark.md. -->
+    <application>
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableFlutterGPU"
+            android:value="true" />
+    </application>
 </manifest>

@@ -15,8 +15,9 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 MODE=debug
 case "${1:-}" in
     ""|--debug) MODE=debug ;;
+    --profile)  MODE=profile ;;
     --release)  MODE=release ;;
-    *) echo "Nutzung: $0 [--debug|--release]" >&2; exit 2 ;;
+    *) echo "Nutzung: $0 [--debug|--profile|--release]" >&2; exit 2 ;;
 esac
 
 export PATH="$HOME/flutter/bin:$HOME/android-sdk/cmdline-tools/latest/bin:$HOME/android-sdk/platform-tools:$PATH"
@@ -106,10 +107,13 @@ APK_SIZE=$(stat --printf='%s' "$APK")
 # `unzip -p … | grep -q` scheitert unter `set -euo pipefail`, weil
 # `grep -q` nach erstem Treffer schliesst → `unzip` bekommt SIGPIPE
 # → Pipe-Exit nicht-0. Deshalb vorher nach tmp extrahieren.
-if [[ "$MODE" == "release" ]]; then
-    DART_ENTRY="lib/arm64-v8a/libapp.so"
-else
+# Debug baut JIT (kernel_blob.bin), Profile und Release bauen AOT
+# (libapp.so). Beide AOT-Varianten muessen den Hash als ASCII-
+# Bytes im Dart-Blob haben.
+if [[ "$MODE" == "debug" ]]; then
     DART_ENTRY="assets/flutter_assets/kernel_blob.bin"
+else
+    DART_ENTRY="lib/arm64-v8a/libapp.so"
 fi
 tmp_blob=$(mktemp)
 trap 'rm -f "$tmp_blob"' EXIT

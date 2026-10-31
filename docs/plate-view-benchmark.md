@@ -84,13 +84,45 @@ collected.
 ### Backend detection
 
 Flutter GPU does not expose the backend name as a public API in
-Flutter 3.35. We instead read `gpuContext.doesSupportFramebufferRenderMipmap`:
-`true` on Vulkan/Metal, `false` on OpenGL ES (noted in the Flutter
-GPU source comment). Impeller on Android picks Vulkan on API ≥ 29
-and falls back to GLES on older devices or when Vulkan is force-
-disabled. The guess is reported alongside the raw flags; the raw
+Flutter 3.47. We instead read
+`gpuContext.doesSupportFramebufferRenderMipmap`: `true` on
+Vulkan/Metal, `false` on OpenGL ES (noted in the Flutter GPU source
+comment). The guess is reported alongside the raw flags; the raw
 flags are what we actually want in the report in case the heuristic
 is wrong on a given device.
+
+### Why the Poco X3 Pro (Adreno 640) reports GLES, not Vulkan
+
+Confirmed from Flutter 3.47.8 engine source
+(`engine/src/flutter/impeller/renderer/backend/vulkan/driver_info_vk.cc`,
+`DriverInfoVK::IsKnownBadDriver()`):
+
+```cpp
+// Fall back to OpenGL ES on older Adreno devices that require
+// additional workarounds in the Impeller Vulkan back end such as
+// disabling framebuffer fetch.
+//
+// See the following issues:
+// https://github.com/flutter/flutter/issues/178285
+// https://github.com/flutter/flutter/issues/178498
+if (adreno_gpu_ && *adreno_gpu_ <= AdrenoGPU::kAdreno650) {
+  return true;
+}
+```
+
+So **any Adreno ≤ 650 is deliberately denylisted**: Impeller
+initialises its OpenGL ES backend on those devices and never
+attempts Vulkan. The Poco X3 Pro (Snapdragon 860 → Adreno 640)
+falls under this rule, which is why the backend-flag probe
+reports `fbRenderMipmap=false` on it.
+
+Practical consequence for us: the Poco measurements are a
+**lower-bound-on-mainstream-hardware** data point, not a
+Vulkan/Metal measurement. If `flutter_scene` is comfortable here,
+newer devices (Adreno 660+, Mali G710+, Xclipse 920+) will almost
+certainly do better. If it struggles, we still don't know whether
+Vulkan would save it — that would need a second measurement on an
+Adreno-660-or-newer device.
 
 ## Measurement table (fill after the Poco run)
 

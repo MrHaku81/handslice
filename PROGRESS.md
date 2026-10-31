@@ -18,6 +18,44 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 19:50 UTC – Pflicht 7 benchmark: profile build + Vulkan/Adreno-Fundstelle
+
+Debug-APK zeigt beim leeren Benchmark-Screen auf dem Poco fps=24,
+p95=135 ms – nicht aussagekräftig, weil Debug ohne AOT läuft. Fix:
+
+- `app/scripts/build_apk.sh` akzeptiert jetzt zusätzlich
+  `--profile`. Dieselben Prüfungen laufen durch; der Hash-Check
+  pickt dann `lib/arm64-v8a/libapp.so` (AOT, wie bei `--release`),
+  nicht `kernel_blob.bin`.
+- Neuer Overlay `app/android/app/src/profile/AndroidManifest.xml`
+  setzt `io.flutter.embedding.android.EnableFlutterGPU=true` so,
+  dass das Profile-APK Flutter GPU aktivieren darf. Release bleibt
+  bewusst unberührt – die Produktionsentscheidung fällt nach den
+  Messwerten.
+
+Fundstelle zur Vulkan-Frage auf dem Poco (Adreno 640, Android 12):
+
+- Flutter 3.47.8 Engine,
+  `engine/src/flutter/impeller/renderer/backend/vulkan/driver_info_vk.cc`,
+  `DriverInfoVK::IsKnownBadDriver()`:
+  `if (adreno_gpu_ && *adreno_gpu_ <= AdrenoGPU::kAdreno650) return true;`
+  → **jede Adreno ≤ 650** fällt auf OpenGL ES zurück. Hintergrund
+  laut Kommentar: "additional workarounds in the Impeller Vulkan
+  back end such as disabling framebuffer fetch" (Flutter-Issues
+  #178285, #178498). Betrifft u.a. Poco X3 Pro (Adreno 640),
+  Pixel 4, OnePlus 7 Pro usw.
+- Konsequenz für den Benchmark: der Poco liefert eine
+  Lower-Bound-auf-Mainstream-Hardware-Zahl, keine
+  Vulkan/Metal-Zahl. Dokumentiert in
+  `docs/plate-view-benchmark.md`.
+
+Test-Dateien für Klaus liegen nach dem Run unter
+`/sdcard/Download/Handslice/bench/` auf dem Poco: notched_cube.hspm
+(1752 B, 24 Dreiecke) + auryn-100000.hspm / auryn-300000.hspm /
+auryn-500000.hspm (Simplify-Ziel per `--simplify N`, nur Vorschau,
+Slice-Pfad unverändert). Weder Modell noch Exporte wandern ins
+Repo (siehe stress-test.md).
+
 ## 2026-10-31 18:40 UTC – build_apk.sh: expliziter --debug-Modus, selbe Prüfungen
 
 Beim ersten Debug-Build für Pflicht 7 wurde direkt `flutter build apk
