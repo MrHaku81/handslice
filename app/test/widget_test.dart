@@ -647,7 +647,7 @@ void main() {
   // Befund 2 (M5): Fortschritt kommt aus current_layer/total_layer,
   // nicht aus `print_status.progress` – letzteres wandert laut
   // Realdruck 09:18 nicht gleichmaessig mit.
-  test('PrinterState.printProgress: aus current/total abgeleitet', () async {
+  test('PrinterState.printProgressFraction: aus current/total abgeleitet', () async {
     final p = await _makePrinter();
     p.injectLiveStateForTest({
       'print_status': {
@@ -656,21 +656,37 @@ void main() {
         'progress': 0, // Firmware pusht stehengebliebenen Wert
       }
     });
-    expect(p.printProgress, 25);
+    expect(p.printProgressFraction, 0.25);
+    expect(p.printProgressPct, 25);
     // Fortschritt wandert mit current_layer, auch wenn progress stehen bleibt
     p.injectLiveStateForTest({
       'print_status': {'current_layer': 50, 'total_layer': 100}
     });
-    expect(p.printProgress, 50);
+    expect(p.printProgressFraction, 0.5);
+    expect(p.printProgressPct, 50);
   });
 
-  test('PrinterState.printProgress: Fallback auf Firmware-Feld wenn Layer fehlen',
-      () async {
+  // Nachbesserung 2026-10-31: der frueher genutzte progress-Fallback
+  // ist entfernt. total_layer==0 (initialer Snapshot) + fehlender
+  // layer-Delta waehrend des Drucks liess den Balken sonst dauerhaft
+  // auf 100% stehen. Ohne total_layer > 0 liefert der Getter null,
+  // UI blendet den Balken dann aus.
+  test('PrinterState.printProgressFraction: ohne total_layer null', () async {
     final p = await _makePrinter();
+    p.injectLiveStateForTest({
+      'print_status': {'current_layer': 48, 'total_layer': 0, 'progress': 100}
+    });
+    expect(p.printProgressFraction, isNull);
+    expect(p.printProgressPct, isNull);
+  });
+
+  test('PrinterState.printProgressFraction: progress-Fallback entfernt', () async {
+    final p = await _makePrinter();
+    // frueher: progress=42 → 42; jetzt: ohne layer-Angaben null.
     p.injectLiveStateForTest({
       'print_status': {'progress': 42}
     });
-    expect(p.printProgress, 42);
+    expect(p.printProgressFraction, isNull);
   });
 
   // Befund 3 (M5): Zeitraffer-Capability – fehlendes Feld = unterstuetzt

@@ -106,18 +106,33 @@ class PrinterState extends ChangeNotifier {
   // --- Hilfs-Getter fuer die UI (lesen aggregierten Live-State) ---
 
   int? get machineStatus => _getInt(['machine_status', 'status']);
-  // Beim Realdruck 2026-10-25 09:18 beobachtet: `print_status.progress`
-  // wandert in der echten Firmware nicht gleichmaessig mit, waehrend
-  // `current_layer`/`total_layer` zuverlaessig per Delta kommen. Deshalb
-  // ist der Layer-Quotient die primaere Fortschrittsquelle; das Firmware-
-  // Feld dient nur als Rueckfall, wenn die Layer-Zahlen (noch) fehlen.
-  int? get printProgress {
+
+  // Fortschritt als Bruch 0.0..1.0 oder `null`, wenn kein belastbarer
+  // Wert vorliegt. Primaere Quelle: `current_layer / total_layer` –
+  // einzige in allen Mitschnitten konsistent beobachtete Groesse.
+  //
+  // Das Fallback-Feld `print_status.progress` wurde entfernt: der
+  // Live-Test 2026-10-31 zeigte, dass die Firmware es im api_status-
+  // Delta ueberhaupt nicht pusht und der aus dem initialen 1002-
+  // Snapshot gemergte Wert zusammen mit `.clamp(0,100)` den Balken
+  // immer "voll" zeichnet. Lieber ehrlich keinen Balken zeigen als
+  // einen irrefuehrenden.
+  //
+  // Rueckgabewert ist bewusst `double?`, nicht `int?`, damit die UI
+  // direkt den LinearProgressIndicator-value verwenden kann und
+  // nicht erneut durch 100 teilen muss.
+  double? get printProgressFraction {
     final cl = currentLayer;
     final tl = totalLayer;
-    if (cl != null && tl != null && tl > 0) {
-      return ((cl * 100) / tl).round().clamp(0, 100);
-    }
-    return _getInt(['print_status', 'progress']);
+    if (cl == null || tl == null || tl <= 0) return null;
+    return (cl / tl).clamp(0.0, 1.0);
+  }
+
+  // Prozent-Form fuer Anzeigen wie "Schicht X von Y (Z%)". Null,
+  // wenn `printProgressFraction` null ist.
+  int? get printProgressPct {
+    final f = printProgressFraction;
+    return f == null ? null : (f * 100).round();
   }
   int? get currentLayer => _getInt(['print_status', 'current_layer']);
   int? get totalLayer => _getInt(['print_status', 'total_layer']);
@@ -139,16 +154,22 @@ class PrinterState extends ChangeNotifier {
 
   int? get subStatus => _getInt(['machine_status', 'sub_status']);
 
-  // Codes gemaess method.h / Daniels const.py / Block-A-Mitschnitt:
+  // Codes gemaess method.h / Daniels const.py / eigenem Mitschnitt:
   //   Vorbereitung (preparing):
   //     1045 HOTEND_PREHEATING, 1096 HOTEND_COOLING,
-  //     1405 ?,                  1906 ?,
+  //     1405 BED_PREHEATING,     1906 BED_PREHEATING_2,
   //     2801 BED_LEVELING_START, 2802 BED_LEVELING_END,
   //     2901 HOMING_START,       2902 HOMING_END.
-  //     Im eigenen Sniff-Log (logs/cc2-sniff-2026-10-26.jsonl)
-  //     als tatsaechlich gepusht gesehen: 1045/1405/2801/2802/2901/2902.
-  //     1096 und 1906 steuert fw 02.01.01.07 im Abnahmedruck nicht an,
-  //     aber Daniels const.py nennt sie und wir folgen seiner Liste.
+  //     1066 Pre-Print Hotend-Stabilisierung – NICHT in Daniels
+  //     const.py genannt, aber in drei Mitschnitten (2026-10-26 x2,
+  //     2026-10-31) ausschliesslich mit `current_layer=0` **und**
+  //     Hotend-Ist nahe Target gesehen; Nachbarcodes sind 1045/2801/
+  //     2901/2075. Siehe docs/networking-cc2.md Abschnitt
+  //     "sub_status 1066 analysis (2026-10-31)".
+  //     Im eigenen Sniff-Log als tatsaechlich gepusht gesehen:
+  //     1045/1066/1405/2801/2802/2901/2902. 1096 und 1906 steuert
+  //     fw 02.01.01.07 nicht an, Daniels const.py nennt sie – wir
+  //     folgen seiner Liste.
   //   Pause: 2501 PRINT_PAUSE_SUCCESS, 2502 PAUSE_STATE,
   //     2505 PAUSE_FILA (Filament-Pause)
   //   Resume: 2401 PRINT_RESUME_SUCCESS,
@@ -164,6 +185,7 @@ class PrinterState extends ChangeNotifier {
     final sub = subStatus;
     switch (sub) {
       case 1045:
+      case 1066:   // Pre-Print Hotend-Stabilisierung (Mitschnitt-Beleg)
       case 1096:
       case 1405:
       case 1906:

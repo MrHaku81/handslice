@@ -479,8 +479,8 @@ abstract class AppLocalizations {
   /// No description provided for @printPreflightNotIdle.
   ///
   /// In en, this message translates to:
-  /// **'Printer is not idle (status={status}).'**
-  String printPreflightNotIdle(int status);
+  /// **'Printer is not idle — currently: {status}.'**
+  String printPreflightNotIdle(String status);
 
   /// No description provided for @printPreflightTrayEmpty.
   ///
@@ -1081,6 +1081,108 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Preparing (heating/levelling)'**
   String get printPhasePreparing;
+
+  /// No description provided for @machineStatusUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'unknown'**
+  String get machineStatusUnknown;
+
+  /// No description provided for @machineStatusInitializing.
+  ///
+  /// In en, this message translates to:
+  /// **'initializing'**
+  String get machineStatusInitializing;
+
+  /// No description provided for @machineStatusIdle.
+  ///
+  /// In en, this message translates to:
+  /// **'idle'**
+  String get machineStatusIdle;
+
+  /// No description provided for @machineStatusPrinting.
+  ///
+  /// In en, this message translates to:
+  /// **'printing'**
+  String get machineStatusPrinting;
+
+  /// No description provided for @machineStatusFilamentOp.
+  ///
+  /// In en, this message translates to:
+  /// **'filament operation'**
+  String get machineStatusFilamentOp;
+
+  /// No description provided for @machineStatusAutoLeveling.
+  ///
+  /// In en, this message translates to:
+  /// **'auto-levelling'**
+  String get machineStatusAutoLeveling;
+
+  /// No description provided for @machineStatusPidCalibrating.
+  ///
+  /// In en, this message translates to:
+  /// **'PID calibration'**
+  String get machineStatusPidCalibrating;
+
+  /// No description provided for @machineStatusResonanceTesting.
+  ///
+  /// In en, this message translates to:
+  /// **'resonance test'**
+  String get machineStatusResonanceTesting;
+
+  /// No description provided for @machineStatusSelfChecking.
+  ///
+  /// In en, this message translates to:
+  /// **'self-check'**
+  String get machineStatusSelfChecking;
+
+  /// No description provided for @machineStatusUpdating.
+  ///
+  /// In en, this message translates to:
+  /// **'firmware update'**
+  String get machineStatusUpdating;
+
+  /// No description provided for @machineStatusHoming.
+  ///
+  /// In en, this message translates to:
+  /// **'homing'**
+  String get machineStatusHoming;
+
+  /// No description provided for @machineStatusFileTransferring.
+  ///
+  /// In en, this message translates to:
+  /// **'file transfer'**
+  String get machineStatusFileTransferring;
+
+  /// No description provided for @machineStatusVideoComposing.
+  ///
+  /// In en, this message translates to:
+  /// **'composing timelapse'**
+  String get machineStatusVideoComposing;
+
+  /// No description provided for @machineStatusExtruderOp.
+  ///
+  /// In en, this message translates to:
+  /// **'extruder operation'**
+  String get machineStatusExtruderOp;
+
+  /// No description provided for @machineStatusEmergencyStop.
+  ///
+  /// In en, this message translates to:
+  /// **'emergency stop'**
+  String get machineStatusEmergencyStop;
+
+  /// No description provided for @machineStatusPowerLossRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'power-loss recovery'**
+  String get machineStatusPowerLossRecovery;
+
+  /// No description provided for @machineStatusOther.
+  ///
+  /// In en, this message translates to:
+  /// **'status {code}'**
+  String machineStatusOther(int code);
 }
 
 class _AppLocalizationsDelegate

@@ -218,8 +218,8 @@ class AppLocalizationsDe extends AppLocalizations {
       'Grenztest fehlgeschlagen – siehe Projekt-Bildschirm.';
 
   @override
-  String printPreflightNotIdle(int status) {
-    return 'Drucker ist nicht im Leerlauf (status=$status).';
+  String printPreflightNotIdle(String status) {
+    return 'Drucker ist nicht im Leerlauf – aktuell: $status.';
   }
 
   @override
@@ -592,4 +592,57 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get printPhasePreparing => 'Vorbereitung (Aufheizen/Nivellieren)';
+
+  @override
+  String get machineStatusUnknown => 'unbekannt';
+
+  @override
+  String get machineStatusInitializing => 'Initialisierung';
+
+  @override
+  String get machineStatusIdle => 'Leerlauf';
+
+  @override
+  String get machineStatusPrinting => 'Druck läuft';
+
+  @override
+  String get machineStatusFilamentOp => 'Filamentwechsel';
+
+  @override
+  String get machineStatusAutoLeveling => 'Auto-Nivellierung';
+
+  @override
+  String get machineStatusPidCalibrating => 'PID-Kalibrierung';
+
+  @override
+  String get machineStatusResonanceTesting => 'Resonanz-Test';
+
+  @override
+  String get machineStatusSelfChecking => 'Selbsttest';
+
+  @override
+  String get machineStatusUpdating => 'Firmware-Update';
+
+  @override
+  String get machineStatusHoming => 'Homing';
+
+  @override
+  String get machineStatusFileTransferring => 'Dateiübertragung';
+
+  @override
+  String get machineStatusVideoComposing => 'Zeitraffer wird erzeugt';
+
+  @override
+  String get machineStatusExtruderOp => 'Extruder arbeitet';
+
+  @override
+  String get machineStatusEmergencyStop => 'Not-Halt';
+
+  @override
+  String get machineStatusPowerLossRecovery => 'Stromausfall-Wiederherstellung';
+
+  @override
+  String machineStatusOther(int code) {
+    return 'Status $code';
+  }
 }

@@ -31,8 +31,11 @@ void main() {
 
     test('status != 1 ohne besonderen sub_status → printing', () async {
       final s = await _buildState();
+      // 2075 = CC2_SUBSTATUS_PRINTING (Daniels const.py). Im Mitschnitt
+      // der eigentliche "Druck laeuft"-Code; typischer Fall ohne
+      // Vorbereitungs- oder Pause-Marker.
       s.injectLiveStateForTest({
-        'machine_status': {'status': 2, 'sub_status': 1066},
+        'machine_status': {'status': 2, 'sub_status': 2075},
       });
       expect(s.printPhase, PrintPhase.printing);
     });
@@ -57,13 +60,14 @@ void main() {
       }
     });
 
-    test('sub_status 1045/1096/1405/1906/2801/2802/2901/2902 → preparing', () async {
-      // Codes aus Daniels const.py + method.h:
-      // 1045/1096 Hotend-Preheat/Cooling, 1405/1906 weitere Vorbereitung,
-      // 2801/2802 Bed-Levelling, 2901/2902 Homing.
-      // Sechs davon (1045/1405/2801/2802/2901/2902) sind im eigenen
-      // Mitschnitt belegt; 1096/1906 nehmen wir ohne Live-Beweis mit.
-      for (final sub in [1045, 1096, 1405, 1906, 2801, 2802, 2901, 2902]) {
+    test('sub_status 1045/1066/1096/1405/1906/2801/2802/2901/2902 → preparing', () async {
+      // Codes aus Daniels const.py + method.h + eigenem Mitschnitt:
+      // 1045/1096 Hotend-Preheat/Cooling, 1405/1906 Bed-Preheat,
+      // 1066 Pre-Print Hotend-Stabilisierung (nur Mitschnitt-Beleg,
+      // nicht in const.py), 2801/2802 Bed-Levelling, 2901/2902 Homing.
+      // Live gesehen beim Geraetetest 2026-10-31: 1045/1066/1405/
+      // 2801/2802/2901/2902.  1096/1906 ohne eigenen Live-Beweis.
+      for (final sub in [1045, 1066, 1096, 1405, 1906, 2801, 2802, 2901, 2902]) {
         final s = await _buildState();
         s.injectLiveStateForTest({
           'machine_status': {'status': 2, 'sub_status': sub},

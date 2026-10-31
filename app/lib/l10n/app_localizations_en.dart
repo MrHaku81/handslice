@@ -214,8 +214,8 @@ class AppLocalizationsEn extends AppLocalizations {
       'Bounds-check failed — see Project screen.';
 
   @override
-  String printPreflightNotIdle(int status) {
-    return 'Printer is not idle (status=$status).';
+  String printPreflightNotIdle(String status) {
+    return 'Printer is not idle — currently: $status.';
   }
 
   @override
@@ -586,4 +586,57 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get printPhasePreparing => 'Preparing (heating/levelling)';
+
+  @override
+  String get machineStatusUnknown => 'unknown';
+
+  @override
+  String get machineStatusInitializing => 'initializing';
+
+  @override
+  String get machineStatusIdle => 'idle';
+
+  @override
+  String get machineStatusPrinting => 'printing';
+
+  @override
+  String get machineStatusFilamentOp => 'filament operation';
+
+  @override
+  String get machineStatusAutoLeveling => 'auto-levelling';
+
+  @override
+  String get machineStatusPidCalibrating => 'PID calibration';
+
+  @override
+  String get machineStatusResonanceTesting => 'resonance test';
+
+  @override
+  String get machineStatusSelfChecking => 'self-check';
+
+  @override
+  String get machineStatusUpdating => 'firmware update';
+
+  @override
+  String get machineStatusHoming => 'homing';
+
+  @override
+  String get machineStatusFileTransferring => 'file transfer';
+
+  @override
+  String get machineStatusVideoComposing => 'composing timelapse';
+
+  @override
+  String get machineStatusExtruderOp => 'extruder operation';
+
+  @override
+  String get machineStatusEmergencyStop => 'emergency stop';
+
+  @override
+  String get machineStatusPowerLossRecovery => 'power-loss recovery';
+
+  @override
+  String machineStatusOther(int code) {
+    return 'status $code';
+  }
 }

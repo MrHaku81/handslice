@@ -3071,3 +3071,69 @@ Both remaining items are *print-time* behaviours and cannot be
 tested on an idle machine; they belong to a later block with a
 running job.
 
+
+---
+
+## M6 device test – print control (CC2 fw 02.01.01.07, 2026-10-31)
+
+App commit `0c36fb3250` installed on the Poco X3 Pro. Klaus
+physically next to the printer; passive MQTT capture in
+`logs/cc2-sniff-2026-10-31-133328.jsonl` (gitignored).
+
+### Verified end-to-end
+
+| Flow        | Observation (device-side)                                                                                       | MQTT timeline (sub_status) |
+|---|---|---|
+| Light on/off | Chamber LED toggles immediately on each `1029 {power:0\|1}` call                                                | – (fw does not broadcast light state) |
+| Preparing   | During **auto-levelling** the Pause button was greyed and Cancel enabled — correct. During the pre-print heating ramp the Pause button was **active** — **WRONG, see 1066 fix below.** | 1045 → 1066 → 2801 → 2802 → 2901 → 2902 → 2075 |
+| Pause       | Printer parks the head, app shows "Paused" and the button flips to "Resume"                                     | **2501 → 2502** within 3.9 s |
+| Resume      | Head returns to work position, print continues; app follows via api_status                                      | **2401 → 2402** within **18.4 s** (temperatures were held — matches Daniel's note that a full cold-start re-heat can take ~2 min; we therefore keep the fire-and-forget semantics in the client) |
+| Cancel      | Confirm dialog in the app, printer transitions to "Cancelling…" then "Idle"                                     | **2503 → 2504** within 8.7 s |
+
+### sub_status 1066 analysis (2026-10-31)
+
+The Pause-active-during-heating bug led to a cross-log check of
+`sub_status 1066`, which `danielcherubini/elegoo-homeassistant`'s
+`cc2/const.py` does **not** name. Scanning all three CC2 captures
+(`cc2-sniff-2026-10-26.jsonl`, `cc2-sniff-2026-10-26-152237.jsonl`,
+`cc2-sniff-2026-10-31-133328.jsonl`):
+
+| Capture                     | Hits of 1066 | current_layer at hit  | Hotend / target at hit | Neighbouring sub_status                 |
+|---|---:|---|---|---|
+| 2026-10-26 (morning tests)  | 12           | **always 0**          | 141/140 → 211/210      | 1045, 2075, 2801 (neighbours only)      |
+| 2026-10-26 (print 15:46)    | 10           | **always 0**          | 143/140 → 201/200 → 180/180 → 140/140 | 2901, 2801, 1045, 2075 |
+| 2026-10-31 (print 13:33)    | 5            | not pushed yet        | 220 (near-target)      | 1045, 2075                              |
+
+Across 27 appearances **1066 never carried a non-zero
+`current_layer`**, and the hotend was always within ±1 °C of
+target. The surrounding codes are Preparing-codes (1045, 2801,
+2802, 2901, 2902) and `2075 CC2_SUBSTATUS_PRINTING`. Conclusion:
+**1066 is a pre-print hotend-stabilisation state.** Added to the
+`PrintPhase.preparing` set alongside the eight codes already there.
+
+### Backlog items narrowed
+
+- 1023 ResumePrint reply latency: measured **18.4 s** on
+  temperatures-held pause (new ground truth to complement Daniel's
+  cold-pause ~122 s report). Fire-and-forget semantics in the
+  client remain correct — Orca's 60 s timeout would miss the long
+  case anyway.
+- Still open: cold-pause case (re-heat required), filament-pause
+  recovery flow (sub_status 2505 + exception_status 1243 on the
+  wire), 1096/1906 which the firmware did not emit in these three
+  captures.
+
+### UI fixes shipped with the same commit
+
+- **Progress bar always full.** `print_status.progress` is not
+  pushed by this firmware in deltas; `total_layer` arrived once
+  with value 0 in the initial 1002 snapshot and was never
+  overwritten. The old fallback field combined with `.clamp(0,100)`
+  pinned the bar at 100 %. Fix: drop the `progress` fallback,
+  derive a `double? printProgressFraction` purely from
+  `current_layer / total_layer` and only when `total_layer > 0`.
+  UI hides the bar otherwise.
+- **Preflight raw-code message.** `printPreflightNotIdle(code)`
+  showed `status=2` to the user. Replaced the `int` placeholder
+  with a `String` label and added CC2 status names (per
+  `cc2/const.py` CC2_STATUS_*). "status 2" now reads "printing".

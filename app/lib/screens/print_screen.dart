@@ -262,7 +262,8 @@ String _preflightMessage(
     case 'preflight.bounds_failed':
       return l.printPreflightBoundsFailed;
     case 'preflight.not_idle':
-      return l.printPreflightNotIdle(printer.machineStatus ?? -1);
+      return l.printPreflightNotIdle(
+          _machineStatusLabel(l, printer.machineStatus));
     case 'preflight.tray_empty':
       return l.printPreflightTrayEmpty(printer.trayAssignmentForTool0 + 1);
     default:
@@ -343,23 +344,25 @@ class _LiveStatus extends StatelessWidget {
             label: l.printStatusLabel,
             value: stateText,
           ),
-          if (printer.currentLayer != null && printer.totalLayer != null)
+          if (printer.currentLayer != null &&
+              printer.totalLayer != null &&
+              printer.totalLayer! > 0)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
                 l.printLayerProgress(
                   printer.currentLayer ?? 0,
                   printer.totalLayer ?? 0,
-                  printer.printProgress ?? 0,
+                  printer.printProgressPct ?? 0,
                 ),
                 style: monoStyle(context, fontSize: 13),
               ),
             ),
-          if (printer.printProgress != null)
+          if (printer.printProgressFraction != null)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: LinearProgressIndicator(
-                value: (printer.printProgress ?? 0) / 100.0,
+                value: printer.printProgressFraction,
               ),
             ),
           const Divider(),
@@ -406,6 +409,32 @@ class _LiveStatus extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+// Klartext fuer machine_status.status laut Daniels const.py
+// (CC2_STATUS_*). Fallback: numerischer Code in Klammern, damit
+// unbekannte Werte nicht spurlos verschwinden.
+String _machineStatusLabel(AppLocalizations l, int? code) {
+  switch (code) {
+    case null:  return l.machineStatusUnknown;
+    case 0:     return l.machineStatusInitializing;
+    case 1:     return l.machineStatusIdle;
+    case 2:     return l.machineStatusPrinting;
+    case 3:
+    case 4:     return l.machineStatusFilamentOp;
+    case 5:     return l.machineStatusAutoLeveling;
+    case 6:     return l.machineStatusPidCalibrating;
+    case 7:     return l.machineStatusResonanceTesting;
+    case 8:     return l.machineStatusSelfChecking;
+    case 9:     return l.machineStatusUpdating;
+    case 10:    return l.machineStatusHoming;
+    case 11:    return l.machineStatusFileTransferring;
+    case 12:    return l.machineStatusVideoComposing;
+    case 13:    return l.machineStatusExtruderOp;
+    case 14:    return l.machineStatusEmergencyStop;
+    case 15:    return l.machineStatusPowerLossRecovery;
+    default:    return l.machineStatusOther(code);
   }
 }
 

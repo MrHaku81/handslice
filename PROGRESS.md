@@ -18,6 +18,77 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 14:30 UTC – M6 Geraetetest bestanden; zwei UI-Bugs + 1066-Phase gefixt
+
+Klaus hat heute mit App 0c36fb3250 Pause/Fortsetzen/Abbrechen/Licht am
+echten CC2 (fw 02.01.01.07) durchgespielt. Mitschnitt
+`logs/cc2-sniff-2026-10-31-133328.jsonl` (gitignored, 564 Nachrichten).
+
+### Nachweislich
+
+- **Geraetetest bestanden** (Klaus-Rueckmeldung + Mitschnitt):
+  - Licht ein/aus schaltet sofort, beide Richtungen.
+  - Nivellieren (2801/2802) + Homing (2901/2902): Pause-Button grau,
+    Cancel aktiv – korrekt.
+  - **Pause** 2501 → 2502 in 3.9 s; Kopf parkt, App zeigt "Pausiert"
+    + "Fortsetzen".
+  - **Resume** 2401 → 2402 in **18.4 s** (Temperaturen gehalten,
+    kein voller Reheat) – deutlich unter Daniels 122-s-Cold-Case.
+    Rechtfertigt die fire-and-forget-Semantik: 60 s Timeout von
+    Orca wuerde den Kaltfall verfehlen; wir blockieren einfach gar
+    nicht und beobachten den Statuswechsel.
+  - **Cancel** 2503 → 2504 in 8.7 s inklusive Bestaetigungs-Dialog.
+- **1066 nachgezogen in `PrintPhase.preparing`**. Analyse ueber
+  **drei Mitschnitte**: 27 Vorkommen, **ausschliesslich bei
+  `current_layer=0`**, Hotend-Ist jeweils ±1 °C am Target,
+  Nachbarcodes 1045/2801/2802/2901/2902/2075 (allesamt
+  Vorbereitungs- und Druck-Codes). Daniels `const.py` benennt
+  1066 nicht; wir uebernehmen es mit Verweis auf die eigenen
+  Mitschnitte (`docs/networking-cc2.md` Abschnitt "sub_status 1066
+  analysis").
+- **Fortschrittsbalken-Fix**: Firmware pusht `print_status.progress`
+  **nicht** im Delta; `total_layer` kam heute 1x als 0 im initialen
+  1002-Snapshot und blieb so. `.clamp(0,100)` pinnte den Balken
+  dauerhaft auf 100 %. **Fix**:
+  - `printProgress` (int?) ersetzt durch
+    `printProgressFraction` (double?) und `printProgressPct` (int?).
+  - Nur noch aus `current_layer / total_layer`, und **nur** wenn
+    `total_layer > 0`.
+  - Progress-Fallback-Feld entfernt (irrefuehrend). UI blendet
+    den Balken aus, wenn kein Wert belastbar ist.
+- **Preflight-Rohwert-Fix**: `printPreflightNotIdle` nahm `code:int`
+  und druckte `status=2`. Jetzt `status:String` + CC2-Status-
+  Labels (16 Codes aus Daniels `CC2_STATUS_*`), inklusive Fallback
+  "status N" fuer unbekannte Werte. "status 2" ist jetzt
+  "printing" (EN) / "Druck läuft" (DE).
+- **L10n**: 17 neue Keys (`machineStatusUnknown` + 15 Status-Namen +
+  `machineStatusOther`) in en.arb (Quelle) und de.arb.
+- **Tests** (`flutter test` → **84/84 gruen**):
+  - `printer_phase_mapping_test.dart`: 1066 im preparing-Fall
+    ergaenzt; "printing"-Default-Fall auf 2075 (echter PRINTING-
+    Code) umgestellt, 1066 ist jetzt kein Default-Fall mehr.
+  - `widget_test.dart`: `printProgress`-Tests auf
+    `printProgressFraction`/`printProgressPct` angepasst; neuer
+    Fall "ohne total_layer null" sichert den Bugfix.
+- Englischer Testergebnis-Abschnitt in `docs/networking-cc2.md`:
+  "M6 device test – print control (CC2 fw 02.01.01.07, 2026-10-31)".
+
+### Ungeprueft
+
+- Cold-Pause-Resume-Dauer: heute waren die Temperaturen gehalten,
+  18.4 s war der Idealfall. Daniels 122 s fuer den Kaltfall ist
+  weiterhin ungeprueft.
+- Filamentzufuhr-Fehler-Pfad (sub_status 2505 + exception_status
+  1243 live): kein Trigger im heutigen Lauf.
+- `sub_status 1096/1906`: wieder nicht gesichtet. Mapping bleibt
+  spekulativ aus Daniels Liste.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+---
+
 ## 2026-10-31 13:45 UTC – M6-Nachbesserung: Phase "preparing" (Aufheizen/Nivellieren)
 
 Vor dem Geraetetest Klaus-Rueckmeldung umgesetzt.

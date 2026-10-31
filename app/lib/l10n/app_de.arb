@@ -67,7 +67,7 @@
   "printPreflightNoUpload": "Zuerst einen G-Code hochladen.",
   "printPreflightNotConnected": "Drucker nicht verbunden.",
   "printPreflightBoundsFailed": "Grenztest fehlgeschlagen – siehe Projekt-Bildschirm.",
-  "printPreflightNotIdle": "Drucker ist nicht im Leerlauf (status={status}).",
+  "printPreflightNotIdle": "Drucker ist nicht im Leerlauf – aktuell: {status}.",
   "printPreflightTrayEmpty": "Gewähltes Fach (A{slot}) ist leer.",
   "printTimelapseNotSupported": "Dieser Drucker meldet keine Kamera – Zeitraffer deaktiviert.",
   "printReconnecting": "Verbindung verloren – wird neu aufgebaut…",
@@ -180,5 +180,23 @@
   "@printControlFailedLight": {"placeholders": {"detail": {"type": "String"}}},
   "printPhaseCancelling": "Bricht ab …",
   "printPhaseCancelled": "Abgebrochen",
-  "printPhasePreparing": "Vorbereitung (Aufheizen/Nivellieren)"
+  "printPhasePreparing": "Vorbereitung (Aufheizen/Nivellieren)",
+
+  "machineStatusUnknown": "unbekannt",
+  "machineStatusInitializing": "Initialisierung",
+  "machineStatusIdle": "Leerlauf",
+  "machineStatusPrinting": "Druck läuft",
+  "machineStatusFilamentOp": "Filamentwechsel",
+  "machineStatusAutoLeveling": "Auto-Nivellierung",
+  "machineStatusPidCalibrating": "PID-Kalibrierung",
+  "machineStatusResonanceTesting": "Resonanz-Test",
+  "machineStatusSelfChecking": "Selbsttest",
+  "machineStatusUpdating": "Firmware-Update",
+  "machineStatusHoming": "Homing",
+  "machineStatusFileTransferring": "Dateiübertragung",
+  "machineStatusVideoComposing": "Zeitraffer wird erzeugt",
+  "machineStatusExtruderOp": "Extruder arbeitet",
+  "machineStatusEmergencyStop": "Not-Halt",
+  "machineStatusPowerLossRecovery": "Stromausfall-Wiederherstellung",
+  "machineStatusOther": "Status {code}"
 }
