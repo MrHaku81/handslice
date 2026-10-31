@@ -18,6 +18,76 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 20:40 UTC – M9 Vorstufe: Fach-Farbe im G-Code + Auto-Fach-Vorauswahl
+
+Kleiner Schritt vor Pflicht 8 (Multicolor), hier noch mono:
+1. Beim Slicen wandert die Farbe des gewaehlten Fachs als
+   `filament_colour`-Override in den G-Code (statt Orcas
+   Standardfarbe).
+2. Der Druck-Dialog fuer vorhandene Dateien waehlt das Fach
+   automatisch vor, wenn `color_map[0]` eindeutig zu genau einem
+   Slot passt (Material-Vergleich + RGB-Toleranz).
+
+### Nachweislich
+
+- **`settings/slot_matcher.dart`** (pure functions, 76 LoC):
+  - `findSlotForFile(colorMap, slots)` → `SlotMatchResult`
+    (`unique`/`ambiguous`/`none`). Material case-insensitive +
+    getrimmt; Farb-Toleranz = euklidische RGB-Summe ≤ 52²
+    (`kDefaultColorToleranceSquared`), faengt Spool-Jitter und
+    Hex-Rounding.
+  - `slotOverridesFor(slot)` → Map, aktuell nur
+    `{"filament_colour": "#RRGGBB"}`; leer bei ungueltiger Farbe.
+- **`state/project_state.dart`**: `slice(...)` nimmt jetzt einen
+  weiteren `slotOverrides: Map<String,String>`-Parameter.
+  Reihenfolge im `merged`: `overrides` → `filamentOverrides` →
+  `slotOverrides` nur `putIfAbsent` (User-Overrides gewinnen,
+  Fach-Werte fuellen nur den Profil-Default auf).
+- **`screens/project_screen.dart`**: `_slice()` baut
+  `slotOverrides` aus `slot.filamentColor` ueber den Helper.
+  `filamentOverrides` + Filamentprofil-Pfad bleiben wie bisher.
+- **`widgets/printer_files_panel.dart`**:
+  `_PrintSettingsDialog` bekommt zusaetzlich `colorMap` und ruft
+  `findSlotForFile(..)` in `initState()`. Bei `unique` wird das
+  Fach vorgewaehlt; bei `ambiguous`/`none` bleibt die letzte
+  Nutzer-Wahl, und unter dem Picker steht ein kurzer kursiver
+  Hinweis.
+- **L10n (en + de)**: zwei neue Keys
+  `printerFilesSlotAmbiguous`,
+  `printerFilesSlotNoMatch`.
+- **Tests** (`test/slot_matcher_test.dart`, 12 Faelle):
+  - `slotOverridesFor`: Hex-Normalisierung mit/ohne `#`,
+    leere Map bei ungueltiger Farbe.
+  - `findSlotForFile`: eindeutig / eindeutig-im-Toleranzbereich /
+    mehrdeutig / kein Treffer wegen falschem Material /
+    kein Treffer wegen zu weit entfernter Farbe / leere
+    `color_map` / leere Slot-Liste / ungueltige Hex-Werte /
+    Material-Case- und Trim-Vergleich.
+  - Vollsuite **126/126 gruen** (+12 ggue M8-NB3).
+
+- **Scrub strict**: 0 Treffer.
+- **Doku**: englischer Abschnitt
+  "M9 (Vorstufe) – slot colour as slice override + auto slot
+  preselect" in `docs/networking-cc2.md`.
+
+### Ungeprueft
+
+- **1046-Verifikation am echten Drucker**: `color_map[0].color`
+  nach Upload+Druckstart muss die neue Fach-Farbe tragen. Klaus
+  prueft das in der naechsten Session (die bisherige
+  Abnahmedruck-Datei trug `#F2754E` als Profil-Default; mit
+  einem anders gefaerbten Fach-Slot zeigt sich der Unterschied).
+- **Auto-Vorauswahl am Geraet**: Dialog-Vorauswahl + Hinweise
+  sind nur Unit-getestet; Live-Verhalten (mehrfach-Slots mit
+  gleicher Farbe) kommt mit Pflicht 8 (Multicolor-Mapping)
+  realistischer in den Blick.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+---
+
 ## 2026-10-31 20:00 UTC – M8 Nachbesserung 3: bedlevel_force vs printer_check (Orca 1:1)
 
 Klaus hat vor dem Push den Verdacht gehabt, dass `bedlevel_force`

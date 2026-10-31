@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
 import '../settings/filament_mapping.dart';
+import '../settings/slot_matcher.dart';
 import '../settings/filament_overrides.dart';
 import '../settings/profile_reader.dart';
 import '../settings/settings_overrides.dart';
@@ -189,12 +190,19 @@ class _ProjectScreenState extends State<ProjectScreen> {
         .where((s) => s.trayId == tray)
         .toList();
     String? filamentRelative;
+    final slotOverrides = <String, String>{};
     if (slot.isNotEmpty) {
+      final s = slot.first;
       final ref = const FilamentMapping().resolve(
-        filamentName: slot.first.filamentName,
-        filamentType: slot.first.filamentType,
+        filamentName: s.filamentName,
+        filamentType: s.filamentType,
       );
       filamentRelative = 'profiles/Elegoo/filament/ECC2/${ref.assetName}';
+      // M9-Vorstufe: Fach-Farbe als `filament_colour`-Override.
+      // Format: ein Hex-String; coStrings-Deserialisierer von Orca
+      // liest das als 1-Element-Vektor. User-Overrides gewinnen,
+      // falls gesetzt (siehe ProjectState.slice).
+      slotOverrides.addAll(slotOverridesFor(s));
     }
     final filamentOv = widget.filamentOverrides.forTray(tray);
 
@@ -203,6 +211,7 @@ class _ProjectScreenState extends State<ProjectScreen> {
       outPath,
       overrides: widget.overrides,
       filamentOverrides: filamentOv,
+      slotOverrides: slotOverrides,
       filamentProfileRelative: filamentRelative,
     );
   }

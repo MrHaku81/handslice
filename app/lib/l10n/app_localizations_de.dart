@@ -808,6 +808,14 @@ class AppLocalizationsDe extends AppLocalizations {
       'Fach-Informationen nicht verfügbar (nicht verbunden?).';
 
   @override
+  String get printerFilesSlotAmbiguous =>
+      'Mehrere Fächer passen zu dieser Datei – letzte Wahl bleibt stehen.';
+
+  @override
+  String get printerFilesSlotNoMatch =>
+      'Kein Fach passt zu Material/Farbe der Datei – letzte Wahl bleibt stehen.';
+
+  @override
   String printerFilesFilamentIndex(int idx) {
     return 'Filament $idx';
   }

@@ -251,6 +251,8 @@
 
   "printerFilesPrintPickSlot": "Fach wählen",
   "printerFilesPrintSlotsUnknown": "Fach-Informationen nicht verfügbar (nicht verbunden?).",
+  "printerFilesSlotAmbiguous": "Mehrere Fächer passen zu dieser Datei – letzte Wahl bleibt stehen.",
+  "printerFilesSlotNoMatch": "Kein Fach passt zu Material/Farbe der Datei – letzte Wahl bleibt stehen.",
   "printerFilesFilamentIndex": "Filament {idx}",
 
   "printLevelBed": "Bett vor dem Druck nivellieren (ca. 200 s)",

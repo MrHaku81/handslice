@@ -3640,3 +3640,67 @@ Asserts:
 - zweiter Call `bedlevel_force=true, printer_check=true`,
 - `PrinterState.lastHint == 'startprint.retry_forced_level'`
   nach dem Lauf.
+
+---
+
+## M9 (Vorstufe) – slot colour as slice override + auto slot preselect (2026-10-31)
+
+Vorstufe zu Pflicht 8 (Multicolor). Hier noch Mono-Druck:
+Fach-Farbe wandert in den G-Code, und der Druck-Dialog waehlt
+ein passendes Fach vor.
+
+### Slice-Override: `filament_colour` aus dem Fach
+
+- `project_state.slice(…, Map<String,String> slotOverrides)`
+  nimmt eine zusaetzliche Override-Map. `slotOverrides`-Keys
+  werden mit `putIfAbsent` nach den anderen Overrides gemergt:
+  User-Overrides gewinnen, Fach-Werte fuellen nur den
+  Profil-Default auf.
+- `project_screen._slice()` baut die Map aus dem aktuellen
+  `CanvasSlot` ueber den neuen Pure-Function-Helper
+  `slotOverridesFor(slot)` in `settings/slot_matcher.dart`.
+  Format: `{"filament_colour": "#RRGGBB"}`. Ein-elementiger
+  Hex-String, den der CLI-`coStrings`-Deserialisierer als
+  1-Vektor liest.
+- Material/Filament-Profil wandert weiterhin ueber den
+  Filament-Pfad (`filament_mapping.dart`), nicht als Override –
+  so bleiben Rapid-PLA+ / PETG / … konsistent zum ECC2-Preset.
+
+Verifikation `method 1046` nach dem Druckstart: `color_map[0].color`
+muss die neu gesetzte Fach-Farbe tragen. (`1044` nutzt denselben
+Header-Parser, ergibt denselben Wert.)
+
+### Auto-Fach-Vorauswahl im Start-Dialog
+
+Pure-Function `findSlotForFile(colorMap, slots)` in
+`settings/slot_matcher.dart`:
+
+- Material-Vergleich: case-insensitive + getrimmt.
+- Farb-Toleranz: euklidische Summe der RGB-Komponenten ≤ 52²
+  (Default `kDefaultColorToleranceSquared`). Faengt
+  Spool-Jitter und Hex-Rounding, blockt aber klar verschiedene
+  Farben.
+- Rueckgabe `SlotMatchResult`:
+  - `unique(trayId)` → Dialog waehlt das Fach vor.
+  - `ambiguous` → letzte Nutzer-Wahl bleibt, kurzer Hinweis
+    "Mehrere Faecher passen zu dieser Datei – letzte Wahl bleibt
+    stehen." / "Several slots match this file — keeping your
+    last choice."
+  - `none` → letzte Nutzer-Wahl bleibt, Hinweis
+    "Kein Fach passt zu Material/Farbe der Datei – letzte Wahl
+    bleibt stehen." / "No slot matches the file's material/colour
+    — keeping your last choice."
+
+Umgesetzt in `_PrintSettingsDialog.initState()`: Dialog bekommt
+jetzt zusaetzlich zur `filename` die `colorMap` der Datei; der
+Match laeuft einmal und setzt das Fach bzw. haengt den Hinweis
+ans Picker-Panel.
+
+### Tests
+
+`test/slot_matcher_test.dart`:
+- `slotOverridesFor`: Hex-Normalisierung (mit/ohne `#`), leere
+  Map bei ungueltiger Farbe.
+- `findSlotForFile`: eindeutig / mehrdeutig / kein Treffer /
+  Toleranz / case + trim / leere Eingaben / ungueltige Hex-Werte.
+Vollsuite 126/126 gruen (+12 ggue M8-NB3).

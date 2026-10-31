@@ -1454,6 +1454,18 @@ abstract class AppLocalizations {
   /// **'Slot info unavailable (not connected?).'**
   String get printerFilesPrintSlotsUnknown;
 
+  /// No description provided for @printerFilesSlotAmbiguous.
+  ///
+  /// In en, this message translates to:
+  /// **'Several slots match this file — keeping your last choice.'**
+  String get printerFilesSlotAmbiguous;
+
+  /// No description provided for @printerFilesSlotNoMatch.
+  ///
+  /// In en, this message translates to:
+  /// **'No slot matches the file\'s material/colour — keeping your last choice.'**
+  String get printerFilesSlotNoMatch;
+
   /// No description provided for @printerFilesFilamentIndex.
   ///
   /// In en, this message translates to:

@@ -802,6 +802,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Slot info unavailable (not connected?).';
 
   @override
+  String get printerFilesSlotAmbiguous =>
+      'Several slots match this file — keeping your last choice.';
+
+  @override
+  String get printerFilesSlotNoMatch =>
+      'No slot matches the file\'s material/colour — keeping your last choice.';
+
+  @override
   String printerFilesFilamentIndex(int idx) {
     return 'Filament $idx';
   }

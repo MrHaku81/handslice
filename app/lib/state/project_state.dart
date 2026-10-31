@@ -118,6 +118,14 @@ class ProjectState extends ChangeNotifier {
   Future<void> slice(SlicerService slicer, String outputPath,
       {SettingsOverrides? overrides,
       SettingsOverrides? filamentOverrides,
+      // M9-Vorstufe: aus dem gewaehlten CANVAS-Fach abgeleitete
+      // Overrides (Farbe/Material), damit der G-Code die Fach-
+      // Farbe traegt statt des Profil-Defaults. Caller baut diese
+      // Map in `ProjectScreen._slice()` zusammen, siehe
+      // docs/networking-cc2.md Abschnitt "M9 – slot colour as
+      // slice override". Werte als Strings serialisiert (CLI
+      // --overrides erlaubt keine Arrays).
+      Map<String, String> slotOverrides = const {},
       String? filamentProfileRelative}) async {
     if (_modelPath == null) return;
     _slicing = true;
@@ -135,7 +143,15 @@ class ProjectState extends ChangeNotifier {
       final merged = <String, String>{
         ...overrides?.all ?? const {},
         ...filamentOverrides?.all ?? const {},
+        // slotOverrides zuletzt – falls der Nutzer explizit
+        // filament_colour via FilamentOverrides setzt, muss der
+        // Nutzerwert gewinnen; wir reichen also die Fach-Werte
+        // als niedrigere Prioritaet und schreiben sie NUR dann
+        // in `merged`, wenn der Key noch nicht gesetzt ist.
       };
+      for (final e in slotOverrides.entries) {
+        merged.putIfAbsent(e.key, () => e.value);
+      }
       final r = await slicer.slice(
         modelPath: _modelPath!,
         bedType: _bedType,

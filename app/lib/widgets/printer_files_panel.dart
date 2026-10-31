@@ -24,6 +24,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../l10n/app_localizations.dart';
 import '../net/elegoo_cc2_client.dart';
+import '../settings/slot_matcher.dart';
 import '../state/printer_state.dart';
 import 'workshop_card.dart';
 
@@ -267,8 +268,11 @@ class _PrinterFilesPanelState extends State<PrinterFilesPanel> {
   Future<void> _printDialog(RemoteFile f) async {
     final result = await showDialog<_PrintChoice>(
       context: context,
-      builder: (ctx) => _PrintSettingsDialog(filename: f.filename,
-                                             printerState: widget.printerState),
+      builder: (ctx) => _PrintSettingsDialog(
+        filename: f.filename,
+        colorMap: f.colorMap,
+        printerState: widget.printerState,
+      ),
     );
     if (result == null || !mounted) return;
     final r = await widget.printerState.startPrintFile(
@@ -592,8 +596,13 @@ class _PrintChoice {
 }
 
 class _PrintSettingsDialog extends StatefulWidget {
-  const _PrintSettingsDialog({required this.filename, required this.printerState});
+  const _PrintSettingsDialog({
+    required this.filename,
+    required this.colorMap,
+    required this.printerState,
+  });
   final String filename;
+  final List<ColorMapEntry> colorMap;
   final PrinterState printerState;
   @override
   State<_PrintSettingsDialog> createState() => _PrintSettingsDialogState();
@@ -605,7 +614,25 @@ class _PrintSettingsDialogState extends State<_PrintSettingsDialog> {
   // beide auf denselben Wert gesetzt.
   bool _bedLevel = true;
   bool _timelapse = false;
-  late int _tray = widget.printerState.trayAssignmentForTool0;
+  late int _tray;
+  late SlotMatchResult _match;
+
+  @override
+  void initState() {
+    super.initState();
+    // M9-Vorstufe: Fach automatisch vorwaehlen, wenn Material +
+    // Farbe eindeutig zu genau einem Slot passen. Sonst letzte
+    // Nutzer-Wahl beibehalten und einen Hinweis zeigen.
+    _match = findSlotForFile(
+      colorMap: widget.colorMap,
+      slots: widget.printerState.slots,
+    );
+    if (_match.kind == SlotMatchKind.unique && _match.trayId != null) {
+      _tray = _match.trayId!;
+    } else {
+      _tray = widget.printerState.trayAssignmentForTool0;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -639,6 +666,20 @@ class _PrintSettingsDialogState extends State<_PrintSettingsDialog> {
                     onTap: () => setState(() => _tray = s.trayId),
                   ),
               ]),
+            // M9-Vorstufe: Hinweis zur Vorauswahl – nur bei
+            // ambiguous/none, der eindeutige Fall braucht keinen
+            // Text, weil der Picker ja schon stimmt.
+            if (_match.kind == SlotMatchKind.ambiguous ||
+                _match.kind == SlotMatchKind.none) ...[
+              const SizedBox(height: 6),
+              Text(
+                _match.kind == SlotMatchKind.ambiguous
+                    ? l.printerFilesSlotAmbiguous
+                    : l.printerFilesSlotNoMatch,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontStyle: FontStyle.italic),
+              ),
+            ],
             const SizedBox(height: 10),
             SwitchListTile(
               dense: true, contentPadding: EdgeInsets.zero,

@@ -291,6 +291,8 @@
 
   "printerFilesPrintPickSlot": "Choose slot",
   "printerFilesPrintSlotsUnknown": "Slot info unavailable (not connected?).",
+  "printerFilesSlotAmbiguous": "Several slots match this file — keeping your last choice.",
+  "printerFilesSlotNoMatch": "No slot matches the file's material/colour — keeping your last choice.",
   "printerFilesFilamentIndex": "Filament {idx}",
   "@printerFilesFilamentIndex": {"placeholders": {"idx": {"type": "int"}}},
 
