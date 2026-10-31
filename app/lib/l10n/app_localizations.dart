@@ -1405,6 +1405,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Stream error: {detail}'**
   String printerCameraStreamError(String detail);
+
+  /// No description provided for @printerCameraTapHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap the image for fullscreen'**
+  String get printerCameraTapHint;
+
+  /// No description provided for @printerCameraFullscreenClose.
+  ///
+  /// In en, this message translates to:
+  /// **'Close fullscreen'**
+  String get printerCameraFullscreenClose;
+
+  /// No description provided for @printerFilesHeading.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer files'**
+  String get printerFilesHeading;
+
+  /// No description provided for @printerFilesDownloadDoneDownloads.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved to Download/Handslice (visible in Files app)'**
+  String get printerFilesDownloadDoneDownloads;
+
+  /// No description provided for @printerFilesDownloadOpen.
+  ///
+  /// In en, this message translates to:
+  /// **'Open'**
+  String get printerFilesDownloadOpen;
+
+  /// No description provided for @printerFilesDownloadShare.
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get printerFilesDownloadShare;
 }
 
 class _AppLocalizationsDelegate

@@ -240,5 +240,12 @@
   "printerCameraPaused": "Kamera aus (Bereich nicht sichtbar oder App im Hintergrund).",
   "printerCameraNoUrl": "Konnte die Stream-URL vom Drucker nicht laden.",
   "printerCameraNoUrlDetail": "method 1042 fehlgeschlagen: {detail}",
-  "printerCameraStreamError": "Stream-Fehler: {detail}"
+  "printerCameraStreamError": "Stream-Fehler: {detail}",
+  "printerCameraTapHint": "Bild antippen für Vollbild",
+  "printerCameraFullscreenClose": "Vollbild schließen",
+
+  "printerFilesHeading": "Dateien am Drucker",
+  "printerFilesDownloadDoneDownloads": "Gespeichert unter Download/Handslice (sichtbar im Datei-Manager)",
+  "printerFilesDownloadOpen": "Öffnen",
+  "printerFilesDownloadShare": "Teilen"
 }

@@ -38,7 +38,9 @@ void main() {
     expect(find.textContaining('Projekt-Reiter'), findsOneWidget);
   });
 
-  testWidgets('Reiter Drucker: Header + Refresh-Button', (tester) async {
+  testWidgets('Reiter Drucker: Section-abhaengiger Header', (tester) async {
+    // M8-Nachbesserung: Ueberschrift wechselt je nach SegmentedButton-
+    // Auswahl, Refresh-Button nur in der Historie-Section.
     SharedPreferences.setMockInitialValues({});
     final prefs = await SharedPreferences.getInstance();
     const secure = FlutterSecureStorage();
@@ -47,6 +49,14 @@ void main() {
     await tester.pumpWidget(_wrap(PrinterScreen(printerState: state)));
     await tester.pumpAndSettle();
 
+    // Default-Section ist "Dateien" – kein Refresh-Button.
+    expect(find.text('Dateien am Drucker'), findsOneWidget);
+    expect(find.byIcon(Icons.refresh), findsNothing);
+
+    // Auf Historie wechseln: Text "Historie" wird vom SegmentedButton
+    // als Label fuer das Segment gerendert.
+    await tester.tap(find.text('Historie'));
+    await tester.pumpAndSettle();
     expect(find.text('Druckhistorie'), findsOneWidget);
     expect(find.byIcon(Icons.refresh), findsOneWidget);
   });

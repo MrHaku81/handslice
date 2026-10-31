@@ -780,4 +780,23 @@ class AppLocalizationsDe extends AppLocalizations {
   String printerCameraStreamError(String detail) {
     return 'Stream-Fehler: $detail';
   }
+
+  @override
+  String get printerCameraTapHint => 'Bild antippen für Vollbild';
+
+  @override
+  String get printerCameraFullscreenClose => 'Vollbild schließen';
+
+  @override
+  String get printerFilesHeading => 'Dateien am Drucker';
+
+  @override
+  String get printerFilesDownloadDoneDownloads =>
+      'Gespeichert unter Download/Handslice (sichtbar im Datei-Manager)';
+
+  @override
+  String get printerFilesDownloadOpen => 'Öffnen';
+
+  @override
+  String get printerFilesDownloadShare => 'Teilen';
 }

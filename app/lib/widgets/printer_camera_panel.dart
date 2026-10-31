@@ -36,6 +36,7 @@ class _PrinterCameraPanelState extends State<PrinterCameraPanel> {
   String? _url;
   String? _err;
   bool _loading = false;
+  bool _fullscreenOpen = false;
 
   @override
   void initState() {
@@ -78,11 +79,32 @@ class _PrinterCameraPanelState extends State<PrinterCameraPanel> {
     }
   }
 
+  Future<void> _openFullscreen() async {
+    final url = _url;
+    if (url == null) return;
+    setState(() { _fullscreenOpen = true; });
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => _CameraFullscreen(
+            url: url,
+            appResumed: widget.appResumed,
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() { _fullscreenOpen = false; });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    final active = widget.visible && widget.appResumed;
+    // Panel-Stream pausiert, waehrend Vollbild offen ist – damit nicht
+    // zwei HTTP-Streams gleichzeitig geoeffnet werden.
+    final active = widget.visible && widget.appResumed && !_fullscreenOpen;
     final connected =
         widget.printerState.connection == CanvasConnection.connected;
     return Padding(
@@ -100,12 +122,23 @@ class _PrinterCameraPanelState extends State<PrinterCameraPanel> {
                   color: theme.colorScheme.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: _buildViewport(l, connected, active),
+                clipBehavior: Clip.antiAlias,
+                // Tap: Vollbild oeffnen (nur wenn eine URL vorliegt
+                // und der Stream aktiv waere).
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap:
+                      (_url != null && connected) ? _openFullscreen : null,
+                  child: _buildViewport(l, connected, active),
+                ),
               ),
             ),
-            if (!active && _url != null && connected) ...[
+            if (_url != null && connected) ...[
               const SizedBox(height: 6),
-              Text(l.printerCameraPaused, style: theme.textTheme.bodySmall),
+              Text(
+                active ? l.printerCameraTapHint : l.printerCameraPaused,
+                style: theme.textTheme.bodySmall,
+              ),
             ],
             if (_err != null) ...[
               const SizedBox(height: 6),
@@ -156,6 +189,79 @@ class _PrinterCameraPanelState extends State<PrinterCameraPanel> {
       errorBuilder: (msg) => _CenterIcon(
         icon: Icons.videocam_off_outlined,
         text: l.printerCameraStreamError(msg),
+      ),
+    );
+  }
+}
+
+// Vollbild-Overlay: fuellt den Screen bis zum Rand, Tap/Back
+// schliesst. Lifecycle-Hook synct `appResumed` ueber den eigenen
+// WidgetsBindingObserver, damit der Stream auch im Vollbild sauber
+// stoppt, wenn der Nutzer in die Statusleiste wechselt.
+class _CameraFullscreen extends StatefulWidget {
+  const _CameraFullscreen({required this.url, required this.appResumed});
+  final String url;
+  final bool appResumed;
+  @override
+  State<_CameraFullscreen> createState() => _CameraFullscreenState();
+}
+
+class _CameraFullscreenState extends State<_CameraFullscreen>
+    with WidgetsBindingObserver {
+  late bool _resumed = widget.appResumed;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final r = state == AppLifecycleState.resumed;
+    if (r != _resumed) setState(() => _resumed = r);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => Navigator.of(context).maybePop(),
+                child: Center(
+                  child: MjpegViewer(
+                    url: widget.url,
+                    active: _resumed,
+                    errorBuilder: (msg) => _CenterIcon(
+                      icon: Icons.videocam_off_outlined,
+                      text: l.printerCameraStreamError(msg),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 8, right: 8,
+              child: IconButton(
+                tooltip: l.printerCameraFullscreenClose,
+                icon: const Icon(Icons.close, color: Colors.white),
+                onPressed: () => Navigator.of(context).maybePop(),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -3417,3 +3417,79 @@ camera stream open — are triggered **by Klaus in the app**, not
 by any script in this repo. `tools/cc2-block-a.py` carries the
 new `thumbnail` and `detail` subcommands for repeatable
 verification.
+
+---
+
+## M8 device test – follow-ups (CC2 fw 02.01.01.07, 2026-10-31)
+
+Klaus tested App `55ae65f` on the Poco X3 Pro. Working: file
+listing (with thumbnails/colours/slots), live camera. Not
+working: the "Download" button saved files but **the user could
+not find them in the Android file manager**.
+
+### Root cause (ADB, read-only)
+
+```
+$ adb shell ls /storage/emulated/0/Android/data/dev.handslice.handslice/files/handslice-downloads/
+handslice_1793449708341.gcode   # 221 143 bytes
+```
+
+That path is Android's *app-private external storage*. Since
+Android 11 it is **not visible** from user-facing file managers
+without ADB. The file ended up there because
+`PrinterFilesPanel._downloadDir()` used
+`getExternalStorageDirectory()` directly, without a MediaStore
+mirror.
+
+### Fix: MediaStore mirror on save
+
+- New Kotlin bridge in `MainActivity.kt`:
+  - `saveGcodeToDownloads(srcPath, displayName, mime)` – inserts a
+    row into `MediaStore.Downloads.EXTERNAL_CONTENT_URI` with
+    `RELATIVE_PATH = Download/Handslice`, streams the bytes in,
+    flips `IS_PENDING` to 0. Returns the `content://` URI.
+  - `openUri(uri, mime)` – fires `ACTION_VIEW` with
+    `FLAG_GRANT_READ_URI_PERMISSION`; returns `true` if a handler
+    was found. No READ_EXTERNAL_STORAGE needed.
+  - Existing `saveVideoToGallery(..)` keeps the Movies/Handslice
+    path for the timelapse flow (unchanged).
+- Dart side (`PrinterFilesPanel`):
+  - After the local write to the app-private dir, the panel
+    invokes `saveGcodeToDownloads`. On success it stores the
+    returned URI in `_downloadUris[filename]`.
+  - UI shows a new confirmation line
+    ("Saved to Download/Handslice (visible in Files app)")
+    plus two outlined buttons: **Open** (platform intent to the
+    MediaStore URI) and **Share** (`share_plus` on the
+    app-private file).
+  - MediaStore mirror only runs on Android; the fallback
+    "Saved to {path}" message stays available for other
+    platforms.
+- `minSdk` already 29 (handslice project constraint), so the
+  MediaStore.Downloads path has no compatibility caveat.
+
+### Small UX fixes shipped with the same commit
+
+- Header text was still "Druckhistorie" / "Printer history" on
+  the Files and Camera sections. Now it switches with the
+  selected segment: **"Dateien am Drucker"** / "Printer files",
+  **"Druckhistorie"** / "Printer history",
+  **"Live-Kamera"** / "Live camera".
+- The History-only Refresh icon no longer appears on the other
+  two sections.
+- The per-file **Download** label used to wrap on narrow phones.
+  Replaced with an icon-only `IconButton` + tooltip, matching
+  the Delete button.
+- Camera panel: tapping the preview opens a fullscreen view
+  (`MaterialPageRoute(fullscreenDialog: true)`, Scaffold with
+  black background). Fullscreen has its own `WidgetsBindingObserver`,
+  and the inline panel pauses its own stream while the fullscreen
+  overlay is open — so there is never more than one HTTP
+  connection to the MJPEG server.
+
+### Tests
+
+- Updated `printer_screen_test.dart` "Section-abhaengiger
+  Header": the default (Files) section no longer shows the
+  Refresh icon; tapping "Historie" brings back the old
+  Druckhistorie header + Refresh. 108/108 overall.

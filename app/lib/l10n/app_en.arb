@@ -280,5 +280,12 @@
   "printerCameraNoUrlDetail": "method 1042 failed: {detail}",
   "@printerCameraNoUrlDetail": {"placeholders": {"detail": {"type": "String"}}},
   "printerCameraStreamError": "Stream error: {detail}",
-  "@printerCameraStreamError": {"placeholders": {"detail": {"type": "String"}}}
+  "@printerCameraStreamError": {"placeholders": {"detail": {"type": "String"}}},
+  "printerCameraTapHint": "Tap the image for fullscreen",
+  "printerCameraFullscreenClose": "Close fullscreen",
+
+  "printerFilesHeading": "Printer files",
+  "printerFilesDownloadDoneDownloads": "Saved to Download/Handslice (visible in Files app)",
+  "printerFilesDownloadOpen": "Open",
+  "printerFilesDownloadShare": "Share"
 }

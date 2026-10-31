@@ -18,7 +18,9 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../l10n/app_localizations.dart';
 import '../net/elegoo_cc2_client.dart';
@@ -41,13 +43,17 @@ class PrinterFilesPanel extends StatefulWidget {
 }
 
 class _PrinterFilesPanelState extends State<PrinterFilesPanel> {
+  static const MethodChannel _engineChannel =
+      MethodChannel('dev.handslice.handslice/engine');
+
   List<RemoteFile> _files = const [];
   bool _loading = false;
   String? _error;
   final Map<String, Uint8List?> _thumbs = {}; // null = tried + unavailable
   final Set<String> _thumbPending = {};
   final Set<String> _downloading = {};
-  final Map<String, String> _downloaded = {}; // filename -> path
+  final Map<String, String> _downloaded = {}; // filename -> local path
+  final Map<String, String> _downloadUris = {}; // filename -> MediaStore URI
   final Map<String, String> _downloadErr = {};
   final Set<String> _deleting = {};
 
@@ -161,10 +167,30 @@ class _PrinterFilesPanelState extends State<PrinterFilesPanel> {
       final dir = await _downloadDir();
       final out = File('${dir.path}/${f.filename}');
       await out.writeAsBytes(bytes, flush: true);
+      // Jetzt via MediaStore nach Download/Handslice spiegeln,
+      // damit der Nutzer die Datei im Datei-Manager findet.
+      String? uri;
+      if (Platform.isAndroid) {
+        try {
+          uri = await _engineChannel.invokeMethod<String>(
+            'saveGcodeToDownloads',
+            {
+              'srcPath': out.path,
+              'displayName': f.filename,
+              'mime': 'application/octet-stream',
+            },
+          );
+        } on PlatformException catch (e) {
+          // Kein Dealbreaker: app-interne Datei bleibt bestehen,
+          // Share waehrend des Downloads bleibt moeglich.
+          debugPrint('saveGcodeToDownloads failed: ${e.code} ${e.message}');
+        }
+      }
       if (!mounted) return;
       setState(() {
         _downloading.remove(f.filename);
         _downloaded[f.filename] = out.path;
+        if (uri != null) _downloadUris[f.filename] = uri;
       });
     } catch (e) {
       if (!mounted) return;
@@ -218,6 +244,26 @@ class _PrinterFilesPanelState extends State<PrinterFilesPanel> {
     }
   }
 
+  Future<void> _openSaved(String filename) async {
+    final uri = _downloadUris[filename];
+    if (uri == null) return;
+    if (!Platform.isAndroid) return;
+    try {
+      await _engineChannel.invokeMethod<bool>('openUri', {
+        'uri': uri,
+        'mime': 'application/octet-stream',
+      });
+    } on PlatformException catch (e) {
+      debugPrint('openUri failed: ${e.code} ${e.message}');
+    }
+  }
+
+  Future<void> _shareSaved(String filename) async {
+    final path = _downloaded[filename];
+    if (path == null) return;
+    await SharePlus.instance.share(ShareParams(files: [XFile(path)]));
+  }
+
   Future<void> _printDialog(RemoteFile f) async {
     final result = await showDialog<_PrintChoice>(
       context: context,
@@ -257,6 +303,7 @@ class _PrinterFilesPanelState extends State<PrinterFilesPanel> {
           thumb: _thumbs[_files[i].filename],
           downloading: _downloading.contains(_files[i].filename),
           downloaded: _downloaded[_files[i].filename],
+          downloadUri: _downloadUris[_files[i].filename],
           downloadErr: _downloadErr[_files[i].filename],
           deleting: _deleting.contains(_files[i].filename),
           isRunning:
@@ -264,6 +311,8 @@ class _PrinterFilesPanelState extends State<PrinterFilesPanel> {
           onDownload: () => _download(_files[i]),
           onDelete: () => _delete(_files[i]),
           onPrint: () => _printDialog(_files[i]),
+          onOpen: () => _openSaved(_files[i].filename),
+          onShare: () => _shareSaved(_files[i].filename),
           canStart:
               widget.printerState.isIdle && !widget.printerState.reconnecting,
         ),
@@ -280,6 +329,7 @@ class _FileRow extends StatelessWidget {
     required this.thumb,
     required this.downloading,
     required this.downloaded,
+    required this.downloadUri,
     required this.downloadErr,
     required this.deleting,
     required this.isRunning,
@@ -287,12 +337,15 @@ class _FileRow extends StatelessWidget {
     required this.onDownload,
     required this.onDelete,
     required this.onPrint,
+    required this.onOpen,
+    required this.onShare,
   });
 
   final RemoteFile file;
   final Uint8List? thumb;
   final bool downloading;
   final String? downloaded;
+  final String? downloadUri;
   final String? downloadErr;
   final bool deleting;
   final bool isRunning;
@@ -300,6 +353,8 @@ class _FileRow extends StatelessWidget {
   final VoidCallback onDownload;
   final VoidCallback onDelete;
   final VoidCallback onPrint;
+  final VoidCallback onOpen;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -382,14 +437,17 @@ class _FileRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: downloading ? null : onDownload,
-                icon: const Icon(Icons.download_outlined, size: 18),
-                label: Text(l.printerFilesDownloadButton),
-              ),
+            // Icon-only mit Tooltip – "Herunterladen" bricht sonst
+            // auf schmalen Screens im Wort um.
+            IconButton(
+              tooltip: l.printerFilesDownloadButton,
+              onPressed: downloading ? null : onDownload,
+              icon: downloading
+                  ? const SizedBox(
+                      width: 18, height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.download_outlined),
             ),
-            const SizedBox(width: 8),
             IconButton(
               tooltip: isRunning
                   ? l.printerFilesDeleteBlockedRunning
@@ -408,8 +466,29 @@ class _FileRow extends StatelessWidget {
           ],
           if (downloaded != null) ...[
             const SizedBox(height: 6),
-            Text(l.printerFilesDownloadDone(downloaded!),
-                style: theme.textTheme.bodySmall),
+            Text(
+              downloadUri != null
+                  ? l.printerFilesDownloadDoneDownloads
+                  : l.printerFilesDownloadDone(downloaded!),
+              style: theme.textTheme.bodySmall,
+            ),
+            if (downloadUri != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(children: [
+                  OutlinedButton.icon(
+                    onPressed: onOpen,
+                    icon: const Icon(Icons.open_in_new, size: 16),
+                    label: Text(l.printerFilesDownloadOpen),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: onShare,
+                    icon: const Icon(Icons.share_outlined, size: 16),
+                    label: Text(l.printerFilesDownloadShare),
+                  ),
+                ]),
+              ),
           ],
           if (downloadErr != null) ...[
             const SizedBox(height: 6),

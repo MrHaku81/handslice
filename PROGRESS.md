@@ -18,6 +18,81 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 18:30 UTC – M8 Nachbesserungen: MediaStore-Downloads + UI-Kleinigkeiten
+
+Klaus-Test mit App 55ae65f ergab:
+- Dateiliste + Thumbnails + Farben/Faecher: OK.
+- Live-Kamera: OK.
+- Download: Datei landete in `/Android/data/dev.handslice.handslice/
+  files/handslice-downloads/` (ADB-Nachweis), **im Datei-Manager
+  nicht sichtbar** (Scoped Storage seit Android 11). Fix: MediaStore.
+
+### Nachweislich
+
+- **ADB-Nachforschung (nur lesen):** Datei lag in
+  `/Android/data/dev.handslice.handslice/files/handslice-downloads/
+  handslice_1793449708341.gcode` – richtig geschrieben, aber nicht
+  nutzer-sichtbar. Nichts an das Geraet geschickt.
+- **Native-Bruecke** `MainActivity.kt`:
+  - `saveGcodeToDownloads(srcPath, displayName, mime)` – legt die
+    Datei via `MediaStore.Downloads.EXTERNAL_CONTENT_URI` unter
+    `Download/Handslice/` an. Benoetigt keine zusaetzliche
+    Permission (Scoped Storage, API 29+; `minSdk` ist 29).
+  - `openUri(uri, mime)` – startet `ACTION_VIEW` auf dem
+    content://-URI, damit der Nutzer die Datei im Datei-Manager
+    oder Viewer oeffnen kann ohne READ_EXTERNAL_STORAGE.
+  - `saveVideoToGallery(..)` bleibt unveraendert fuer die
+    Zeitraffer-Flow (Movies/Handslice).
+- **Dart-UI** (`PrinterFilesPanel`):
+  - Nach dem lokalen Schreiben ruft die Panel die
+    `saveGcodeToDownloads`-Methode; URI wird in
+    `_downloadUris` gemerkt.
+  - UI zeigt "Gespeichert unter Download/Handslice (sichtbar im
+    Datei-Manager)" + zwei OutlinedButtons **Oeffnen** (URI via
+    Platform-Intent) und **Teilen** (`share_plus` auf
+    app-interner Datei).
+- **UI-Kleinigkeiten** aus Klaus' Rueckmeldung:
+  - Section-abhaengiger Header: "Dateien am Drucker" /
+    "Druckhistorie" / "Live-Kamera" statt starr "Druckhistorie".
+  - Refresh-Icon nur im Historie-Reiter (Pull-to-refresh deckt
+    Dateien ab).
+  - "Herunterladen" bricht nicht mehr im Wort um – jetzt reiner
+    IconButton mit Tooltip, analog zum Loeschen-Button.
+  - Kamerabild Tap → Vollbild (`MaterialPageRoute
+    fullscreenDialog: true`, Scaffold black, eigener
+    WidgetsBindingObserver). Panel-Stream pausiert waehrend
+    Vollbild offen ist, damit nicht zwei HTTP-Streams parallel
+    laufen.
+- **Tests**: `printer_screen_test.dart` Fall "Section-
+  abhaengiger Header" angepasst (Default-Section ist "Dateien"
+  → Refresh fehlt; nach Tap auf "Historie" sind Druckhistorie
+  + Refresh wieder da). **108/108 gruen** (unveraendert).
+- **L10n**: neue Keys `printerCameraTapHint`,
+  `printerCameraFullscreenClose`, `printerFilesHeading`,
+  `printerFilesDownloadDoneDownloads`, `printerFilesDownloadOpen`,
+  `printerFilesDownloadShare` in en + de.
+- **Scrub** strict: 0 Treffer.
+
+### Ungeprueft
+
+- MediaStore-Pfad live im Datei-Manager: Klaus prueft, ob die
+  Download-Button-Variante jetzt die Datei in
+  `Download/Handslice/` zeigt und ob der Open-Button auf dem
+  Poco (MIUI Datei-Manager) einen passenden Handler findet. Bei
+  "kein Handler" liefert der Platform-Channel `false` ohne
+  Fehler; die App zeigt dann nur Teilen.
+- Share-Button nutzt den app-privaten Pfad – FileProvider
+  Konfiguration ist im bestehenden Timelapse-Flow abgenommen,
+  fuer G-Code identisch.
+- Fullscreen-Kamera-Rotation: Scaffold passt sich automatisch
+  an Portrait/Landscape an; nicht am Geraet rotiert getestet.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+---
+
 ## 2026-10-31 18:00 UTC – M8: Dateien am Drucker + Live-Kamera (Pflicht 4+5)
 
 Neuer "Dateien"- und "Kamera"-Bereich im Reiter „Drucker". Nur zwei

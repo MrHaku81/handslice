@@ -373,21 +373,31 @@ class _PrinterScreenState extends State<PrinterScreen>
   }
 
   Widget _header(AppLocalizations l) {
+    // M8-Nachbesserung: Ueberschrift je nach aktiver Section, nicht
+    // starr "Druckhistorie" (Klaus-Rueckmeldung aus Pflicht-4/5-Test).
+    final title = switch (_section) {
+      PrinterSection.files   => l.printerFilesHeading,
+      PrinterSection.history => l.printerHistoryHeading,
+      PrinterSection.camera  => l.printerCameraHeading,
+    };
+    // Refresh-Button nur fuer die Historie-Section; der Dateien-Reiter
+    // hat RefreshIndicator (Pull-to-refresh), der Kamera-Reiter
+    // braucht keinen manuellen Refresh.
+    final showRefresh = _section == PrinterSection.history;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              l.printerHistoryHeading,
-              style: Theme.of(context).textTheme.titleLarge,
+            child: Text(title,
+                style: Theme.of(context).textTheme.titleLarge),
+          ),
+          if (showRefresh)
+            IconButton(
+              tooltip: l.printerHistoryRefresh,
+              onPressed: _loading ? null : _refresh,
+              icon: const Icon(Icons.refresh),
             ),
-          ),
-          IconButton(
-            tooltip: l.printerHistoryRefresh,
-            onPressed: _loading ? null : _refresh,
-            icon: const Icon(Icons.refresh),
-          ),
         ],
       ),
     );
