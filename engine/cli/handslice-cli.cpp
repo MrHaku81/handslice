@@ -104,6 +104,11 @@ struct Args {
     // unconditionally; this flag never touches the Print.
     uint32_t simplify_target = 0;
     bool simplify_set = false;
+    // --export-preview-mesh <path>: emits a compact binary that
+    // the app's debug preview screen loads (Pflicht 7). Written
+    // AFTER centring / drop-to-bed so the mesh is in the same
+    // world frame the slicer sees. Slicing is unaffected.
+    std::string preview_mesh_path;
 };
 
 [[noreturn]] void die(const std::string& msg) {
@@ -147,7 +152,15 @@ void usage(std::ostream& os) {
         "--simplify <N>  Dreiecks-Zielanzahl fuer den Thumbnail-Renderer\n"
         "             (its_quadric_edge_collapse). Nur fuer Vorschau/Anzeige;\n"
         "             der Slice-Pfad nutzt immer das Original-Mesh. 0 oder\n"
-        "             weggelassen = keine Vereinfachung.\n";
+        "             weggelassen = keine Vereinfachung.\n"
+        "\n"
+        "--export-preview-mesh <path>\n"
+        "             Export the arranged model (after centring/drop-to-bed)\n"
+        "             as a compact binary mesh for the app's plate-view\n"
+        "             debug screen (Pflicht 7). Honours --simplify. Does\n"
+        "             NOT change the slicing path. Format: 'HSPM' + u32\n"
+        "             version=1 + per-object/per-volume flat vertex streams\n"
+        "             (position + normal, 24 bytes each, three per triangle).\n";
 }
 
 Args parse_args(int argc, char** argv) {
@@ -177,6 +190,9 @@ Args parse_args(int argc, char** argv) {
         else if (arg == "--bed-type") a.bed_type = need_val("--bed-type");
         else if (arg == "--dump-schema") a.dump_schema = true;
         else if (arg == "--overrides") a.overrides_json = need_val("--overrides");
+        else if (arg == "--export-preview-mesh") {
+            a.preview_mesh_path = need_val("--export-preview-mesh");
+        }
         else if (arg == "--simplify") {
             const std::string v = need_val("--simplify");
             try {
@@ -811,6 +827,82 @@ static int run(int argc, char** argv) {
     print.apply(model, cfg);
     print.process();
 
+    // 6a. Preview-Mesh-Export (Pflicht 7 – plate-view benchmark).
+    //
+    // Compact binary format (little-endian, no padding) so the app
+    // can map it to flutter_scene's `MeshGeometry` or a
+    // `Canvas.drawVertices` buffer with a single read.
+    //
+    //     u8[4]  magic   = 'H','S','P','M'
+    //     u32    version = 1
+    //     u32    n_objects
+    //     per object:
+    //       u32 n_volumes
+    //       per volume:
+    //         u32 filament_idx    // index into filament_colour
+    //         u32 n_tris
+    //         per triangle (3 vertices, each 6 floats):
+    //           f32 x, y, z, nx, ny, nz   // vertex 0
+    //           f32 x, y, z, nx, ny, nz   // vertex 1
+    //           f32 x, y, z, nx, ny, nz   // vertex 2
+    //         (normal is identical for all three vertices of a
+    //         triangle — flat shading, matches Thumbnail renderer)
+    //
+    // Positions are in printer-world millimetres, same frame as
+    // the arranged model (centred + dropped to bed). The slicing
+    // path above is NOT changed by this export.
+    const auto preview_meshes = handslice::build_preview_meshes(
+        model, cfg, args.simplify_target);
+
+    if (!args.preview_mesh_path.empty()) {
+        std::ofstream f(args.preview_mesh_path, std::ios::binary);
+        if (!f) die("cannot open preview-mesh output: " + args.preview_mesh_path);
+        auto w32 = [&](uint32_t v) {
+            f.write(reinterpret_cast<const char*>(&v), 4);
+        };
+        auto wf  = [&](float v) {
+            f.write(reinterpret_cast<const char*>(&v), 4);
+        };
+        f.write("HSPM", 4);
+        w32(1u);
+        w32(uint32_t(preview_meshes.size()));
+        uint64_t total_tris = 0;
+        for (const auto& per_obj : preview_meshes) {
+            w32(uint32_t(per_obj.size()));
+            for (const auto& pm : per_obj) {
+                w32(pm.filament_idx);
+                const uint32_t n_tris = uint32_t(pm.its.indices.size());
+                w32(n_tris);
+                for (const auto& face : pm.its.indices) {
+                    const auto& a = pm.its.vertices[face[0]];
+                    const auto& b = pm.its.vertices[face[1]];
+                    const auto& c = pm.its.vertices[face[2]];
+                    const float ax = a.x(), ay = a.y(), az = a.z();
+                    const float bx = b.x(), by = b.y(), bz = b.z();
+                    const float cx_ = c.x(), cy_ = c.y(), cz = c.z();
+                    // Flat normal (counter-clockwise winding →
+                    // right-hand outward); the app can re-orient
+                    // per-face as the thumbnail renderer does.
+                    const float ex = bx - ax, ey = by - ay, ez = bz - az;
+                    const float fx = cx_ - ax, fy = cy_ - ay, fz = cz - az;
+                    float nx = ey * fz - ez * fy;
+                    float ny = ez * fx - ex * fz;
+                    float nz = ex * fy - ey * fx;
+                    const float L = std::sqrt(nx*nx + ny*ny + nz*nz);
+                    if (L > 1e-9f) { nx /= L; ny /= L; nz /= L; }
+                    wf(ax); wf(ay); wf(az); wf(nx); wf(ny); wf(nz);
+                    wf(bx); wf(by); wf(bz); wf(nx); wf(ny); wf(nz);
+                    wf(cx_); wf(cy_); wf(cz); wf(nx); wf(ny); wf(nz);
+                }
+                total_tris += n_tris;
+            }
+        }
+        if (!args.quiet)
+            std::cerr << "handslice-cli: wrote preview mesh ("
+                      << total_tris << " triangles) to "
+                      << args.preview_mesh_path << "\n";
+    }
+
     // 6b. Thumbnail-Vorbereitung.
     //
     // Variante C (siehe docs/preview-research.md "Follow-up …"):
@@ -824,8 +916,8 @@ static int run(int argc, char** argv) {
     // auf dem Slice-Pfad. Der Print.apply(model, cfg) hat die
     // ORIGINAL-Meshes bereits uebernommen; ein Preview-Vereinfachen
     // kann nicht mehr nachtraeglich die G-Code-Bahnen verdrehen.
-    const auto preview_meshes = handslice::build_preview_meshes(
-        model, cfg, args.simplify_target);
+    // preview_meshes wurde oben in Step 6a bereits einmal gebaut,
+    // damit --export-preview-mesh dieselben Daten teilt.
     auto thumbnail_cb =
         [&model, &cfg, &preview_meshes](const Slic3r::ThumbnailsParams& p) {
             return handslice::render_handslice_thumbnails(

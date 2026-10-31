@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../l10n/app_localizations.dart';
+import 'plate_bench_screen.dart';
 import '../settings/filament_mapping.dart';
 import '../settings/filament_overrides.dart';
 import '../settings/profile_reader.dart';
@@ -500,6 +502,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 l.settingsNoMatches,
                 style: theme.textTheme.bodyMedium
                     ?.copyWith(color: WorkshopTokens.textMuted),
+              ),
+            ),
+          ],
+          if (kDebugMode) ...[
+            const SizedBox(height: 24),
+            TextButton.icon(
+              icon: const Icon(Icons.bug_report),
+              label: const Text('Open plate-view benchmark (debug)'),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PlateBenchScreen()),
               ),
             ),
           ],

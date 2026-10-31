@@ -18,6 +18,64 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 18:30 UTC – Pflicht 7 scaffolding: CLI export + bench screen + Canvas fallback
+
+Benchmark scaffolding for the plate renderer is in place. Numbers
+pending Klaus' Poco X3 Pro run.
+
+- CLI gained `--export-preview-mesh <path>` (`handslice-cli` arg
+  block + export in step 6a, right before thumbnail prep).
+  Reuses the arranged `preview_meshes` so slicing stays
+  untouched; reference-g-code test still green. 24-tri notched
+  cube serialises to 1752 bytes with magic `HSPM`.
+- `flutter_scene: 0.24.3` pinned (exact, not caret). F-Droid
+  check passed: no prebuilt native blobs under the package root,
+  shader sources (`.vert`, `.frag`, `.glsl`) ship from source,
+  MIT. Transitive `flutter_gpu` is the Flutter SDK stub.
+- `lib/screens/plate_bench_screen.dart`: hidden plate-view
+  screen (only shown in `kDebugMode`, bottom row in Settings).
+  Loads a `.hspm`, one-finger rotate, two-finger pan/zoom,
+  toggle between `flutter_scene` and `Canvas.drawVertices`,
+  reports load/build time, triangle count, approximate VRAM,
+  rolling FPS + p95 frame time, RSS, Δload RSS, and a backend
+  guess from `gpuContext.doesSupportFramebufferRenderMipmap`
+  (true = Vulkan/Metal, false = GLES — Impeller does not expose
+  the name directly).
+- Debug APK builds cleanly (`JAVA_HOME=java-21-openjdk`
+  required; the system `java` is the headless 27 JRE and lacks
+  `javac`).
+- Report scaffold under `docs/plate-view-benchmark.md` with the
+  measurement-table template, procedure, F-Droid eligibility
+  recap, HSPM format spec, and a three-branch recommendation
+  framework to commit to after the numbers come in.
+
+Open: Poco run on Klaus' notched cube + big model (not in repo).
+After the numbers come back, pick one of the three
+recommendation bullets, and fill or drop the upstream-notice
+stub (`docs/upstream/`).
+
+---
+
+## 2026-11-01 09:00 UTC – Pflicht 6 device test passed (`7fc19b0`)
+
+Klaus verified on the printer:
+
+- Cube: white, three distinct face greys, right-side-up, in-app
+  and on the printer's display.
+- Auryn-sized model: slices in ~1 min end-to-end **including**
+  the thumbnail — no measurable regression from the renderer.
+- Black filament on a dark display background renders similarly
+  to Orca's own export (near-silhouette). Treated as expected,
+  **not** a renderer defect — the background stays transparent
+  so this is a display-theme/colour interaction. **No change.**
+
+Pflicht 6 closed. First English-only Pflicht closed under the
+new project-language rule.
+
+Pushed by Klaus.
+
+---
+
 ## 2026-10-31 23:30 UTC – Pflicht 6 follow-up 2: z-buffer sign fix + notched-cube test
 
 Device test of `aca76ac` passed on colour, shading and background,
