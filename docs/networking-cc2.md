@@ -3137,3 +3137,101 @@ target. The surrounding codes are Preparing-codes (1045, 2801,
   showed `status=2` to the user. Replaced the `int` placeholder
   with a `String` label and added CC2 status names (per
   `cc2/const.py` CC2_STATUS_*). "status 2" now reads "printing".
+
+---
+
+## M7 – Printer-error table + reconnect behaviour (2026-10-31)
+
+### Source for the exception_status table
+
+Full code → text table (77 entries) extracted from the Orca
+ElegooLink web UI at
+`engine/OrcaSlicer/resources/web/elegoolink/lan_service_web/
+index.html`:
+
+- **Code → key** mapping (81 code→key assignments; 77 distinct
+  codes). Pattern `<code>:"exceptionCode.<name>"` emitted at
+  offset @590106 and following. Extraction via regex, dedup by
+  first-wins.
+- **Key → English text**: object `Zve = { … }` starting at
+  @512127, preamble `locale:"en"`. 75 top-level keys; 76/77 of
+  the mapping targets have a text (the lone miss is 1300
+  `PrintFileUnavailable`, which we backfill from the key name).
+- **Chinese** text in sibling object `L3e` @528357 — not used,
+  we go English → German instead.
+
+`danielcherubini/elegoo-homeassistant/custom_components/elegoo_printer/
+cc2/const.py` does **not** carry an exception-code enum, so the
+Orca bundle is the only full source. method.h names 1243 (and a
+handful of others) but has no text.
+
+The 77 codes are mirrored verbatim as English text in
+`app/lib/net/cc2_exception_codes.dart` constant `cc2ExceptionEn`,
+alongside a hand-translated `cc2ExceptionDe`. Duplicate codes with
+identical English text share the same German text (e.g. 1203 =
+1241 both land on the "feed-from-CANVAS failed" message).
+
+### Display rules (print screen)
+
+- Any non-zero `machine_status.exception_status[]` entry triggers
+  a red error banner inside the live-status card.
+- Code **1243** keeps its dedicated text
+  "Filament feed error – check PTFE tubes" / "Filamentzufuhr-
+  Fehler – PTFE-Schläuche prüfen" from `printStatusException1243`
+  (Klaus-defined wording, carried over from M6).
+- All other codes read from `cc2ExceptionLookup(code, locale)`.
+- Unknown codes fall back to `l.exceptionCodeUnknown(code)`
+  ("Printer error 2345" / "Druckerfehler 2345") — the raw list
+  is never rendered.
+
+### Reconnect behaviour
+
+Loss of connection is detected via two signals:
+
+1. **MQTT ping failure**: existing 10 s ping loop
+   (`_startPing`); first PUBLISH error reaches the reconnect path.
+2. **Status watchdog**: a 10 s periodic check verifies that the
+   last `api_status` delta is no older than 30 s **while a print
+   is active**. In Idle the firmware is quiet and we don't force
+   a reconnect from the watchdog.
+
+On reconnect:
+
+- Delay follows a short progressive sequence
+  **2 s → 5 s → 10 s → 20 s → 30 s**, then capped at 30 s.
+- Each attempt runs the full `connectAndLoad()` path again: UDP
+  discovery → MQTT CONNECT → `api_register` + `register_response`
+  → subscribe → fresh 1002 full-status fetch.
+- Watchdog grace timer is reset on successful connect; so are
+  the attempt counter and the "due at" timestamp.
+- **No command is retried** after a reconnect — no re-pause,
+  re-cancel, re-light, re-start. The firmware ran the originally-
+  issued command locally; the app has no reason to repeat it,
+  and a replay could cause duplicate print starts if a reconnect
+  happens milliseconds after a 1020 that the printer actually
+  received.
+
+### UI during reconnect
+
+- The reconnect info-box in the print screen shows
+  `l.reconnectBannerLost` ("Connection lost — reconnecting…")
+  while the attempt is in flight, and
+  `l.reconnectBannerRetrying(sec)` ("Reconnecting in Ns…") while
+  the backoff is counting down.
+- All control buttons (Pause/Resume/Cancel + the Light switch)
+  are gated on `connection == connected`, so they grey out for
+  the whole reconnect window without further plumbing.
+
+### Lifecycle hook
+
+`_RootShellState` observes `AppLifecycleState.resumed` via
+`WidgetsBindingObserver` and calls `printerState.checkAliveOnResume()`.
+That method:
+
+- Does nothing if the state machine is already in the
+  `disconnected` baseline.
+- Otherwise checks `_client.isConnected` **and** that the last
+  `api_status` delta is within the watchdog grace window.
+- If either fails, resets the backoff attempt counter to 0 (so a
+  user who just unlocked the phone doesn't wait 30 s) and
+  schedules an immediate reconnect.

@@ -80,7 +80,41 @@ class PrinterState extends ChangeNotifier {
   Timer? _pingTimer;
   StreamSubscription<Map<String, dynamic>>? _statusSub;
   Timer? _reconnectTimer;
+  Timer? _watchdogTimer;
   bool _reconnecting = false;
+
+  // Reconnect-Backoff. Delays in Sekunden; nach dem letzten Index
+  // bleibt der letzte Wert als Dach bestehen. Die Folge ist bewusst
+  // kurz: Verbindungsabrisse im Heim-WLAN sind meist Sekunden-Events,
+  // nicht Minuten.
+  static const List<int> _reconnectBackoffSec = [2, 5, 10, 20, 30];
+
+  // Public fuer Unit-Tests der Backoff-Progression.
+  @visibleForTesting
+  static int reconnectDelaySecForAttempt(int attempt) {
+    final idx = attempt.clamp(0, _reconnectBackoffSec.length - 1);
+    return _reconnectBackoffSec[idx];
+  }
+
+  int _reconnectAttempt = 0;
+  DateTime? _reconnectDueAt;
+
+  @visibleForTesting
+  int get reconnectAttempt => _reconnectAttempt;
+
+  @visibleForTesting
+  void setReconnectDueAtForTest(DateTime? due) {
+    _reconnectDueAt = due;
+    notifyListeners();
+  }
+
+  // Status-Watchdog: haertet die Verbindungserkennung, falls der
+  // Broker die TCP-Verbindung still kappt (keine CONNACK-Fehlerspur,
+  // der mqtt_client meldet keinen Disconnect). Wenn in `_watchdogGrace`
+  // kein api_status-Delta auftaucht und wir im Druckbetrieb sind,
+  // triggern wir einen Reconnect.
+  static const Duration _watchdogGrace = Duration(seconds: 30);
+  DateTime? _lastDeltaAt;
 
   String? get ip => prefs.getString(_kIp);
   String? get sn => prefs.getString(_kSn);
@@ -93,6 +127,15 @@ class PrinterState extends ChangeNotifier {
   Map<String, dynamic> get liveState => Map.unmodifiable(_liveState);
   String? get lastUploadedName => _lastUploadedName;
   bool get reconnecting => _reconnecting;
+
+  // Sekunden bis zum naechsten Reconnect-Versuch, oder null wenn
+  // gerade nicht geplant. UI nutzt das fuer einen Countdown.
+  int? get secondsUntilReconnect {
+    final due = _reconnectDueAt;
+    if (due == null) return null;
+    final diff = due.difference(DateTime.now()).inSeconds;
+    return diff < 0 ? 0 : diff;
+  }
 
   // Nur fuer Widget-Tests gedacht: ersetzt bzw. merge-t den Live-State
   // ohne echten MQTT-Pfad. Nicht im Produktionscode aufrufen.
@@ -220,6 +263,19 @@ class PrinterState extends ChangeNotifier {
     return list.contains(1243);
   }
 
+  // Nur die bisher ganzzahligen und > 0 Eintraege. Firmware pusht
+  // gelegentlich `null` oder `0` als Platzhalter; die filtern wir
+  // weg, damit die UI keinen leeren Error-Banner zeigt.
+  List<int> get activeExceptionCodes {
+    final list = exceptionStatus;
+    if (list == null) return const [];
+    final out = <int>[];
+    for (final v in list) {
+      if (v is int && v > 0) out.add(v);
+    }
+    return out;
+  }
+
   // --- Licht-Zustand ---
   //
   // Die CC2-Firmware pusht KEIN `light`/`chamber_light`-Feld
@@ -297,6 +353,7 @@ class PrinterState extends ChangeNotifier {
   Future<void> clearPairing() async {
     _stopPing();
     _stopStatusSub();
+    _stopWatchdog();
     _stopReconnect();
     await prefs.remove(_kIp);
     await prefs.remove(_kSn);
@@ -345,10 +402,14 @@ class PrinterState extends ChangeNotifier {
       await _client.connect(ip: ipV, sn: info.sn, accessCode: code);
       _state = CanvasConnection.connected;
       _slots = await _client.getCanvasStatus();
-      // Initial-Status laden + Delta-Stream abonnieren + PING-Loop
+      // Initial-Status laden + Delta-Stream abonnieren + PING-Loop +
+      // Status-Watchdog starten. Reconnect-Zaehler zuruecksetzen.
       await _refreshStatus();
       _startStatusSub();
       _startPing();
+      _startWatchdog();
+      _reconnectAttempt = 0;
+      _reconnectDueAt = null;
       notifyListeners();
     } on ElegooAuthException catch (e) {
       _state = CanvasConnection.authError;
@@ -600,6 +661,7 @@ class PrinterState extends ChangeNotifier {
       _lastPrintDurationSec = pd;
       _lastPrintDurationAt = DateTime.now();
     }
+    _lastDeltaAt = DateTime.now();
     notifyListeners();
   }
 
@@ -646,31 +708,92 @@ class PrinterState extends ChangeNotifier {
     _pingTimer = null;
   }
 
+  // Status-Watchdog: feuert periodisch, prueft wie lange das letzte
+  // api_status-Delta her ist. Wenn > _watchdogGrace und wir glauben
+  // verbunden zu sein → Reconnect ausloesen. Baendigt zwei Faelle:
+  //   1. Broker-TCP-Halbschluss, bei dem mqtt_client keinen
+  //      Disconnect meldet.
+  //   2. WLAN-Flap, bei dem die TCP-Verbindung ins Nirgendwo laeuft.
+  // Pre-Print laeuft die Firmware oft minutenlang ohne 6000-Delta,
+  // daher nur beim laufenden Druck pruefen (status != idle); im
+  // Idle bleiben wir ruhig.
+  void _startWatchdog() {
+    _stopWatchdog();
+    _lastDeltaAt = DateTime.now();
+    _watchdogTimer =
+        Timer.periodic(const Duration(seconds: 10), (_) {
+      if (_state != CanvasConnection.connected) return;
+      if (isIdle) return;
+      final last = _lastDeltaAt;
+      if (last == null) return;
+      if (DateTime.now().difference(last) > _watchdogGrace) {
+        _scheduleReconnect();
+      }
+    });
+  }
+
+  void _stopWatchdog() {
+    _watchdogTimer?.cancel();
+    _watchdogTimer = null;
+  }
+
   // Verbindungs-Dropouts: der laufende Druck am Drucker darf NICHT
   // betroffen sein – der laeuft komplett lokal. Wir re-verbinden
-  // nur die Beobachter-Session und re-abonnieren Status.
+  // nur die Beobachter-Session, re-registrieren und re-abonnieren
+  // Status. Keine Wiederholung von vorherigen Steuerbefehlen –
+  // Pause/Resume/Cancel/Start werden nach dem Reconnect NICHT
+  // erneut geschickt (Pflicht-3-Vorgabe).
+  //
+  // Exponential-ish backoff:  2 → 5 → 10 → 20 → 30 s, danach 30 s.
   void _scheduleReconnect() {
     if (_reconnecting || _state == CanvasConnection.disconnected) return;
     _reconnecting = true;
     _stopPing();
     _stopStatusSub();
+    _stopWatchdog();
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 5), () async {
+    final idx = _reconnectAttempt.clamp(0, _reconnectBackoffSec.length - 1);
+    final delaySec = _reconnectBackoffSec[idx];
+    _reconnectAttempt++;
+    _reconnectDueAt = DateTime.now().add(Duration(seconds: delaySec));
+    notifyListeners();
+    _reconnectTimer = Timer(Duration(seconds: delaySec), () async {
       _reconnecting = false;
+      _reconnectDueAt = null;
+      notifyListeners();
       await connectAndLoad();
     });
   }
 
   void _stopReconnect() {
     _reconnecting = false;
+    _reconnectAttempt = 0;
+    _reconnectDueAt = null;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+  }
+
+  // Von Lifecycle-Observer (AppLifecycleState.resumed) aufgerufen.
+  // Wenn wir aktuell nicht verbunden sind oder der Watchdog die
+  // Verbindung fuer stale haelt, triggere einen frischen Versuch.
+  // Reset Backoff vorher: nach dem App-Resume geht's beim ersten
+  // Versuch mit 2 s los, nicht bei dem alten Zaehler.
+  Future<void> checkAliveOnResume() async {
+    if (_state == CanvasConnection.disconnected) return;
+    final isConn = _client.isConnected;
+    final stale = _lastDeltaAt != null &&
+        DateTime.now().difference(_lastDeltaAt!) > _watchdogGrace;
+    if (!isConn || stale) {
+      _reconnectAttempt = 0;
+      _scheduleReconnect();
+    }
   }
 
   @override
   void dispose() {
     _stopPing();
     _stopStatusSub();
+    _stopWatchdog();
     _stopReconnect();
     _client.disconnect();
     super.dispose();

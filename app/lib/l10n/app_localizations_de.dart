@@ -645,4 +645,30 @@ class AppLocalizationsDe extends AppLocalizations {
   String machineStatusOther(int code) {
     return 'Status $code';
   }
+
+  @override
+  String get printerErrorBannerTitle => 'Druckerfehler';
+
+  @override
+  String printerErrorsBannerTitle(int count) {
+    return 'Druckerfehler ($count)';
+  }
+
+  @override
+  String exceptionCodeUnknown(int code) {
+    return 'Druckerfehler $code';
+  }
+
+  @override
+  String get reconnectBannerLost => 'Verbindung verloren – verbinde neu …';
+
+  @override
+  String reconnectBannerRetrying(int seconds) {
+    return 'Erneuter Verbindungsversuch in $seconds s …';
+  }
+
+  @override
+  String reconnectBannerBackoff(int seconds) {
+    return 'Verbindung fehlgeschlagen – nächster Versuch in $seconds s.';
+  }
 }

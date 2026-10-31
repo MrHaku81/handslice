@@ -139,8 +139,31 @@ class RootShell extends StatefulWidget {
   State<RootShell> createState() => _RootShellState();
 }
 
-class _RootShellState extends State<RootShell> {
+class _RootShellState extends State<RootShell> with WidgetsBindingObserver {
   int _index = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  // Pflicht-3 Teil B.3: beim Zurueckkehren der App aus dem
+  // Hintergrund die MQTT-Verbindung pruefen und ggf. frisch
+  // reconnecten. PrinterState entscheidet selbst, ob was zu tun
+  // ist – wir rufen nur den Hook.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      widget.printerState.checkAliveOnResume();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

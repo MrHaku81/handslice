@@ -198,5 +198,13 @@
   "machineStatusExtruderOp": "Extruder arbeitet",
   "machineStatusEmergencyStop": "Not-Halt",
   "machineStatusPowerLossRecovery": "Stromausfall-Wiederherstellung",
-  "machineStatusOther": "Status {code}"
+  "machineStatusOther": "Status {code}",
+
+  "printerErrorBannerTitle": "Druckerfehler",
+  "printerErrorsBannerTitle": "Druckerfehler ({count})",
+  "exceptionCodeUnknown": "Druckerfehler {code}",
+
+  "reconnectBannerLost": "Verbindung verloren – verbinde neu …",
+  "reconnectBannerRetrying": "Erneuter Verbindungsversuch in {seconds} s …",
+  "reconnectBannerBackoff": "Verbindung fehlgeschlagen – nächster Versuch in {seconds} s."
 }

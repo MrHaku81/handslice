@@ -229,5 +229,17 @@
   "machineStatusEmergencyStop": "emergency stop",
   "machineStatusPowerLossRecovery": "power-loss recovery",
   "machineStatusOther": "status {code}",
-  "@machineStatusOther": {"placeholders": {"code": {"type": "int"}}}
+  "@machineStatusOther": {"placeholders": {"code": {"type": "int"}}},
+
+  "printerErrorBannerTitle": "Printer error",
+  "printerErrorsBannerTitle": "Printer errors ({count})",
+  "@printerErrorsBannerTitle": {"placeholders": {"count": {"type": "int"}}},
+  "exceptionCodeUnknown": "Printer error {code}",
+  "@exceptionCodeUnknown": {"placeholders": {"code": {"type": "int"}}},
+
+  "reconnectBannerLost": "Connection lost — reconnecting…",
+  "reconnectBannerRetrying": "Reconnecting in {seconds}s…",
+  "@reconnectBannerRetrying": {"placeholders": {"seconds": {"type": "int"}}},
+  "reconnectBannerBackoff": "Reconnect failed — next attempt in {seconds}s.",
+  "@reconnectBannerBackoff": {"placeholders": {"seconds": {"type": "int"}}}
 }

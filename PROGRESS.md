@@ -18,6 +18,109 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 15:30 UTC – M7: Fehlermeldungen + Reconnect-Behandlung
+
+Pflicht 3 der Pflichtliste in zwei Teilen umgesetzt. Kein Befehl
+an den echten Drucker – Klaus macht den Live-Test.
+
+### Nachweislich
+
+**Teil A: Druckerfehler-Tabelle**
+- Komplette Code → Klartext-Tabelle aus dem Orca-ElegooLink-Bundle
+  (PR #14024, v2.4.2) extrahiert: 77 Codes mit englischem Freitext
+  aus Objekt `Zve` (locale "en") in
+  `engine/OrcaSlicer/resources/web/elegoolink/lan_service_web/
+  index.html`. Daniels `const.py` fuehrt keine exception-code-Liste.
+- `app/lib/net/cc2_exception_codes.dart`: `cc2ExceptionEn` (77,
+  Orca-Text 1:1) + `cc2ExceptionDe` (77, sinngemaess uebersetzt).
+  Codes mit gleichem EN-Text teilen sich den DE-Text
+  (z. B. 1203/1241 → beide "Zufuhr … fehlgeschlagen").
+- UI (`print_screen.dart`): `_PrinterErrorBanner` zeigt alle
+  aktiven `exception_status`-Codes als rot gerahmte Infobox
+  solange sie in dem Array stehen. 1243 behaelt den
+  Klaus-definierten Text aus `printStatusException1243`. Unbekannte
+  Codes landen auf `exceptionCodeUnknown(code)` ("Druckerfehler N" /
+  "Printer error N"). Rohes Array wird nicht mehr gerendert.
+- L10n (`app_en.arb` + `app_de.arb`): neue Keys
+  `printerErrorBannerTitle`, `printerErrorsBannerTitle(count)`,
+  `exceptionCodeUnknown(code)`.
+
+**Teil B: Reconnect-Logik**
+- Detektion:
+  - **PING-Fail** (bestehend, 10 s-Loop) → Reconnect.
+  - **Status-Watchdog**: 10 s-Timer, prueft ob der letzte
+    `api_status`-Delta hoechstens 30 s zurueckliegt. Im Idle
+    inaktiv (Firmware schweigt dann), nur im laufenden Druck.
+- Backoff: 2 → 5 → 10 → 20 → 30 s, danach 30 s als Dach.
+  Delay-Serie als statische Konstante `_reconnectBackoffSec` +
+  `@visibleForTesting`-Static.
+- Reconnect-Schritte (bestehender `connectAndLoad()`): Discovery
+  → CONNECT → `api_register` → subscribe → initiales 1002 holen
+  → Watchdog neu starten → Attempt-Counter + "due at" ruecksetzen.
+- **Keine Wiederholung von Steuerbefehlen** nach dem Reconnect
+  (kein Pause/Resume/Cancel/Start-Replay). Steht im Reconnect-
+  Pfad als Nicht-Aktion drin + Testbeleg via Pflicht-3-Vorgabe.
+- UI (`print_screen.dart`):
+  - `_reconnectBannerText(l, printer)` liefert
+    "Verbindung verloren – verbinde neu …" wenn kein Countdown,
+    sonst "Erneuter Verbindungsversuch in Ns …".
+  - Steuerknoepfe (Pause/Resume/Cancel/Light) bleiben gesperrt
+    solange `connection != connected` (unveraendert, Guard
+    deckt reconnecting mit ab).
+- Lifecycle-Hook: `_RootShellState` ist jetzt
+  `WidgetsBindingObserver`, ruft bei `AppLifecycleState.resumed`
+  `printerState.checkAliveOnResume()`. Diese Methode prueft
+  `_client.isConnected` + Watchdog-Alter; wenn stale, reset
+  Attempt-Counter und sofortiger Reconnect-Versuch.
+- L10n: neue Keys `reconnectBannerLost`,
+  `reconnectBannerRetrying(seconds)`, `reconnectBannerBackoff`.
+
+**Tests (`flutter test` → 96/96 gruen, +12 ggue. M6)**
+- `cc2_exception_codes_test.dart` (8 Faelle): EN-/DE-Lookup fuer
+  Stichproben aller drei Kernkategorien, `en-US`/`de-DE`-Locale-
+  Fallbacks, unbekannte Codes → null, Keys-Konsistenz zwischen
+  EN und DE, nicht-leere Texte, Count 77/77, 1243-Praesenz.
+- `reconnect_backoff_test.dart` (4 Faelle):
+  `reconnectDelaySecForAttempt(0..99)` → gesamte Serie plus
+  Dach-Verhalten; `secondsUntilReconnect` positiv/Null/null je
+  nach gesetztem `_reconnectDueAt`.
+
+**Doku**
+- Englischer Abschnitt
+  "M7 – Printer-error table + reconnect behaviour (2026-10-31)"
+  in `docs/networking-cc2.md`.
+- Scrub-Check (strict): 0 Treffer.
+
+### Ungeprueft
+
+- **Reconnect am echten Drucker**: WLAN-Flap, Broker-Kill,
+  App-Suspend/Resume – alle drei macht Klaus live. Die
+  Watchdog-30-s-Grace, Backoff-Progression und das Nicht-
+  Replay-Verhalten sind nur per Unit-Test belegt.
+- **Fehler-Banner-Live-Trigger**: 1243 ist in den Mitschnitten
+  nicht aufgetreten; Klaus muss einen echten Printer-Error
+  provozieren, damit der Banner-Text in Druck-Kontext sichtbar
+  wird. Die Tabelle selbst ist durch die Orca-Quelle direkt
+  belegt.
+- **Backoff-Trigger-Pfad**: Das pure Delay-Mapping ist getestet,
+  der Weg "echter MQTT-Disconnect → _scheduleReconnect → Timer
+  feuert → connectAndLoad" ist nur manuell am Geraet
+  nachvollziehbar.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+### Konsequenz
+
+- Pflicht 3 vorlaeufig umgesetzt; Klaus-Test entscheidet, ob
+  der Watchdog-Threshold von 30 s zu lang oder zu kurz ist
+  (ist konfigurierbar via `_watchdogGrace`-Konstante).
+- Pflicht 4+ (Datei-Loeschen, Kamera-Panel) folgt in getrennten
+  Commits.
+
+---
+
 ## 2026-10-31 14:30 UTC – M6 Geraetetest bestanden; zwei UI-Bugs + 1066-Phase gefixt
 
 Klaus hat heute mit App 0c36fb3250 Pause/Fortsetzen/Abbrechen/Licht am

@@ -1183,6 +1183,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'status {code}'**
   String machineStatusOther(int code);
+
+  /// No description provided for @printerErrorBannerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer error'**
+  String get printerErrorBannerTitle;
+
+  /// No description provided for @printerErrorsBannerTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer errors ({count})'**
+  String printerErrorsBannerTitle(int count);
+
+  /// No description provided for @exceptionCodeUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer error {code}'**
+  String exceptionCodeUnknown(int code);
+
+  /// No description provided for @reconnectBannerLost.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection lost — reconnecting…'**
+  String get reconnectBannerLost;
+
+  /// No description provided for @reconnectBannerRetrying.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting in {seconds}s…'**
+  String reconnectBannerRetrying(int seconds);
+
+  /// No description provided for @reconnectBannerBackoff.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect failed — next attempt in {seconds}s.'**
+  String reconnectBannerBackoff(int seconds);
 }
 
 class _AppLocalizationsDelegate

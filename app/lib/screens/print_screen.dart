@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
+import '../net/cc2_exception_codes.dart';
 import '../net/elegoo_cc2_client.dart';
 import '../state/printer_state.dart';
 import '../state/project_state.dart';
@@ -187,7 +188,7 @@ class _PrintScreenState extends State<PrintScreen> {
             _InfoBox(
               icon: Icons.wifi_tethering_off,
               color: WorkshopTokens.textMuted,
-              message: l.printReconnecting,
+              message: _reconnectBannerText(l, printer),
             ),
           ],
 
@@ -390,26 +391,27 @@ class _LiveStatus extends StatelessWidget {
               value: '',
             ),
           ],
-          if (printer.isFilamentFeedError) ...[
+          // M7 Teil A: aktive Druckerfehler als lokalisierte Infobox.
+          // 1243 behaelt den speziellen "Filamentzufuhr-Fehler"-Text
+          // aus der ARB (Klaus-Vorgabe). Alle anderen Codes zieht
+          // _formatExceptionCode aus cc2_exception_codes.dart.
+          if (printer.activeExceptionCodes.isNotEmpty) ...[
             const Divider(),
-            _InfoBox(
-              icon: Icons.error_outline,
-              color: const Color(0xFFFF6B6B),
-              message: l.printStatusException1243,
-            ),
-          ] else if (printer.exceptionStatus != null &&
-              printer.exceptionStatus!.isNotEmpty) ...[
-            const Divider(),
-            WorkshopRow(
-              label: l.printExceptionLabel,
-              value: printer.exceptionStatus.toString(),
-              mono: true,
-            ),
+            _PrinterErrorBanner(codes: printer.activeExceptionCodes),
           ],
         ],
       ),
     );
   }
+}
+
+// Reconnect-Banner: "Verbindung verloren – verbinde neu …" wenn
+// gerade kein konkreter Countdown; sobald der Countdown steht,
+// wird er als "nächster Versuch in Ns" angezeigt.
+String _reconnectBannerText(AppLocalizations l, PrinterState printer) {
+  final sec = printer.secondsUntilReconnect;
+  if (sec == null || sec <= 0) return l.reconnectBannerLost;
+  return l.reconnectBannerRetrying(sec);
 }
 
 // Klartext fuer machine_status.status laut Daniels const.py
@@ -481,6 +483,63 @@ class _ToggleRow extends StatelessWidget {
             Switch(value: value, onChanged: onChanged),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// M7 Teil A: Fehler-Banner mit lokalisierten Druckerfehler-Texten.
+// Mehrere Codes werden gestapelt angezeigt, bleibt sichtbar solange
+// mindestens einer in `machine_status.exception_status` steht.
+class _PrinterErrorBanner extends StatelessWidget {
+  const _PrinterErrorBanner({required this.codes});
+  final List<int> codes;
+
+  String _formatCode(AppLocalizations l, String locale, int code) {
+    // 1243 bekommt den Klaus-definierten Spezialtext in der ARB.
+    if (code == 1243) return l.printStatusException1243;
+    final hit = cc2ExceptionLookup(code, locale: locale);
+    return hit ?? l.exceptionCodeUnknown(code);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context).toLanguageTag();
+    final title = codes.length == 1
+        ? l.printerErrorBannerTitle
+        : l.printerErrorsBannerTitle(codes.length);
+    const color = Color(0xFFFF6B6B);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+        borderRadius: BorderRadius.circular(WorkshopTokens.radiusSmall),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: [
+            const Icon(Icons.error_outline, size: 18, color: color),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(title,
+                  style: Theme.of(context).textTheme.titleSmall
+                      ?.copyWith(color: color)),
+            ),
+          ]),
+          const SizedBox(height: 6),
+          for (final code in codes) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 28, top: 2, bottom: 2),
+              child: Text(
+                _formatCode(l, locale, code),
+                style: TextStyle(color: color.withValues(alpha: 0.95)),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }

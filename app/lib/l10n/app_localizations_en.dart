@@ -639,4 +639,30 @@ class AppLocalizationsEn extends AppLocalizations {
   String machineStatusOther(int code) {
     return 'status $code';
   }
+
+  @override
+  String get printerErrorBannerTitle => 'Printer error';
+
+  @override
+  String printerErrorsBannerTitle(int count) {
+    return 'Printer errors ($count)';
+  }
+
+  @override
+  String exceptionCodeUnknown(int code) {
+    return 'Printer error $code';
+  }
+
+  @override
+  String get reconnectBannerLost => 'Connection lost — reconnecting…';
+
+  @override
+  String reconnectBannerRetrying(int seconds) {
+    return 'Reconnecting in ${seconds}s…';
+  }
+
+  @override
+  String reconnectBannerBackoff(int seconds) {
+    return 'Reconnect failed — next attempt in ${seconds}s.';
+  }
 }
