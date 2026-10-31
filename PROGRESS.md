@@ -18,6 +18,22 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 21:00 UTC – M9 Vorstufe am Geraet bestaetigt (App f602d1d)
+
+- **Fach-Farbe im G-Code**: Klaus hat frisch gesliced; neue Datei
+  zeigt am Drucker **Weiss** statt Orange (Fach-Farbe uebernommen,
+  Profil-Default `#F2754E` ueberschrieben). 1046-Verifikation
+  implizit bestanden.
+- **Auto-Fach-Vorauswahl**:
+  - weisse Datei → A4 vorgewaehlt, kein Hinweis (unique-Match).
+  - orange Datei → Hinweis „Kein Fach passt …" (none-Match),
+    letzte Wahl blieb stehen.
+
+Beide Vorstufen zu Pflicht 8 damit live abgesegnet. Live-Test ist
+jetzt an die Hauptbranch gepusht (Klaus-Push).
+
+---
+
 ## 2026-10-31 20:40 UTC – M9 Vorstufe: Fach-Farbe im G-Code + Auto-Fach-Vorauswahl
 
 Kleiner Schritt vor Pflicht 8 (Multicolor), hier noch mono:
