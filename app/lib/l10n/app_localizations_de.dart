@@ -277,6 +277,29 @@ class AppLocalizationsDe extends AppLocalizations {
   String get gcodeMoveCustomGcode => 'Custom G-Code';
 
   @override
+  String layerViewHeight(String z) {
+    return 'Z = $z mm';
+  }
+
+  @override
+  String get layerLineTypeHeader => 'Wegtyp';
+
+  @override
+  String get layerLineTypeName => 'Typ';
+
+  @override
+  String get layerLineTypeLength => 'Länge';
+
+  @override
+  String get layerLineTypePercent => '%';
+
+  @override
+  String get projectPlateLabelTextured => 'A · Strukturiert — 256×256×256 mm³';
+
+  @override
+  String get projectPlateLabelSmooth => 'B · Glatt — 256×256×256 mm³';
+
+  @override
   String get projectZOffset =>
       'Z-Offset pro Seite (wird beim Slicen angewendet)';
 

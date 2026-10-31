@@ -89,6 +89,7 @@ class Toolpaths {
     required this.moveCount,
     required this.layerCount,
     required this.layerStarts,
+    required this.layerZ,
     required this.minX,
     required this.maxX,
     required this.minY,
@@ -97,6 +98,7 @@ class Toolpaths {
     required this.maxZ,
     required this.extrudedMm,
     required this.extrudedByRole,
+    required this.lengthByRole,
   });
 
   /// Raw record stream. Length == `moveCount * 28`.
@@ -107,8 +109,20 @@ class Toolpaths {
   final Uint32List layerStarts;
 
   final double minX, maxX, minY, maxY, minZ, maxZ;
+  /// Sum of per-move `delta_extruder`, filtered to
+  /// `MoveType.extrude` and positive deltas. Matches Orca's
+  /// `; filament used [mm]` footer within 0.01 % on the thumbnail
+  /// cube — see `toolpath_parser_test.dart`.
   final double extrudedMm;
+  /// Per-role sum of extruded `delta_extruder` (mm). Same filter
+  /// as above. Length == `GcodeRole.values.length`.
   final Float64List extrudedByRole;
+  /// Per-role sum of Euclidean segment lengths (mm). What Orca
+  /// shows as "Length" in the Line-Type legend.
+  final Float64List lengthByRole;
+  /// Z-height at the start of each layer, parallel to
+  /// `layerStarts`.
+  final Float32List layerZ;
 
   int layerStart(int layer) => layerStarts[layer];
   int layerEnd(int layer) =>
@@ -173,11 +187,15 @@ Toolpaths _parseInline(Uint8List bytes) {
   // Per-record pass: layers + bbox + extruded totals.
   final rbd = ByteData.sublistView(data);
   final layerStarts = <int>[];
+  final layerZ = <double>[];
   int lastLayerId = -1;
   double minX = double.infinity, minY = double.infinity, minZ = double.infinity;
   double maxX = -double.infinity, maxY = -double.infinity, maxZ = -double.infinity;
   double extruded = 0;
   final extrudedByRole = Float64List(GcodeRole.values.length);
+  final lengthByRole   = Float64List(GcodeRole.values.length);
+  double px = 0, py = 0, pz = 0;
+  bool hasPrev = false;
   for (int i = 0; i < n; ++i) {
     final o = i * _hspSize;
     final roleCode = rbd.getUint8(o);
@@ -188,12 +206,9 @@ Toolpaths _parseInline(Uint8List bytes) {
     final z = rbd.getFloat32(o + 20, Endian.little);
     final de = rbd.getFloat32(o + 24, Endian.little);
     if (layerId != lastLayerId) {
-      // libslic3r numbers layers from 0 for the first extruding
-      // one; the dummy first move stays at layer 0 as well. We
-      // record a start whenever the id changes to any value we
-      // have not seen (monotone).
       if (layerStarts.isEmpty || layerId > lastLayerId) {
         layerStarts.add(i);
+        layerZ.add(z);
         lastLayerId = layerId;
       }
     }
@@ -207,10 +222,16 @@ Toolpaths _parseInline(Uint8List bytes) {
             ? roleCode
             : GcodeRole.none.index;
         extrudedByRole[rc] += de;
+        if (hasPrev) {
+          final dx = x - px, dy = y - py, dz = z - pz;
+          lengthByRole[rc] += math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
       }
     }
+    px = x; py = y; pz = z;
+    hasPrev = true;
   }
-  if (layerStarts.isEmpty) layerStarts.add(0);
+  if (layerStarts.isEmpty) { layerStarts.add(0); layerZ.add(0); }
   if (minX == double.infinity) { minX = 0; maxX = 0; }
   if (minY == double.infinity) { minY = 0; maxY = 0; }
   if (minZ == double.infinity) { minZ = 0; maxZ = 0; }
@@ -219,11 +240,13 @@ Toolpaths _parseInline(Uint8List bytes) {
     moveCount: n,
     layerCount: layerStarts.length,
     layerStarts: Uint32List.fromList(layerStarts),
+    layerZ: Float32List.fromList(layerZ),
     minX: minX, maxX: maxX,
     minY: minY, maxY: maxY,
     minZ: minZ, maxZ: maxZ,
     extrudedMm: extruded,
     extrudedByRole: extrudedByRole,
+    lengthByRole: lengthByRole,
   );
 }
 
@@ -335,6 +358,30 @@ int colorForMove(int roleCode, int moveCode) {
       ? MoveType.values[moveCode]
       : MoveType.noop;
   return OrcaPalette.moveColor[mt] ?? 0xFFCCCCCC;
+}
+
+/// Axis-aligned bounding box of extruded moves in the range
+/// [[fromIdx], [toIdx]). Returns `null` when no extrude move
+/// falls in the range. Used by the 2D top-down painter to fit
+/// the viewport to the current layer, not the whole print.
+({double minX, double maxX, double minY, double maxY})?
+layerXyBounds(Toolpaths t, int fromIdx, int toIdx) {
+  if (toIdx <= fromIdx) return null;
+  final bd = ByteData.sublistView(t.data);
+  double minX = double.infinity, minY = double.infinity;
+  double maxX = -double.infinity, maxY = -double.infinity;
+  bool any = false;
+  for (int i = fromIdx; i < toIdx; ++i) {
+    final o = i * _hspSize;
+    if (bd.getUint8(o + 2) != MoveType.extrude.index) continue;
+    final x = bd.getFloat32(o + 12, Endian.little);
+    final y = bd.getFloat32(o + 16, Endian.little);
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    any = true;
+  }
+  if (!any) return null;
+  return (minX: minX, maxX: maxX, minY: minY, maxY: maxY);
 }
 
 // Sum of all `width×length` extrusions per role, useful for

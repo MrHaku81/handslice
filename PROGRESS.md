@@ -18,6 +18,59 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 11:00 UTC – Pflicht 7c fixes: Orca-accurate colours + table legend
+
+Device test (`7b6ec2a`) said we were close but off on four
+counts. All fixed below.
+
+- Colours washed out (orange outer wall rendering as peach,
+  dark red infill as salmon pink). Root cause:
+  `UnlitMaterial.displayReferred` defaults to `false`, which
+  tells Impeller to treat `baseColorFactor` as *linear* radiance.
+  Our Orca palette constants are sRGB display values, so the
+  pipeline gamma-corrected them a second time. Fix: flip
+  `displayReferred = true` on every UnlitMaterial in the
+  toolpath view; also drop the dimming of stacked layers so the
+  whole visible stack sits at the Orca palette value, same as
+  what the desktop viewer paints.
+- Translucent "rest of the model" outline above the slider was
+  missing. New `_addModelSilhouette` draws the 12 edges of the
+  print's XY/Z AABB (from `currentTopZ` up to `maxZ`) in a cyan
+  tint via a cheap `LineSegmentsGeometry`.
+- 2D top-down was fitting the whole-print XY bbox, which
+  included brim / purge-line and shrunk the model to a corner.
+  New `layerXyBounds(Toolpaths, from, to)` helper computes the
+  per-slider-layer object bbox, and the painter fits the
+  viewport to it with a 10 % margin. 2D also gets pinch-zoom
+  and single-finger pan (same `Listener` + manual pointer
+  tracking as the 3D view).
+- Self-check: the earlier +15 % discrepancy was indeed the
+  Unretract moves. Dart's `_parseInline` already filters by
+  `MoveType.extrude`, so `t.extrudedMm` on the thumbnail-cube
+  HSPT lands at 1177.151 mm — within 0.001 % of Orca's footer
+  `; filament used [mm] = 1177.15`. Pinned by a new test.
+
+Table legend now matches Orca's Line Type widget: eye-icon
+toggle, swatch, name, length in metres, percent. The two
+derived columns come from the new `Toolpaths.lengthByRole`
+(Euclidean, filtered to `MoveType.extrude`). Weight and time
+columns are planned for the next pass once we propagate the
+total weight / per-role time from the slice stats.
+
+Slider label now shows `Z = X.XX mm` alongside the layer index,
+and both bed views (plate + layer) carry a small top-left
+overlay naming the selected plate (`A · Textured — 256×256×256
+mm³`) — Klaus asked for the bed labelling to live in the shared
+scene starting with model loading.
+
+Follow-ups queued for 7d:
+- Tubes with per-move width AND height (needs a custom
+  `LineSegmentsGeometry`-equivalent shader).
+- Time and weight columns in the legend (needs per-role time +
+  the slice-stats weight propagation).
+- Bed grid lines + world-anchored axis labels.
+- Range-within-layer slider + G-code excerpt.
+
 ## 2026-11-01 01:30 UTC – Pflicht 7c: toolpaths from Orca's GCodeProcessor
 
 Dart g-code parser is now the fallback; the authoritative path

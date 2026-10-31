@@ -608,6 +608,48 @@ abstract class AppLocalizations {
   /// **'Custom G-code'**
   String get gcodeMoveCustomGcode;
 
+  /// No description provided for @layerViewHeight.
+  ///
+  /// In en, this message translates to:
+  /// **'Z = {z} mm'**
+  String layerViewHeight(String z);
+
+  /// No description provided for @layerLineTypeHeader.
+  ///
+  /// In en, this message translates to:
+  /// **'Line Type'**
+  String get layerLineTypeHeader;
+
+  /// No description provided for @layerLineTypeName.
+  ///
+  /// In en, this message translates to:
+  /// **'Type'**
+  String get layerLineTypeName;
+
+  /// No description provided for @layerLineTypeLength.
+  ///
+  /// In en, this message translates to:
+  /// **'Length'**
+  String get layerLineTypeLength;
+
+  /// No description provided for @layerLineTypePercent.
+  ///
+  /// In en, this message translates to:
+  /// **'%'**
+  String get layerLineTypePercent;
+
+  /// No description provided for @projectPlateLabelTextured.
+  ///
+  /// In en, this message translates to:
+  /// **'A · Textured — 256×256×256 mm³'**
+  String get projectPlateLabelTextured;
+
+  /// No description provided for @projectPlateLabelSmooth.
+  ///
+  /// In en, this message translates to:
+  /// **'B · Smooth — 256×256×256 mm³'**
+  String get projectPlateLabelSmooth;
+
   /// No description provided for @projectZOffset.
   ///
   /// In en, this message translates to:

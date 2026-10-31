@@ -86,8 +86,37 @@ flutter_scene's `LineSegmentsGeometry` takes a single
 `width` per instance. We bucket by role and feed each
 `LineSegmentsGeometry` the width of the first extruding move
 of that role (which matches Orca's `;WIDTH:` comment). Per-
-move width ribbons that change thickness mid-path would need a
-custom shader and remain a 7c follow-up.
+move width AND height ribbons that change thickness mid-path
+need a custom shader and are queued for 7d.
+
+Important material setting: `UnlitMaterial.displayReferred =
+true`. Without it Impeller treats `baseColorFactor` as linear
+radiance and gamma-corrects the sRGB palette constants a second
+time, which pushed orange walls into peach on the first on-
+device run (Klaus, 2026-11-01).
+
+Layers below the slider are drawn at their full Orca palette
+value — no stacked dimming. Above the slider the viewport
+renders a 12-edge AABB wireframe in a cyan tint to mark the
+"model still to come". Matches `GCodeViewer`'s translucent
+preview.
+
+### 2D top-down fit
+
+Per-layer object bbox (new `layerXyBounds(Toolpaths, from, to)`
+helper), not the whole-print bbox. Brim / skirt / purge lines
+would otherwise inflate the bbox and shrink the model to a
+corner. Pinch-zoom and single-finger pan both live on a
+`Listener` so the outer `ListView` scroll never steals the
+gesture.
+
+### Legend table
+
+Columns: toggle (eye icon), swatch, name, length (m), %. Only
+roles with ≥ 0.5 mm of recorded path appear so a plain cube does
+not drag the full 20-row palette into view. Length comes from
+`Toolpaths.lengthByRole` (Euclidean), percent is role length ÷
+total length. Weight and time columns are 7d scope.
 
 ---
 

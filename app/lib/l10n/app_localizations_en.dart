@@ -274,6 +274,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get gcodeMoveCustomGcode => 'Custom G-code';
 
   @override
+  String layerViewHeight(String z) {
+    return 'Z = $z mm';
+  }
+
+  @override
+  String get layerLineTypeHeader => 'Line Type';
+
+  @override
+  String get layerLineTypeName => 'Type';
+
+  @override
+  String get layerLineTypeLength => 'Length';
+
+  @override
+  String get layerLineTypePercent => '%';
+
+  @override
+  String get projectPlateLabelTextured => 'A · Textured — 256×256×256 mm³';
+
+  @override
+  String get projectPlateLabelSmooth => 'B · Smooth — 256×256×256 mm³';
+
+  @override
   String get projectZOffset => 'Z-offset per plate (applied at slice time)';
 
   @override

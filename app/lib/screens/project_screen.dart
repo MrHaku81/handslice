@@ -640,6 +640,7 @@ class _PlateViewCardState extends State<_PlateViewCard> {
         labels: ToolpathLayerViewLabels(
           layer: l.layerViewLayer,
           of: l.layerViewOf,
+          height: (z) => l.layerViewHeight(z.toStringAsFixed(2)),
           resetView: l.plateViewReset,
           top: l.plateViewTop,
           front: l.plateViewFront,
@@ -647,10 +648,17 @@ class _PlateViewCardState extends State<_PlateViewCard> {
           zoomIn: l.plateViewZoomIn,
           zoomOut: l.plateViewZoomOut,
           pathTypes: l.layerViewPathTypes,
+          lineTypeLegendHeader: l.layerLineTypeHeader,
+          lineTypeNameHeader: l.layerLineTypeName,
+          lineTypeLengthHeader: l.layerLineTypeLength,
+          lineTypePercentHeader: l.layerLineTypePercent,
           renderer3d: l.layerViewRenderer3d,
           renderer2d: l.layerViewRenderer2d,
           decrementLayer: l.layerViewDecrement,
           incrementLayer: l.layerViewIncrement,
+          plateLabel: projectState.bedType == BedType.texturedA
+              ? l.projectPlateLabelTextured
+              : l.projectPlateLabelSmooth,
           roleLabel: (r) => _localizedRole(l, r),
           moveLabel: (m) => _localizedMove(l, m),
         ),

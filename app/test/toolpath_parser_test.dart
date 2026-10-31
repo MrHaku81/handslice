@@ -103,6 +103,7 @@ void main() {
 
   group('on real HSPT (local only)', () {
     final hspt = File('local-test/cube.hspt');
+    final cubeGcode = File('local-test/thumbnail-cube.gcode');
     test('decodes a thumbnail-cube HSPT if present',
         () async {
           if (!hspt.existsSync()) return;
@@ -116,5 +117,54 @@ void main() {
               greaterThan(100));
         },
         timeout: const Timeout(Duration(seconds: 30)));
+
+    test('cube HSPT extrudedMm matches the g-code footer within 1 %',
+        () async {
+      if (!hspt.existsSync() || !cubeGcode.existsSync()) return;
+      final text = cubeGcode.readAsStringSync();
+      final match = RegExp(r'^;\s*filament used \[mm\]\s*=\s*([\d.]+)',
+          multiLine: true).firstMatch(text);
+      expect(match, isNotNull);
+      final footer = double.parse(match!.group(1)!);
+      final t = await loadToolpaths(hspt.path);
+      final rel = (t.extrudedMm - footer).abs() / footer;
+      expect(rel, lessThan(0.01),
+          reason: 'HSPT extrudedMm=${t.extrudedMm.toStringAsFixed(3)} '
+              'vs footer=${footer.toStringAsFixed(3)}');
+    });
+
+    test('cube HSPT lengthByRole + extrudedByRole are reported', () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      expect(t.lengthByRole[GcodeRole.externalPerimeter.index],
+          greaterThan(100));
+      expect(t.lengthByRole[GcodeRole.perimeter.index],
+          greaterThan(100));
+      // Length and extruded E are the same order of magnitude on
+      // this profile (0.42 mm × 0.2 mm cross-section → ~0.84 mm3
+      // per mm of path, delta E ≈ path length in mm since the
+      // flow stays flat). Sanity: ratio within an order of
+      // magnitude.
+      final ratio = t.extrudedByRole[GcodeRole.externalPerimeter.index]
+          / t.lengthByRole[GcodeRole.externalPerimeter.index];
+      expect(ratio, greaterThan(0.1));
+      expect(ratio, lessThan(10));
+    });
+
+    test('layerXyBounds returns per-layer bbox not the whole print',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Layer 51 (1-indexed in UI 52) should fit inside the
+      // whole-print XY bbox.
+      final whole = layerXyBounds(t, 0, t.moveCount);
+      final mid = layerXyBounds(t, t.layerStart(51), t.layerEnd(51));
+      expect(whole, isNotNull);
+      expect(mid,   isNotNull);
+      expect(mid!.minX, greaterThanOrEqualTo(whole!.minX));
+      expect(mid.maxX,  lessThanOrEqualTo(whole.maxX));
+      expect(mid.minY, greaterThanOrEqualTo(whole.minY));
+      expect(mid.maxY,  lessThanOrEqualTo(whole.maxY));
+    });
   });
 }

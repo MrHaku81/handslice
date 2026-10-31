@@ -31,6 +31,7 @@ class ToolpathLayerViewLabels {
   const ToolpathLayerViewLabels({
     required this.layer,
     required this.of,
+    required this.height,
     required this.resetView,
     required this.top,
     required this.front,
@@ -38,15 +39,22 @@ class ToolpathLayerViewLabels {
     required this.zoomIn,
     required this.zoomOut,
     required this.pathTypes,
+    required this.lineTypeLegendHeader,
+    required this.lineTypeLengthHeader,
+    required this.lineTypePercentHeader,
+    required this.lineTypeNameHeader,
     required this.renderer3d,
     required this.renderer2d,
     required this.decrementLayer,
     required this.incrementLayer,
+    required this.plateLabel,
     required this.roleLabel,
     required this.moveLabel,
   });
   final String layer;
   final String of;
+  /// "Z = X.XX mm", for the slider label.
+  final String Function(double zMm) height;
   final String resetView;
   final String top;
   final String front;
@@ -54,10 +62,16 @@ class ToolpathLayerViewLabels {
   final String zoomIn;
   final String zoomOut;
   final String pathTypes;
+  final String lineTypeLegendHeader;
+  final String lineTypeLengthHeader;
+  final String lineTypePercentHeader;
+  final String lineTypeNameHeader;
   final String renderer3d;
   final String renderer2d;
   final String decrementLayer;
   final String incrementLayer;
+  /// e.g. "A · Textured — 256×256×256 mm³".
+  final String plateLabel;
   final String Function(GcodeRole) roleLabel;
   final String Function(MoveType) moveLabel;
 }
@@ -185,10 +199,13 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     final t = widget.toolpaths;
     if (t.moveCount == 0 || t.layerCount == 0) return;
     final maxLayer = _currentLayer.clamp(0, t.layerCount - 1);
-    final endOfBelow = t.layerStart(maxLayer);
     final endOfCurrent = t.layerEnd(maxLayer);
-    // Collect per-role, per-split segment lists. We do a single
-    // pass over records and partition.
+    // Draw every extrusion up to and including the current
+    // layer at its full Orca palette value. Orca's own viewer
+    // does the same — the current layer is "the top of the
+    // stack we see" rather than a visually-distinct ribbon,
+    // and the hidden-above translucent silhouette (added
+    // separately below) marks where the slider is.
     for (final role in GcodeRole.values) {
       if (!_visibleRoles.contains(role)) continue;
       final color = Color(OrcaPalette.roleColor[role]!);
@@ -197,12 +214,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           roleCode: role.index,
           colorBright: color,
           widthMm: width,
-          from: 0, to: endOfBelow, dim: true);
-      _emitRole(scene, t,
-          roleCode: role.index,
-          colorBright: color,
-          widthMm: width,
-          from: endOfBelow, to: endOfCurrent, dim: false);
+          from: 0, to: endOfCurrent);
     }
     for (final move in [MoveType.travel, MoveType.wipe,
                         MoveType.retract, MoveType.unretract,
@@ -214,12 +226,14 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           moveCode: move.index,
           colorBright: color,
           widthMm: 0.2,
-          from: 0, to: endOfBelow, dim: true);
-      _emitMoveType(scene, t,
-          moveCode: move.index,
-          colorBright: color,
-          widthMm: 0.2,
-          from: endOfBelow, to: endOfCurrent, dim: false);
+          from: 0, to: endOfCurrent);
+    }
+    // Translucent model silhouette above the current layer — a
+    // simple AABB wireframe in Orca's cyan. Lets the user see at
+    // a glance how much print is still coming above the slider
+    // without rendering those extrusions.
+    if (maxLayer < t.layerCount - 1) {
+      _addModelSilhouette(scene, t, endOfCurrent);
     }
   }
 
@@ -228,7 +242,6 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     required Color colorBright,
     required double widthMm,
     required int from, required int to,
-    required bool dim,
   }) {
     if (to <= from) return;
     final bd = ByteData.sublistView(t.data);
@@ -268,13 +281,19 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
       hasPrev = true;
     }
     final data = fscene.LineSegmentData(positions: out);
-    final geom = fscene.LineSegmentsGeometry(data,
-        width: dim ? math.max(widthMm * 0.5, 0.15) : widthMm);
-    final tint = dim ? _dim(colorBright) : colorBright;
+    final geom = fscene.LineSegmentsGeometry(data, width: widthMm);
+    // `displayReferred = true` treats `baseColorFactor` as the
+    // final sRGB display value instead of linear radiance. The
+    // Orca palette constants are sRGB — without this flag,
+    // Impeller gamma-corrects them again and the walls read as
+    // peach / salmon. Called out by Klaus on the first 7c
+    // device test.
     final mat = fscene.UnlitMaterial()
-      ..baseColorFactor = vm.Vector4(tint.r, tint.g, tint.b, 1);
+      ..displayReferred = true
+      ..baseColorFactor = vm.Vector4(
+          colorBright.r, colorBright.g, colorBright.b, 1);
     scene.add(fscene.Node(
-        name: 'role${roleCode}_${dim ? "dim" : "cur"}',
+        name: 'role$roleCode',
         mesh: fscene.Mesh(geom, mat)));
   }
 
@@ -283,7 +302,6 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     required Color colorBright,
     required double widthMm,
     required int from, required int to,
-    required bool dim,
   }) {
     if (to <= from) return;
     final bd = ByteData.sublistView(t.data);
@@ -311,18 +329,62 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
       hasPrev = true;
     }
     final data = fscene.LineSegmentData(positions: out);
-    final geom = fscene.LineSegmentsGeometry(data,
-        width: dim ? widthMm * 0.5 : widthMm);
-    final tint = dim ? _dim(colorBright) : colorBright;
+    final geom = fscene.LineSegmentsGeometry(data, width: widthMm);
     final mat = fscene.UnlitMaterial()
-      ..baseColorFactor = vm.Vector4(tint.r, tint.g, tint.b, 1);
+      ..displayReferred = true
+      ..baseColorFactor = vm.Vector4(
+          colorBright.r, colorBright.g, colorBright.b, 1);
     scene.add(fscene.Node(
-        name: 'move${moveCode}_${dim ? "dim" : "cur"}',
+        name: 'move$moveCode',
         mesh: fscene.Mesh(geom, mat)));
   }
 
-  Color _dim(Color c) => Color.from(
-      alpha: 1.0, red: c.r * 0.35, green: c.g * 0.35, blue: c.b * 0.35);
+  // Orca's "translucent-above-the-slider" model silhouette.
+  // We approximate it with the 12 edges of the model's AABB in
+  // cyan at ~30 % intensity (`displayReferred` + a tint factor;
+  // flutter_scene's UnlitMaterial does not expose a full alpha
+  // blend, so we settle for a near-black-background multiply by
+  // keeping the colour dim). Good enough to show where the rest
+  // of the model will land, which is what Klaus asked for.
+  void _addModelSilhouette(fscene.Scene scene, Toolpaths t, int endOfCurrent) {
+    // Current slider's Z: top of the current layer's segments.
+    // The silhouette sits above it so it does not overlap the
+    // bright extrusion we just drew.
+    final maxLayer = _currentLayer.clamp(0, t.layerCount - 1);
+    final currentTopZ = maxLayer + 1 < t.layerZ.length
+        ? t.layerZ[maxLayer + 1]
+        : t.maxZ;
+    if (currentTopZ >= t.maxZ) return;
+    final x0 = t.minX, x1 = t.maxX;
+    final y0 = t.minY, y1 = t.maxY;
+    final z0 = currentTopZ, z1 = t.maxZ;
+    final corners = <vm.Vector3>[
+      vm.Vector3(x0, y0, z0), vm.Vector3(x1, y0, z0),
+      vm.Vector3(x1, y1, z0), vm.Vector3(x0, y1, z0),
+      vm.Vector3(x0, y0, z1), vm.Vector3(x1, y0, z1),
+      vm.Vector3(x1, y1, z1), vm.Vector3(x0, y1, z1),
+    ];
+    // 12 edges of the box.
+    final edges = <List<int>>[
+      [0, 1], [1, 2], [2, 3], [3, 0],      // bottom
+      [4, 5], [5, 6], [6, 7], [7, 4],      // top
+      [0, 4], [1, 5], [2, 6], [3, 7],      // vertical
+    ];
+    final out = Float32List(edges.length * 6);
+    for (int i = 0; i < edges.length; ++i) {
+      final a = corners[edges[i][0]], b = corners[edges[i][1]];
+      final o = i * 6;
+      out[o    ] = a.x; out[o + 1] = a.y; out[o + 2] = a.z;
+      out[o + 3] = b.x; out[o + 4] = b.y; out[o + 5] = b.z;
+    }
+    final data = fscene.LineSegmentData(positions: out);
+    final geom = fscene.LineSegmentsGeometry(data, width: 0.4);
+    final mat = fscene.UnlitMaterial()
+      ..displayReferred = true
+      ..baseColorFactor = vm.Vector4(0.33, 0.60, 0.58, 1);
+    scene.add(fscene.Node(name: 'silhouette',
+        mesh: fscene.Mesh(geom, mat)));
+  }
 
   // -------- gestures (identical contract to PlateView / LayerView) --------
   final Map<int, Offset> _pointers = {};
@@ -445,22 +507,26 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
   }
 
   Widget _viewport() {
+    final currentLayer =
+        _currentLayer.clamp(0, widget.toolpaths.layerCount - 1);
     if (_mode == _RendererMode.twoDTopDown) {
-      return _TopDownPainterView(
+      return _wrapPlateLabel(_TopDownPainterView(
         toolpaths: widget.toolpaths,
         visibleRoles: _visibleRoles,
         visibleMoves: _visibleMoves,
-        currentLayer: _currentLayer.clamp(0, widget.toolpaths.layerCount - 1),
-      );
+        currentLayer: currentLayer,
+        onInteractionChanged: widget.onInteractionChanged,
+      ));
     }
     final scene = _scene;
     if (_sceneError != null || scene == null) {
-      return _TopDownPainterView(
+      return _wrapPlateLabel(_TopDownPainterView(
         toolpaths: widget.toolpaths,
         visibleRoles: _visibleRoles,
         visibleMoves: _visibleMoves,
-        currentLayer: _currentLayer.clamp(0, widget.toolpaths.layerCount - 1),
-      );
+        currentLayer: currentLayer,
+        onInteractionChanged: widget.onInteractionChanged,
+      ));
     }
     if (!_sceneReady) {
       return Container(
@@ -470,7 +536,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
       );
     }
     final target = _orbitCentre + _panOffset;
-    return Listener(
+    return _wrapPlateLabel(Listener(
       behavior: HitTestBehavior.opaque,
       onPointerDown: _handlePointerDown,
       onPointerMove: _handlePointerMove,
@@ -488,6 +554,37 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           fovFar: _distance * 50.0,
         ),
       ),
+    ));
+  }
+
+  // Static overlay in the top-left of the viewport that names
+  // the plate and its size — Orca shows a bed label too, Klaus
+  // asked us to match it in both the model and layer views.
+  Widget _wrapPlateLabel(Widget child) {
+    return Stack(
+      children: [
+        Positioned.fill(child: child),
+        Positioned(
+          top: 6,
+          left: 8,
+          child: IgnorePointer(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                widget.labels.plateLabel,
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    fontFamily: 'monospace'),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -495,6 +592,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     final t = widget.toolpaths;
     final maxLayer = (t.layerCount - 1).clamp(0, 1 << 30);
     final value = _currentLayer.clamp(0, maxLayer);
+    final z = value < t.layerZ.length ? t.layerZ[value] : t.minZ;
     return Row(
       children: [
         IconButton(
@@ -508,7 +606,8 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
             min: 0,
             max: maxLayer.toDouble(),
             divisions: maxLayer > 0 ? maxLayer : null,
-            label: '${l.layer} ${value + 1} ${l.of} ${t.layerCount}',
+            label: '${l.layer} ${value + 1} ${l.of} ${t.layerCount}'
+                ' · ${l.height(z)}',
             onChanged: (v) => _setLayer(v.round()),
           ),
         ),
@@ -519,11 +618,11 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
         ),
         const SizedBox(width: 4),
         SizedBox(
-          width: 72,
+          width: 96,
           child: Text(
-            '${value + 1}/${t.layerCount}',
+            '${value + 1}/${t.layerCount}\n${l.height(z)}',
             textAlign: TextAlign.right,
-            style: const TextStyle(fontFamily: 'monospace'),
+            style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
           ),
         ),
       ],
@@ -579,65 +678,136 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
 
   Widget _legend(ToolpathLayerViewLabels l) {
     final theme = Theme.of(context);
-    final roles = GcodeRole.values.where((r) =>
-        r != GcodeRole.mixed && r != GcodeRole.none).toList();
+    final t = widget.toolpaths;
+    // Only show roles with non-zero length in this print — the
+    // full 20-row list is noisy on a plain cube.
+    final roles = GcodeRole.values
+        .where((r) => t.lengthByRole[r.index] > 0.5)
+        .toList();
     final moveTypes = [
       MoveType.travel, MoveType.wipe,
       MoveType.retract, MoveType.unretract, MoveType.seam,
     ];
+    final totalLen = t.lengthByRole.fold<double>(0, (a, b) => a + b);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(l.pathTypes, style: theme.textTheme.titleSmall),
+        Text(l.lineTypeLegendHeader, style: theme.textTheme.titleSmall),
         const SizedBox(height: 4),
-        Wrap(
-          spacing: 8, runSpacing: 4,
-          children: [
-            for (final r in roles) _roleChip(r, l),
-            for (final m in moveTypes) _moveChip(m, l),
-          ],
+        // Column headers.
+        Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: DefaultTextStyle(
+            style: theme.textTheme.bodySmall!
+                .copyWith(color: Colors.white60),
+            child: Row(
+              children: [
+                const SizedBox(width: 20 + 20),   // eye + swatch
+                Expanded(flex: 4, child: Text(l.lineTypeNameHeader)),
+                SizedBox(width: 72,
+                    child: Text(l.lineTypeLengthHeader,
+                        textAlign: TextAlign.right)),
+                SizedBox(width: 52,
+                    child: Text(l.lineTypePercentHeader,
+                        textAlign: TextAlign.right)),
+              ],
+            ),
+          ),
         ),
+        for (final r in roles)
+          _legendRow(
+            name: l.roleLabel(r),
+            color: Color(OrcaPalette.roleColor[r]!),
+            lengthMm: t.lengthByRole[r.index],
+            percent: totalLen > 0
+                ? t.lengthByRole[r.index] / totalLen * 100
+                : 0,
+            visible: _visibleRoles.contains(r),
+            onToggle: (v) {
+              setState(() {
+                if (v) {
+                  _visibleRoles.add(r);
+                } else {
+                  _visibleRoles.remove(r);
+                }
+              });
+              _rebuildScene();
+            },
+          ),
+        const SizedBox(height: 2),
+        for (final m in moveTypes)
+          _legendRow(
+            name: l.moveLabel(m),
+            color: Color(OrcaPalette.moveColor[m]!),
+            lengthMm: null,   // move-type lengths are not tracked here
+            percent: null,
+            visible: _visibleMoves.contains(m),
+            onToggle: (v) {
+              setState(() {
+                if (v) {
+                  _visibleMoves.add(m);
+                } else {
+                  _visibleMoves.remove(m);
+                }
+              });
+              _rebuildScene();
+            },
+          ),
       ],
     );
   }
 
-  Widget _roleChip(GcodeRole r, ToolpathLayerViewLabels l) {
-    final visible = _visibleRoles.contains(r);
-    return FilterChip(
-      selected: visible,
-      showCheckmark: false,
-      avatar: _swatch(Color(OrcaPalette.roleColor[r]!)),
-      label: Text(l.roleLabel(r)),
-      onSelected: (v) {
-        setState(() {
-          if (v) {
-            _visibleRoles.add(r);
-          } else {
-            _visibleRoles.remove(r);
-          }
-        });
-        _rebuildScene();
-      },
-    );
-  }
-
-  Widget _moveChip(MoveType m, ToolpathLayerViewLabels l) {
-    final visible = _visibleMoves.contains(m);
-    return FilterChip(
-      selected: visible,
-      showCheckmark: false,
-      avatar: _swatch(Color(OrcaPalette.moveColor[m]!)),
-      label: Text(l.moveLabel(m)),
-      onSelected: (v) {
-        setState(() {
-          if (v) {
-            _visibleMoves.add(m);
-          } else {
-            _visibleMoves.remove(m);
-          }
-        });
-        _rebuildScene();
-      },
+  Widget _legendRow({
+    required String name,
+    required Color color,
+    required double? lengthMm,
+    required double? percent,
+    required bool visible,
+    required ValueChanged<bool> onToggle,
+  }) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: () => onToggle(!visible),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            SizedBox(width: 20,
+              child: Icon(
+                visible ? Icons.visibility : Icons.visibility_off,
+                size: 16,
+                color: visible ? Colors.white70 : Colors.white24),
+            ),
+            SizedBox(width: 20, child: _swatch(color)),
+            Expanded(flex: 4,
+              child: Text(name,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: visible ? null : Colors.white38),
+                overflow: TextOverflow.ellipsis),
+            ),
+            SizedBox(width: 72,
+              child: Text(
+                lengthMm == null
+                    ? '—'
+                    : '${(lengthMm / 1000).toStringAsFixed(2)} m',
+                textAlign: TextAlign.right,
+                style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    color: visible ? null : Colors.white38),
+              ),
+            ),
+            SizedBox(width: 52,
+              child: Text(
+                percent == null ? '—' : '${percent.toStringAsFixed(1)} %',
+                textAlign: TextAlign.right,
+                style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    color: visible ? null : Colors.white38),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -653,31 +823,101 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
 // -------- 2D top-down painter --------
 //
 // Pure Dart, pure CPU. Walks the record stream and paints the
-// current layer's segments as 1 px lines. Uses the per-axis
-// AABB so a cube that is not centred on the bed draws in the
-// middle of the viewport.
-class _TopDownPainterView extends StatelessWidget {
+// current layer's segments as 1 px lines. Fits the viewport to
+// the current layer's XY bounding box (not the whole-print bbox,
+// which would include brim / purge and shrink the model to a
+// corner). Supports pinch zoom + pan.
+class _TopDownPainterView extends StatefulWidget {
   const _TopDownPainterView({
     required this.toolpaths,
     required this.visibleRoles,
     required this.visibleMoves,
     required this.currentLayer,
+    required this.onInteractionChanged,
   });
   final Toolpaths toolpaths;
   final Set<GcodeRole> visibleRoles;
   final Set<MoveType> visibleMoves;
   final int currentLayer;
+  final ValueChanged<bool>? onInteractionChanged;
+
+  @override
+  State<_TopDownPainterView> createState() => _TopDownPainterViewState();
+}
+
+class _TopDownPainterViewState extends State<_TopDownPainterView> {
+  double _zoom = 1.0;
+  Offset _pan = Offset.zero;
+  double? _pinchStartDist;
+  double? _pinchStartZoom;
+  Offset? _lastCentroid;
+  final Map<int, Offset> _pointers = {};
+
+  void _down(PointerDownEvent e) {
+    _pointers[e.pointer] = e.localPosition;
+    _pinchStartDist = null;
+    _pinchStartZoom = null;
+    _lastCentroid = null;
+    if (_pointers.length == 1) widget.onInteractionChanged?.call(true);
+  }
+  void _move(PointerMoveEvent e) {
+    final prev = _pointers[e.pointer] ?? e.localPosition;
+    _pointers[e.pointer] = e.localPosition;
+    if (_pointers.length == 1) {
+      final delta = e.localPosition - prev;
+      setState(() { _pan += delta; });
+    } else if (_pointers.length >= 2) {
+      final ptrs = _pointers.values.toList();
+      final cx = ptrs.fold<double>(0, (a, p) => a + p.dx) / ptrs.length;
+      final cy = ptrs.fold<double>(0, (a, p) => a + p.dy) / ptrs.length;
+      final centroid = Offset(cx, cy);
+      double dist = 0;
+      for (int i = 0; i < ptrs.length; ++i) {
+        for (int j = i + 1; j < ptrs.length; ++j) {
+          dist += (ptrs[i] - ptrs[j]).distance;
+        }
+      }
+      _pinchStartDist ??= dist;
+      _pinchStartZoom ??= _zoom;
+      _lastCentroid   ??= centroid;
+      setState(() {
+        _zoom = (_pinchStartZoom! * (dist / math.max(_pinchStartDist!, 1e-3)))
+            .clamp(0.25, 16.0);
+        _pan += centroid - _lastCentroid!;
+        _lastCentroid = centroid;
+      });
+    }
+  }
+  void _up(PointerEvent e) {
+    _pointers.remove(e.pointer);
+    if (_pointers.length < 2) {
+      _pinchStartDist = null;
+      _pinchStartZoom = null;
+      _lastCentroid = null;
+    }
+    if (_pointers.isEmpty) widget.onInteractionChanged?.call(false);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
       color: const Color(0xFF1A1D23),
-      child: CustomPaint(
-        size: Size.infinite,
-        painter: _ToolpathTopDownPainter(
-          toolpaths: toolpaths,
-          visibleRoles: visibleRoles,
-          visibleMoves: visibleMoves,
-          currentLayer: currentLayer,
+      child: Listener(
+        behavior: HitTestBehavior.opaque,
+        onPointerDown: _down,
+        onPointerMove: _move,
+        onPointerUp: _up,
+        onPointerCancel: _up,
+        child: CustomPaint(
+          size: Size.infinite,
+          painter: _ToolpathTopDownPainter(
+            toolpaths: widget.toolpaths,
+            visibleRoles: widget.visibleRoles,
+            visibleMoves: widget.visibleMoves,
+            currentLayer: widget.currentLayer,
+            zoom: _zoom,
+            pan: _pan,
+          ),
         ),
       ),
     );
@@ -690,11 +930,15 @@ class _ToolpathTopDownPainter extends CustomPainter {
     required this.visibleRoles,
     required this.visibleMoves,
     required this.currentLayer,
+    required this.zoom,
+    required this.pan,
   });
   final Toolpaths toolpaths;
   final Set<GcodeRole> visibleRoles;
   final Set<MoveType> visibleMoves;
   final int currentLayer;
+  final double zoom;
+  final Offset pan;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -703,14 +947,20 @@ class _ToolpathTopDownPainter extends CustomPainter {
     final from = t.layerStart(currentLayer);
     final to   = t.layerEnd(currentLayer);
     if (to <= from) return;
-    final rangeX = (t.maxX - t.minX).clamp(1.0, double.infinity);
-    final rangeY = (t.maxY - t.minY).clamp(1.0, double.infinity);
+    // Fit the viewport to the *current layer's* object bbox so a
+    // small cube stays large on the screen regardless of how big
+    // the whole-print bbox is (brim, purge line etc. inflate it).
+    final layerBbox = layerXyBounds(t, from, to) ??
+        (minX: t.minX, maxX: t.maxX, minY: t.minY, maxY: t.maxY);
+    final rangeX = (layerBbox.maxX - layerBbox.minX).clamp(1.0, double.infinity);
+    final rangeY = (layerBbox.maxY - layerBbox.minY).clamp(1.0, double.infinity);
     final maxRange = math.max(rangeX, rangeY);
-    final scale = math.min(size.width, size.height) / maxRange * 0.9;
-    final cx = size.width  / 2;
-    final cy = size.height / 2;
-    final midX = (t.minX + t.maxX) * 0.5;
-    final midY = (t.minY + t.maxY) * 0.5;
+    final fitScale = math.min(size.width, size.height) / maxRange * 0.9;
+    final scale = fitScale * zoom;
+    final cx = size.width  / 2 + pan.dx;
+    final cy = size.height / 2 + pan.dy;
+    final midX = (layerBbox.minX + layerBbox.maxX) * 0.5;
+    final midY = (layerBbox.minY + layerBbox.maxY) * 0.5;
     double toX(double x) => cx + (x - midX) * scale;
     double toY(double y) => cy - (y - midY) * scale;
 
@@ -766,6 +1016,7 @@ class _ToolpathTopDownPainter extends CustomPainter {
   bool shouldRepaint(covariant _ToolpathTopDownPainter old) =>
       old.toolpaths != toolpaths ||
       old.currentLayer != currentLayer ||
+      old.zoom != zoom || old.pan != pan ||
       !_setEquals(old.visibleRoles, visibleRoles) ||
       !_setEquals(old.visibleMoves, visibleMoves);
 
