@@ -209,5 +209,6 @@
   "printControlFailedLight": "Chamber light command failed: {detail}",
   "@printControlFailedLight": {"placeholders": {"detail": {"type": "String"}}},
   "printPhaseCancelling": "Cancelling…",
-  "printPhaseCancelled": "Cancelled"
+  "printPhaseCancelled": "Cancelled",
+  "printPhasePreparing": "Preparing (heating/levelling)"
 }

@@ -57,6 +57,21 @@ void main() {
       }
     });
 
+    test('sub_status 1045/1096/1405/1906/2801/2802/2901/2902 → preparing', () async {
+      // Codes aus Daniels const.py + method.h:
+      // 1045/1096 Hotend-Preheat/Cooling, 1405/1906 weitere Vorbereitung,
+      // 2801/2802 Bed-Levelling, 2901/2902 Homing.
+      // Sechs davon (1045/1405/2801/2802/2901/2902) sind im eigenen
+      // Mitschnitt belegt; 1096/1906 nehmen wir ohne Live-Beweis mit.
+      for (final sub in [1045, 1096, 1405, 1906, 2801, 2802, 2901, 2902]) {
+        final s = await _buildState();
+        s.injectLiveStateForTest({
+          'machine_status': {'status': 2, 'sub_status': sub},
+        });
+        expect(s.printPhase, PrintPhase.preparing, reason: 'sub_status=$sub');
+      }
+    });
+
     test('sub_status 2503 → cancelling, 2504 → cancelled', () async {
       final s1 = await _buildState();
       s1.injectLiveStateForTest({

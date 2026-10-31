@@ -328,6 +328,7 @@ class _LiveStatus extends StatelessWidget {
     final stateText = switch (phase) {
       PrintPhase.unknown => l.printStatusUnknown,
       PrintPhase.idle => l.printStatusIdle,
+      PrintPhase.preparing => l.printPhasePreparing,
       PrintPhase.paused => l.substatePaused,
       PrintPhase.resuming => l.substateResuming,
       PrintPhase.cancelling => l.printPhaseCancelling,
@@ -479,10 +480,14 @@ class _PrintControlsState extends State<_PrintControls> {
     final busy = p.controlInFlight;
     final connected = p.connection == CanvasConnection.connected;
 
+    // preparing: Pause ergibt am Pre-Heat/Levelling keinen Sinn,
+    // Cancel aber schon (Klaus-Vorgabe M6-Nachbesserung).
     final canPause  = connected && phase == PrintPhase.printing && !busy;
     final canResume = connected && phase == PrintPhase.paused   && !busy;
     final canCancel = connected &&
-        (phase == PrintPhase.printing || phase == PrintPhase.paused) && !busy;
+        (phase == PrintPhase.printing ||
+         phase == PrintPhase.paused   ||
+         phase == PrintPhase.preparing) && !busy;
     final canLight  = connected && !busy;
 
     // Pause/Resume ist EIN Knopf, Label je nach Phase.

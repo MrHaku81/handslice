@@ -1075,6 +1075,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cancelled'**
   String get printPhaseCancelled;
+
+  /// No description provided for @printPhasePreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing (heating/levelling)'**
+  String get printPhasePreparing;
 }
 
 class _AppLocalizationsDelegate

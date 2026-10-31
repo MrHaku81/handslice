@@ -589,4 +589,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get printPhaseCancelled => 'Abgebrochen';
+
+  @override
+  String get printPhasePreparing => 'Vorbereitung (Aufheizen/Nivellieren)';
 }

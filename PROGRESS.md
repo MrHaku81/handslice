@@ -18,6 +18,61 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 13:45 UTC – M6-Nachbesserung: Phase "preparing" (Aufheizen/Nivellieren)
+
+Vor dem Geraetetest Klaus-Rueckmeldung umgesetzt.
+
+### Nachweislich
+
+- **Neues Phase-Element `PrintPhase.preparing`** in
+  `app/lib/state/printer_state.dart`. Mapping aus Daniels const.py +
+  method.h fuer die Vorbereitungs-Unterstatus:
+  - 1045 HOTEND_PREHEATING, 1096 HOTEND_COOLING
+  - 1405, 1906 (weitere Vorbereitungs-Codes aus Daniels Liste)
+  - 2801/2802 Bed-Levelling (start/end)
+  - 2901/2902 Homing (start/end)
+- **Mitschnitt-Gegenprobe** ueber alle `logs/cc2-sniff-*.jsonl`
+  (Python-Script in-memory): Vorkommen bei dieser Firmware
+  (fw 02.01.01.07, Abnahmedruck 2026-10-26 + Block A 2026-10-31):
+  - 1045: 19 Nachrichten – belegt
+  - 1405:  3 Nachrichten – belegt
+  - 2801:  5 Nachrichten – belegt
+  - 2802:  5 Nachrichten – belegt
+  - 2901:  3 Nachrichten – belegt
+  - 2902:  1 Nachricht  – belegt
+  - 1096 und 1906: 0 Treffer in unseren Mitschnitten. In Daniels
+    `const.py` dokumentiert; wir uebernehmen die beiden ohne
+    eigenen Live-Beleg, Kommentar im Code weist darauf hin.
+- **UI-Gating** (`screens/print_screen.dart`): Cancel aktiv in
+  `preparing`, Pause **inaktiv**. Resume bleibt nur in `paused`.
+  Entsprechender Guard auch in `PrinterState.cancelPrint()`
+  (preparing in erlaubte Phasen aufgenommen).
+- **L10n**: neue Keys `printPhasePreparing` (EN "Preparing
+  (heating/levelling)", DE "Vorbereitung (Aufheizen/Nivellieren)")
+  in beiden ARB-Dateien; Generated-Files regeneriert.
+- **Tests** (`cd app && flutter test` → **83/83 gruen**):
+  - Erweiterung in `printer_phase_mapping_test.dart`: alle 8
+    prep-Codes muessen zu `PrintPhase.preparing` auflösen.
+  - Alle bisherigen 82 Faelle weiter gruen (keine Rueckregression).
+
+### Ungeprueft
+
+- 1096/1906 am echten Drucker: in unseren Mitschnitten nicht
+  gesichtet. Code uebernimmt sie trotzdem (Daniels Liste); falls
+  die Firmware noch andere Codes fuer diese Phasen nutzt, wird
+  die UI dort weiterhin "Printing" zeigen statt "Preparing" –
+  **falsch-sicher**, keine falsche Pause-Freigabe moeglich, weil
+  die Pause nur in `printing` aktiv ist.
+- Alles was Klaus zum Geraetetest beisteuert (echte Transitionen
+  idle → preparing → printing → paused → resuming → printing →
+  cancelling → cancelled) ist weiterhin offen – wie geplant.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+---
+
 ## 2026-10-31 13:15 UTC – M6 Druck-Steuerung + Licht: Code steht, APK auf Poco
 
 Phase 6 Punkt 1+2 der Pflichtliste umgesetzt (Pause/Fortsetzen/Abbrechen

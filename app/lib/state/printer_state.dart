@@ -17,6 +17,11 @@ enum PrintPhase {
   unknown,
   // status == 1
   idle,
+  // status != 1, Vorbereitungs-Unterstatus (Aufheizen, Nivellieren,
+  // Homing) laufen. UI: Abbrechen aktiv, Pause inaktiv – ein
+  // laufendes Pre-Heat laesst sich am Drucker nicht sinnvoll
+  // pausieren.
+  preparing,
   // status != 1, keine der besonderen sub_status-Codes aktiv.
   printing,
   // sub_status in {2501, 2502, 2505}
@@ -134,10 +139,21 @@ class PrinterState extends ChangeNotifier {
 
   int? get subStatus => _getInt(['machine_status', 'sub_status']);
 
-  // Codes gemaess method.h / Block-A-Mitschnitt:
-  //   2501 PRINT_PAUSE_SUCCESS, 2502 PAUSE_STATE, 2505 PAUSE_FILA (Filament-Pause)
-  //   2401 PRINT_RESUME_SUCCESS, 2402 CONTINUE_HEAT (Transition zur Printing-Phase)
-  //   2503 PRINT_CANCEL_START,  2504 PRINT_CANCEL_SUCCESS
+  // Codes gemaess method.h / Daniels const.py / Block-A-Mitschnitt:
+  //   Vorbereitung (preparing):
+  //     1045 HOTEND_PREHEATING, 1096 HOTEND_COOLING,
+  //     1405 ?,                  1906 ?,
+  //     2801 BED_LEVELING_START, 2802 BED_LEVELING_END,
+  //     2901 HOMING_START,       2902 HOMING_END.
+  //     Im eigenen Sniff-Log (logs/cc2-sniff-2026-10-26.jsonl)
+  //     als tatsaechlich gepusht gesehen: 1045/1405/2801/2802/2901/2902.
+  //     1096 und 1906 steuert fw 02.01.01.07 im Abnahmedruck nicht an,
+  //     aber Daniels const.py nennt sie und wir folgen seiner Liste.
+  //   Pause: 2501 PRINT_PAUSE_SUCCESS, 2502 PAUSE_STATE,
+  //     2505 PAUSE_FILA (Filament-Pause)
+  //   Resume: 2401 PRINT_RESUME_SUCCESS,
+  //     2402 CONTINUE_HEAT (Transition zur Printing-Phase)
+  //   Cancel: 2503 PRINT_CANCEL_START, 2504 PRINT_CANCEL_SUCCESS
   // "paused" sammelt die drei Pause-Varianten; die UI unterscheidet
   // Filament-Zufuhr-Fehler erst zusaetzlich ueber exception_status
   // (siehe isFilamentFeedError).
@@ -147,6 +163,15 @@ class PrinterState extends ChangeNotifier {
     if (s == statusIdle) return PrintPhase.idle;
     final sub = subStatus;
     switch (sub) {
+      case 1045:
+      case 1096:
+      case 1405:
+      case 1906:
+      case 2801:
+      case 2802:
+      case 2901:
+      case 2902:
+        return PrintPhase.preparing;
       case 2501:
       case 2502:
       case 2505:
@@ -461,8 +486,12 @@ class PrinterState extends ChangeNotifier {
   }
 
   Future<bool> cancelPrint() async {
-    if (!(printPhase == PrintPhase.printing || printPhase == PrintPhase.paused)
-        || _controlInFlight) {
+    const okPhases = {
+      PrintPhase.printing,
+      PrintPhase.paused,
+      PrintPhase.preparing,
+    };
+    if (!okPhases.contains(printPhase) || _controlInFlight) {
       return false;
     }
     _controlInFlight = true; _lastError = null; notifyListeners();
