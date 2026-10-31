@@ -18,6 +18,80 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 19:30 UTC – M8 Nachbesserung 2: Start-Dialog, Cancel-Semantik, control-Labels
+
+Klaus-Test mit App d6849c8: Dateiliste / Thumbnails / Farben / Groesse,
+Live-Kamera (inkl. Vollbild), Download+Open/Share, Delete+Dialog,
+Print+A4-Pull, Running-File-Protection – **alles OK**.
+
+Zwei Punkte waren offen:
+1. Abbrechen waehrend des Nivellierens → App zeigte "Abbruch vom
+   Drucker abgelehnt: control.cancel.timeout" (zwei Fehler: Timeout
+   ist keine Ablehnung; roher Schluessel in der UI).
+2. Start-Dialog zeigte nur "Aktuelles Fach: A4" ohne Auswahl.
+
+### Nachweislich
+
+- **Firmware-Verhalten dokumentiert** (nicht unser Fehler): Cancel
+  waehrend `sub_status 2901`/`2902` (Levelling/Homing) wird vom
+  CC2 fw 02.01.01.07 **erst nach Abschluss der Nivellierung**
+  ausgefuehrt. Die 1022-Response kam ~Minuten verspaetet; das lag
+  nicht an Netzwerk oder App, sondern an der nicht-unterbrechbaren
+  Firmware-Motion-Planning-Phase. Jetzt in
+  `docs/networking-cc2.md` im Abschnitt "M8 follow-ups 2"
+  festgehalten.
+- **Cancel/Pause-Semantik angepasst** (`PrinterState.pausePrint`,
+  `cancelPrint`):
+  - Client-Wait auf 5 s verkuerzt.
+  - `error_code == 0` → UI still, Status-Watcher uebernimmt.
+  - `error_code != 0` → **echte Ablehnung** →
+    `lastError = control.<verb>.error_code.N`.
+  - **`TimeoutException` → keine Ablehnung**: `lastError` bleibt
+    null, Rueckgabe `true`. UI verfolgt den Erfolg ueber
+    `sub_status 2501/2502` (Pause) bzw. `2503/2504` (Cancel).
+  - Resume (1023) bleibt fire-and-forget wie zuvor.
+- **control.*-Keys lokalisieren**
+  (`app/lib/net/control_error_label.dart`): neuer Mapper
+  `mapControlErrorToText(l, key)` uebersetzt
+  `control.<verb>.error_code.N` → "Verb vom Drucker abgelehnt
+  (error_code=N)" und `control.<verb>.timeout` → "Verb: keine
+  Antwort in der erwarteten Zeit". UI im `PrintScreen._PrintControls`
+  nutzt den Mapper, bevor ein lastError ausgegeben wird – so taucht
+  der rohe Schluessel nicht mehr auf.
+- **Guard-Test** (`test/control_error_label_test.dart`): fuer jede
+  verb × kind Kombination in en und de muss der Mapper einen
+  nicht-leeren Text liefern, der KEIN `control.`-Fragment enthaelt.
+  Deckt die Rueckregression aus dem Live-Test ab.
+- **Start-Dialog fuer vorhandene Dateien** zeigt jetzt denselben
+  Fach-Picker (A1..A4, Radio + Farbkreis + Material-Label) wie
+  der Upload-Flow und persistiert die Auswahl via
+  `PrinterState.setTrayAssignmentForTool0`.
+- **Zwei Nivellier-Switches → einer**: ein Schalter "Bett vor dem
+  Druck nivellieren" in beiden Dialogen; beim Senden werden
+  `bedlevel_force` und `printer_check` auf denselben Wert gesetzt.
+- **Farbchip-Beschriftung** in der Dateiliste: `color_map[].t` ist
+  der Filament-Index aus der G-Code-Datei, NICHT das Fach. Jetzt
+  "Filament 1" statt "A1" (lokalisiert ueber neuen Key
+  `printerFilesFilamentIndex`), damit niemand Fach und Filament
+  verwechselt. Das physische Fach-Mapping passiert erst beim
+  Druckstart ueber `trayAssignmentForTool0`.
+
+**Tests**: `flutter test` → **113/113 gruen** (+5 ggue M8-Basis).
+Scrub strict: 0 Treffer.
+
+### Ungeprueft
+
+- Live-Verifikation der neuen Nachbesserungen am echten Drucker:
+  Fach-Picker-Verhalten, "Bricht ab …" bei Cancel-waehrend-
+  Nivellieren statt Timeout-Meldung – macht Klaus bei der naechsten
+  Session.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+---
+
 ## 2026-10-31 18:30 UTC – M8 Nachbesserungen: MediaStore-Downloads + UI-Kleinigkeiten
 
 Klaus-Test mit App 55ae65f ergab:

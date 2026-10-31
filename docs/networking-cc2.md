@@ -3493,3 +3493,85 @@ mirror.
   Header": the default (Files) section no longer shows the
   Refresh icon; tapping "Historie" brings back the old
   Druckhistorie header + Refresh. 108/108 overall.
+
+---
+
+## M8 follow-ups 2 – print dialog, cancel semantics, cancel-during-levelling (2026-10-31)
+
+### Firmware behaviour verified by Klaus (passing)
+
+- File list with thumbnails, colours, size, layers, print time.
+- Camera live + fullscreen.
+- Download → Download/Handslice, Open/Share.
+- Delete via `method 1047` with confirmation dialog; file is gone
+  on both printer display and app list.
+- Print existing file → start OK, printer actually pulled from
+  slot A4. Running-print-protection ("cannot delete") held.
+
+### Firmware behaviour to document (not a bug on our side)
+
+**Cancel during auto-levelling delays the stop until the levelling
+pass finishes.** Klaus hit Cancel while the printer was in
+`sub_status 2901`/`2902` (Homing/Levelling); the printer completed
+the levelling cycle and only then transitioned to Cancelling /
+Idle. The app's 1022 request was accepted, but the matching
+`api_response` only came after the levelling finished – well past
+the earlier 10 s client-side timeout. The firmware does not
+interrupt an in-flight motion-planning operation mid-stride on
+this firmware (`02.01.01.07`).
+
+### Fixes in this commit
+
+**Cancel/Pause now follow the Resume pattern.** Both 1021 and
+1022 are issued with a short client-side wait (5 s) that only
+distinguishes two outcomes:
+
+| Return                | Semantics                                                     |
+|---|---|
+| `error_code == 0`     | printer accepted – UI stays quiet, status watcher takes over  |
+| `error_code != 0`     | **real refusal** – `lastError = control.<verb>.error_code.N`  |
+| `TimeoutException`    | **no refusal**; the printer may answer later (levelling case). UI relies on `sub_status 2501/2502` for pause and `2503/2504` for cancel. `lastError` stays `null`, return value is `true`. |
+
+Resume (1023) is unchanged (fire-and-forget).
+
+**control.* keys now get localised text in the UI.** The new
+helper `mapControlErrorToText(l, key)` in
+`app/lib/net/control_error_label.dart` turns
+`control.cancel.error_code.42` into "Cancel rejected by the
+printer (error_code=42)" and `control.light.timeout` into "Chamber
+light: no reply from the printer in time". The old `lastError`
+pass-through through `l.printControlFailedPause(detail)` left the
+raw key visible when there was no better text; that path now
+runs through the helper first. The pure function covers all
+three verbs (`pause`, `cancel`, `light`) × both kinds
+(`error_code.N`, `timeout`).
+
+**Guard test** (`test/control_error_label_test.dart`) iterates
+every verb × kind combination for `en` and `de` and asserts:
+
+1. `mapControlErrorToText(l, key)` is non-null and non-empty;
+2. the returned text does not contain the substring `control.`
+   (would be the sign of a raw-key leak).
+
+### Smaller UI fixes
+
+- **Start dialog for existing files**: now shows a Radio-style
+  slot picker (A1..A4) exactly like the upload flow, and
+  persists the selection via
+  `PrinterState.setTrayAssignmentForTool0` so the next print
+  dialog opens with the same choice.
+- **Two bed-levelling switches merged into one** in both the
+  upload-driven dialog (`PrintScreen`) and the existing-file
+  dialog (`PrinterFilesPanel`). The new label is "Level the bed
+  before this print" / "Bett vor dem Druck nivellieren". On the
+  wire we send `bedlevel_force` and `printer_check` with the
+  same boolean; the previous two-switch UI implied a difference
+  that neither Orca nor the firmware actually surfaced to the
+  user.
+- **Colour chip relabelled from "PLA · A1" to "PLA · Filament 1"**
+  / "PLA · Filament 1" (and localised). The `color_map[].t` is a
+  file-local filament index, **not** a printer slot. The physical
+  slot assignment happens later via
+  `trayAssignmentForTool0` at print start; conflating the two in
+  the file list caused Klaus's "wait, is Filament 1 really going
+  to feed from slot A1?" moment.

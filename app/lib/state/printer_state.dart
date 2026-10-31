@@ -660,19 +660,37 @@ class PrinterState extends ChangeNotifier {
   bool _controlInFlight = false;
   bool get controlInFlight => _controlInFlight;
 
+  // M8-Nachbesserung: Pause/Cancel verfolgen den Erfolg jetzt
+  // genauso wie Resume ueber den `api_status`-Pfad, nicht ueber
+  // die api_response-Antwort. Hintergrund: Beim Abbruch waehrend
+  // des Nivellierens fuehrt die Firmware die Nivellierung erst
+  // zu Ende und schickt die Response spaet – mit Orcas 10-s-
+  // Timeout meldeten wir "Abbruch abgelehnt (timeout)", obwohl
+  // der Drucker den Request akzeptiert hatte. Jetzt:
+  //   - Request wird abgesetzt (short timeout, 5 s).
+  //   - error_code != 0 → echte Ablehnung → `_lastError = control.X.error_code.N`.
+  //   - Timeout → **keine** Fehler-Markierung; die UI vertraut dem
+  //     Status-Watch (sub_status 2501/2502 fuer pause, 2503/2504
+  //     fuer cancel). Rueckgabe `true`.
+  //   - andere Exceptions bleiben Fehler.
+  // Resume (1023) bleibt unveraendert fire-and-forget.
+
   Future<bool> pausePrint() async {
     if (printPhase != PrintPhase.printing || _controlInFlight) return false;
     _controlInFlight = true; _lastError = null; notifyListeners();
     try {
-      final r = await _client.pausePrint();
+      final r = await _client
+          .pausePrint(timeout: const Duration(seconds: 5));
       final code = ((r['result'] as Map?)?['error_code'] ?? -1) as int;
       if (code != 0) {
         _lastError = 'control.pause.error_code.$code';
+        return false;
       }
-      return code == 0;
+      return true;
     } on TimeoutException {
-      _lastError = 'control.pause.timeout';
-      return false;
+      // Firmware darf spaet antworten (z. B. am Ende eines
+      // Nivellier-Schritts). UI verfolgt den Erfolg via sub_status.
+      return true;
     } catch (e) {
       _lastError = e.toString();
       return false;
@@ -693,15 +711,18 @@ class PrinterState extends ChangeNotifier {
     }
     _controlInFlight = true; _lastError = null; notifyListeners();
     try {
-      final r = await _client.cancelPrint();
+      final r = await _client
+          .cancelPrint(timeout: const Duration(seconds: 5));
       final code = ((r['result'] as Map?)?['error_code'] ?? -1) as int;
       if (code != 0) {
         _lastError = 'control.cancel.error_code.$code';
+        return false;
       }
-      return code == 0;
+      return true;
     } on TimeoutException {
-      _lastError = 'control.cancel.timeout';
-      return false;
+      // Siehe Kommentar oben: Nivellier-Fall braucht eine spaete
+      // Antwort. UI zeigt "Bricht ab …" ueber den printPhase-Pfad.
+      return true;
     } catch (e) {
       _lastError = e.toString();
       return false;

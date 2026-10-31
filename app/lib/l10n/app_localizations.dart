@@ -1441,6 +1441,60 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Share'**
   String get printerFilesDownloadShare;
+
+  /// No description provided for @printerFilesPrintPickSlot.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose slot'**
+  String get printerFilesPrintPickSlot;
+
+  /// No description provided for @printerFilesPrintSlotsUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Slot info unavailable (not connected?).'**
+  String get printerFilesPrintSlotsUnknown;
+
+  /// No description provided for @printerFilesFilamentIndex.
+  ///
+  /// In en, this message translates to:
+  /// **'Filament {idx}'**
+  String printerFilesFilamentIndex(int idx);
+
+  /// No description provided for @printLevelBed.
+  ///
+  /// In en, this message translates to:
+  /// **'Level the bed before this print'**
+  String get printLevelBed;
+
+  /// No description provided for @controlVerbPause.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause'**
+  String get controlVerbPause;
+
+  /// No description provided for @controlVerbCancel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel'**
+  String get controlVerbCancel;
+
+  /// No description provided for @controlVerbLight.
+  ///
+  /// In en, this message translates to:
+  /// **'Chamber light'**
+  String get controlVerbLight;
+
+  /// No description provided for @controlFailedTimeout.
+  ///
+  /// In en, this message translates to:
+  /// **'{verb}: no reply from the printer in time'**
+  String controlFailedTimeout(String verb);
+
+  /// No description provided for @controlFailedWithCode.
+  ///
+  /// In en, this message translates to:
+  /// **'{verb} rejected by the printer (error_code={code})'**
+  String controlFailedWithCode(String verb, String code);
 }
 
 class _AppLocalizationsDelegate

@@ -793,4 +793,38 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get printerFilesDownloadShare => 'Share';
+
+  @override
+  String get printerFilesPrintPickSlot => 'Choose slot';
+
+  @override
+  String get printerFilesPrintSlotsUnknown =>
+      'Slot info unavailable (not connected?).';
+
+  @override
+  String printerFilesFilamentIndex(int idx) {
+    return 'Filament $idx';
+  }
+
+  @override
+  String get printLevelBed => 'Level the bed before this print';
+
+  @override
+  String get controlVerbPause => 'Pause';
+
+  @override
+  String get controlVerbCancel => 'Cancel';
+
+  @override
+  String get controlVerbLight => 'Chamber light';
+
+  @override
+  String controlFailedTimeout(String verb) {
+    return '$verb: no reply from the printer in time';
+  }
+
+  @override
+  String controlFailedWithCode(String verb, String code) {
+    return '$verb rejected by the printer (error_code=$code)';
+  }
 }

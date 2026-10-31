@@ -57,6 +57,24 @@ class _DeleteFake extends ElegooCc2Client {
   }
 }
 
+// Fake-Client fuer Timeout-Simulation bei pause/cancel. Ruft
+// die Original-Methoden ueberschreibt und wirft TimeoutException.
+class _TimeoutFake extends ElegooCc2Client {
+  bool connected = true;
+  @override
+  bool get isConnected => connected;
+  @override
+  Future<Map<String, dynamic>> pausePrint(
+      {Duration timeout = const Duration(seconds: 5)}) async {
+    throw TimeoutException('pause reply late');
+  }
+  @override
+  Future<Map<String, dynamic>> cancelPrint(
+      {Duration timeout = const Duration(seconds: 5)}) async {
+    throw TimeoutException('cancel reply late');
+  }
+}
+
 void main() {
   group('M8 Payload-Form', () {
     test('1047 deleteFile sendet file_path als Liste (Orca-Shape)', () async {
@@ -140,6 +158,33 @@ void main() {
       expect(code, 0, reason: 'andere Datei → regulaerer 1047-Call');
       expect(fake.deleteCalls, 1);
       expect(fake.lastFilePath, equals(['other.gcode']));
+    });
+
+    // M8-Nachbesserung: Timeout bei pause/cancel ist KEINE
+    // Ablehnung. Erfolg wird nur ueber den Status-Pfad verfolgt;
+    // `lastError` bleibt null, Rueckgabe `true`.
+    test('pausePrint: Timeout wird nicht als Fehler gemeldet', () async {
+      final fake = _TimeoutFake();
+      final s = await _state(client: fake);
+      s.setConnectionForTest(CanvasConnection.connected);
+      s.injectLiveStateForTest({
+        'machine_status': {'status': 2, 'sub_status': 2075},
+      });
+      final ok = await s.pausePrint();
+      expect(ok, isTrue, reason: 'Timeout → true, Erfolg kommt via Status');
+      expect(s.lastError, isNull);
+    });
+
+    test('cancelPrint: Timeout wird nicht als Fehler gemeldet', () async {
+      final fake = _TimeoutFake();
+      final s = await _state(client: fake);
+      s.setConnectionForTest(CanvasConnection.connected);
+      s.injectLiveStateForTest({
+        'machine_status': {'status': 2, 'sub_status': 2901}, // Nivellieren
+      });
+      final ok = await s.cancelPrint();
+      expect(ok, isTrue, reason: 'Timeout → true, Erfolg kommt via Status');
+      expect(s.lastError, isNull);
     });
 
     test('deleteFile verweigert ohne Verbindung', () async {

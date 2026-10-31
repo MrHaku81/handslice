@@ -799,4 +799,38 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get printerFilesDownloadShare => 'Teilen';
+
+  @override
+  String get printerFilesPrintPickSlot => 'Fach wählen';
+
+  @override
+  String get printerFilesPrintSlotsUnknown =>
+      'Fach-Informationen nicht verfügbar (nicht verbunden?).';
+
+  @override
+  String printerFilesFilamentIndex(int idx) {
+    return 'Filament $idx';
+  }
+
+  @override
+  String get printLevelBed => 'Bett vor dem Druck nivellieren';
+
+  @override
+  String get controlVerbPause => 'Pause';
+
+  @override
+  String get controlVerbCancel => 'Abbruch';
+
+  @override
+  String get controlVerbLight => 'Licht';
+
+  @override
+  String controlFailedTimeout(String verb) {
+    return '$verb: keine Antwort vom Drucker in der erwarteten Zeit';
+  }
+
+  @override
+  String controlFailedWithCode(String verb, String code) {
+    return '$verb vom Drucker abgelehnt (error_code=$code)';
+  }
 }

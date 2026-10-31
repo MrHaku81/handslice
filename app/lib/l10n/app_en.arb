@@ -287,5 +287,20 @@
   "printerFilesHeading": "Printer files",
   "printerFilesDownloadDoneDownloads": "Saved to Download/Handslice (visible in Files app)",
   "printerFilesDownloadOpen": "Open",
-  "printerFilesDownloadShare": "Share"
+  "printerFilesDownloadShare": "Share",
+
+  "printerFilesPrintPickSlot": "Choose slot",
+  "printerFilesPrintSlotsUnknown": "Slot info unavailable (not connected?).",
+  "printerFilesFilamentIndex": "Filament {idx}",
+  "@printerFilesFilamentIndex": {"placeholders": {"idx": {"type": "int"}}},
+
+  "printLevelBed": "Level the bed before this print",
+
+  "controlVerbPause": "Pause",
+  "controlVerbCancel": "Cancel",
+  "controlVerbLight": "Chamber light",
+  "controlFailedTimeout": "{verb}: no reply from the printer in time",
+  "@controlFailedTimeout": {"placeholders": {"verb": {"type": "String"}}},
+  "controlFailedWithCode": "{verb} rejected by the printer (error_code={code})",
+  "@controlFailedWithCode": {"placeholders": {"verb": {"type": "String"}, "code": {"type": "String"}}}
 }

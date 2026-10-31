@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../engine/slicer.dart';
 import '../l10n/app_localizations.dart';
 import '../net/cc2_exception_codes.dart';
+import '../net/control_error_label.dart';
 import '../net/elegoo_cc2_client.dart';
 import '../state/printer_state.dart';
 import '../state/project_state.dart';
@@ -29,8 +30,12 @@ class PrintScreen extends StatefulWidget {
 }
 
 class _PrintScreenState extends State<PrintScreen> {
-  bool _bedlevelForce = true;
-  bool _printerCheck = true;
+  // M8-Nachbesserung: ein einziger Nivellier-Schalter steht fuer
+  // `bedlevel_force` UND `printer_check` – beim Senden werden
+  // beide auf denselben Wert gesetzt. Zuvor war das in zwei
+  // Switches aufgeteilt, obwohl die Semantik "Bett nivellieren
+  // ja/nein" ist.
+  bool _bedLevel = true;
   bool _timelapse = false;
 
   double? _uploadProgress;
@@ -94,8 +99,8 @@ class _PrintScreenState extends State<PrintScreen> {
 
   Future<void> _startPrint() async {
     final r = await widget.printerState.startPrint(
-      bedlevelForce: _bedlevelForce,
-      printerCheck: _printerCheck,
+      bedlevelForce: _bedLevel,
+      printerCheck: _bedLevel,
       enableTimelapse: _timelapse,
       boundsOk: widget.projectState.boundsOk,
     );
@@ -147,15 +152,9 @@ class _PrintScreenState extends State<PrintScreen> {
             child: Column(
               children: [
                 _ToggleRow(
-                  label: l.printBedLeveling,
-                  value: _bedlevelForce,
-                  onChanged: (v) => setState(() => _bedlevelForce = v),
-                ),
-                const Divider(),
-                _ToggleRow(
-                  label: l.printPrinterCheck,
-                  value: _printerCheck,
-                  onChanged: (v) => setState(() => _printerCheck = v),
+                  label: l.printLevelBed,
+                  value: _bedLevel,
+                  onChanged: (v) => setState(() => _bedLevel = v),
                 ),
                 const Divider(),
                 _ToggleRow(
@@ -593,7 +592,8 @@ class _PrintControlsState extends State<_PrintControls> {
           if (ok) {
             _lastHint = l.printControlResumeHint;
           } else {
-            _lastError = p.lastError ?? l.printControlFailedPause('—');
+            _lastError =
+                mapControlErrorToText(l, p.lastError) ?? p.lastError ?? '—';
           }
         });
       };
@@ -603,7 +603,10 @@ class _PrintControlsState extends State<_PrintControls> {
         final ok = await p.pausePrint();
         if (!mounted) return;
         setState(() {
-          if (!ok) _lastError = l.printControlFailedPause(p.lastError ?? '—');
+          if (!ok) {
+            _lastError =
+                mapControlErrorToText(l, p.lastError) ?? p.lastError ?? '—';
+          }
         });
       };
     }
@@ -657,8 +660,8 @@ class _PrintControlsState extends State<_PrintControls> {
                       if (!mounted) return;
                       if (!ok) {
                         setState(() {
-                          _lastError =
-                              l.printControlFailedLight(p.lastError ?? '—');
+                          _lastError = mapControlErrorToText(l, p.lastError)
+                              ?? p.lastError ?? '—';
                         });
                       }
                     }
@@ -711,7 +714,8 @@ class _PrintControlsState extends State<_PrintControls> {
     if (!mounted) return;
     setState(() {
       if (!success) {
-        _lastError = l.printControlFailedCancel(p.lastError ?? '—');
+        _lastError =
+            mapControlErrorToText(l, p.lastError) ?? p.lastError ?? '—';
       }
     });
   }

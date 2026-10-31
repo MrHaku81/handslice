@@ -247,5 +247,17 @@
   "printerFilesHeading": "Dateien am Drucker",
   "printerFilesDownloadDoneDownloads": "Gespeichert unter Download/Handslice (sichtbar im Datei-Manager)",
   "printerFilesDownloadOpen": "Öffnen",
-  "printerFilesDownloadShare": "Teilen"
+  "printerFilesDownloadShare": "Teilen",
+
+  "printerFilesPrintPickSlot": "Fach wählen",
+  "printerFilesPrintSlotsUnknown": "Fach-Informationen nicht verfügbar (nicht verbunden?).",
+  "printerFilesFilamentIndex": "Filament {idx}",
+
+  "printLevelBed": "Bett vor dem Druck nivellieren",
+
+  "controlVerbPause": "Pause",
+  "controlVerbCancel": "Abbruch",
+  "controlVerbLight": "Licht",
+  "controlFailedTimeout": "{verb}: keine Antwort vom Drucker in der erwarteten Zeit",
+  "controlFailedWithCode": "{verb} vom Drucker abgelehnt (error_code={code})"
 }

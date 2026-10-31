@@ -515,6 +515,12 @@ class _ColorChip extends StatelessWidget {
       } catch (_) { return Colors.grey; }
     }
     final c = parse(entry.color);
+    final l = AppLocalizations.of(context);
+    // M8-Nachbesserung: `t` ist der Filament-Index aus der G-Code-
+    // Datei, NICHT das Fach. "A1" hat Klaus mit "Fach A1" verwechselt
+    // – deshalb jetzt lokalisiert als "Filament N" (Fach-Mapping
+    // laeuft erst beim Druckstart ueber trayAssignmentForTool0 und
+    // ist in der Dateiliste nicht bekannt).
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
@@ -533,8 +539,11 @@ class _ColorChip extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 4),
-          Text('${entry.filamentType} · A${entry.toolIndex + 1}',
-              style: const TextStyle(fontSize: 11)),
+          Text(
+            '${entry.filamentType.isEmpty ? "" : "${entry.filamentType} · "}'
+            '${l.printerFilesFilamentIndex(entry.toolIndex + 1)}',
+            style: const TextStyle(fontSize: 11),
+          ),
         ],
       ),
     );
@@ -581,15 +590,18 @@ class _PrintSettingsDialog extends StatefulWidget {
 }
 
 class _PrintSettingsDialogState extends State<_PrintSettingsDialog> {
+  // M8-Nachbesserung: ein einziger Nivellier-Schalter steht fuer
+  // `bedlevel_force` UND `printer_check` – beim Senden werden
+  // beide auf denselben Wert gesetzt.
   bool _bedLevel = true;
-  bool _printerCheck = true;
   bool _timelapse = false;
+  late int _tray = widget.printerState.trayAssignmentForTool0;
 
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
     final supportsTl = widget.printerState.supportsTimelapse;
-    final currentSlot = widget.printerState.trayAssignmentForTool0;
+    final slots = widget.printerState.slots;
     return AlertDialog(
       title: Text(l.printerFilesPrintTitle),
       content: SingleChildScrollView(
@@ -599,20 +611,30 @@ class _PrintSettingsDialogState extends State<_PrintSettingsDialog> {
           children: [
             Text(widget.filename,
                 style: Theme.of(context).textTheme.bodySmall),
-            const SizedBox(height: 8),
-            Text('${l.printerFilesPrintSlot}: A${currentSlot + 1}'),
+            const SizedBox(height: 10),
+            // Fach-Picker: dieselbe Logik wie im Upload-Flow,
+            // nicht nur eine statische "Aktuelles Fach"-Zeile.
+            Text(l.printerFilesPrintPickSlot,
+                style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 6),
+            if (slots.isEmpty)
+              Text(l.printerFilesPrintSlotsUnknown,
+                  style: Theme.of(context).textTheme.bodySmall)
+            else
+              Column(children: [
+                for (final s in slots)
+                  _SlotPickerRow(
+                    slot: s,
+                    selected: s.trayId == _tray,
+                    onTap: () => setState(() => _tray = s.trayId),
+                  ),
+              ]),
             const SizedBox(height: 10),
             SwitchListTile(
               dense: true, contentPadding: EdgeInsets.zero,
-              title: Text(l.printBedLeveling),
+              title: Text(l.printLevelBed),
               value: _bedLevel,
               onChanged: (v) => setState(() => _bedLevel = v),
-            ),
-            SwitchListTile(
-              dense: true, contentPadding: EdgeInsets.zero,
-              title: Text(l.printPrinterCheck),
-              value: _printerCheck,
-              onChanged: (v) => setState(() => _printerCheck = v),
             ),
             SwitchListTile(
               dense: true, contentPadding: EdgeInsets.zero,
@@ -643,11 +665,67 @@ class _PrintSettingsDialogState extends State<_PrintSettingsDialog> {
           child: Text(l.printerFilesPrintCancel),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(
-              _PrintChoice(_bedLevel, _printerCheck, _timelapse)),
+          onPressed: () {
+            // Fach uebernehmen und PrinterState aktualisieren
+            // (so wie der Upload-Flow die Zuweisung dauerhaft
+            // merkt).
+            widget.printerState.setTrayAssignmentForTool0(_tray);
+            Navigator.of(context).pop(
+                _PrintChoice(_bedLevel, _bedLevel, _timelapse));
+          },
           child: Text(l.printerFilesPrintStart),
         ),
       ],
+    );
+  }
+}
+
+class _SlotPickerRow extends StatelessWidget {
+  const _SlotPickerRow(
+      {required this.slot, required this.selected, required this.onTap});
+  final CanvasSlot slot;
+  final bool selected;
+  final VoidCallback onTap;
+  Color _parse(String hex) {
+    final h = hex.replaceAll('#', '').toUpperCase();
+    if (h.length != 6) return Colors.grey;
+    try { return Color(int.parse('FF$h', radix: 16)); } catch (_) { return Colors.grey; }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(children: [
+          Radio<bool>(
+            value: true,
+            groupValue: selected ? true : null,
+            onChanged: (_) => onTap(),
+          ),
+          Container(
+            width: 14, height: 14,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: _parse(slot.filamentColor),
+              border: Border.all(color: Colors.black26),
+              shape: BoxShape.circle,
+            ),
+          ),
+          Text(slot.slotLabel, style: theme.textTheme.bodyMedium),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              slot.filamentType.isEmpty
+                  ? '—'
+                  : '${slot.filamentType} · ${slot.filamentName}',
+              style: theme.textTheme.bodySmall,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ]),
+      ),
     );
   }
 }
