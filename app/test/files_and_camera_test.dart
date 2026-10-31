@@ -57,6 +57,37 @@ class _DeleteFake extends ElegooCc2Client {
   }
 }
 
+// Fake-Client fuer den 1026-Retry-Pfad: beim ersten startPrint
+// liefert er BedMeshDataMissing, danach Erfolg.
+class _MeshRetryFake extends ElegooCc2Client {
+  bool connected = true;
+  int startCalls = 0;
+  final List<Map<String, dynamic>> startParams = [];
+  @override
+  bool get isConnected => connected;
+  @override
+  Future<StartPrintResult> startPrint({
+    required String filename,
+    required bool bedlevelForce,
+    required bool printerCheck,
+    required bool? delayVideo,
+    required List<SlotMapEntry> slotMap,
+    String storageMedia = 'local',
+    String printLayout = 'A',
+    Duration timeout = const Duration(seconds: 30),
+  }) async {
+    startCalls++;
+    startParams.add({
+      'filename': filename,
+      'bedlevel_force': bedlevelForce,
+      'printer_check': printerCheck,
+      'delay_video': delayVideo,
+    });
+    final code = startCalls == 1 ? 1026 : 0; // BedMeshDataMissing → OK
+    return StartPrintResult(errorCode: code, raw: {'result': {'error_code': code}});
+  }
+}
+
 // Fake-Client fuer Timeout-Simulation bei pause/cancel. Ruft
 // die Original-Methoden ueberschreibt und wirft TimeoutException.
 class _TimeoutFake extends ElegooCc2Client {
@@ -128,6 +159,41 @@ void main() {
           url: 'http://x:8080/?action=stream').ok, isTrue);
       expect(const LivingVideoResult(errorCode: 1, url: '').ok, isFalse);
       expect(const LivingVideoResult(errorCode: 0, url: '').ok, isFalse);
+    });
+  });
+
+  group('M8 1026-Retry (BedMeshDataMissing)', () {
+    test('startPrintFile: 1026 → zweiter Call mit bedlevel_force=true + lastHint',
+        () async {
+      final fake = _MeshRetryFake();
+      final s = await _state(client: fake);
+      s.setConnectionForTest(CanvasConnection.connected);
+      s.injectLiveStateForTest({
+        'machine_status': {'status': 1},
+      });
+      s.setSlotsForTest([
+        CanvasSlot(trayId: 0, filamentType: 'PLA',
+            filamentName: 'ELEGOO PLA', filamentColor: '#F2754E'),
+      ]);
+      s.setTrayAssignmentForTool0(0);
+
+      final r = await s.startPrintFile(
+        filename: 'x.gcode',
+        levelBed: true,
+        enableTimelapse: false,
+      );
+      expect(r, isNotNull);
+      expect(r!.ok, isTrue, reason: 'zweiter Call lieferte Erfolg');
+      expect(fake.startCalls, 2, reason: 'genau ein Retry');
+      expect(fake.startParams[0]['bedlevel_force'], isFalse,
+          reason: 'Erstversuch IMMER mit bedlevel_force=false');
+      expect(fake.startParams[1]['bedlevel_force'], isTrue,
+          reason: 'Retry mit bedlevel_force=true');
+      expect(fake.startParams[0]['printer_check'], isTrue,
+          reason: 'User-Switch bindet an printer_check');
+      expect(fake.startParams[1]['printer_check'], isTrue);
+      expect(s.lastHint, 'startprint.retry_forced_level',
+          reason: 'UI-Hint fuer den 1026-Retry');
     });
   });
 

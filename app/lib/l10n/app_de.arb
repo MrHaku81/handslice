@@ -253,7 +253,8 @@
   "printerFilesPrintSlotsUnknown": "Fach-Informationen nicht verfügbar (nicht verbunden?).",
   "printerFilesFilamentIndex": "Filament {idx}",
 
-  "printLevelBed": "Bett vor dem Druck nivellieren",
+  "printLevelBed": "Bett vor dem Druck nivellieren (ca. 200 s)",
+  "startPrintForcedLevelHint": "Drucker hat keine Mesh-Daten – Nivellierung wird erzwungen",
 
   "controlVerbPause": "Pause",
   "controlVerbCancel": "Abbruch",

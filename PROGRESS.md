@@ -18,6 +18,71 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-10-31 20:00 UTC – M8 Nachbesserung 3: bedlevel_force vs printer_check (Orca 1:1)
+
+Klaus hat vor dem Push den Verdacht gehabt, dass `bedlevel_force`
+und `printer_check` zwei verschiedene Funktionen sind. Beleg im
+Orca-Bundle angesehen – es sind zwei Felder, aber Orca hat trotzdem
+nur EINEN sichtbaren Switch, und `bedlevel_force` ist ein
+Retry-Flag, kein User-Toggle. Freigabe fuer "A — Orca 1:1":
+EIN Switch bindet an `printer_check`, `bedlevel_force` wird nur im
+Retry nach `error_code=1026 BedMeshDataMissing` auf `true` gesetzt.
+
+### Nachweislich
+
+- **Fundstellen in Orca** (dokumentiert in
+  `docs/networking-cc2.md` "M8 follow-ups 3"): Multicolor- und
+  Monocolor-Start-Pfad binden `printer_check` an denselben
+  User-Switch; `bedlevel_force` ist initial `false` und wird nur
+  im 1026-Retry-Pfad auf `true` gedreht.
+- **PrinterState**:
+  - `startPrint` und `startPrintFile` haben jetzt genau einen
+    Nutzer-Parameter `levelBed` (statt `bedlevelForce` +
+    `printerCheck`).
+  - `_startPrintCore` sendet den Erstversuch IMMER mit
+    `bedlevel_force=false`. Bei `error_code=1026` **genau ein**
+    Retry mit `bedlevel_force=true`, gleicher restlicher Config.
+    Danach wird das Resultat durchgereicht.
+  - Vor dem Retry wird `_lastHint =
+    'startprint.retry_forced_level'` gesetzt (neuer transienter
+    Hint-Getter `lastHint`).
+- **UI**:
+  - `print_screen.dart` und `widgets/printer_files_panel.dart`:
+    EIN Switch mit neuem Label
+    "Bett vor dem Druck nivellieren (ca. 200 s)" /
+    "Level bed before printing (~200 s)".
+  - Hint-Anzeige: im Upload-Flow als `_InfoBox` neben dem
+    Start-Button; im Datei-Druck-Flow als `SnackBar` nach
+    Abschluss des Dialog-Flows (Panel wechselt gleich auf
+    Druckstatus).
+- **L10n**: neue Keys `startPrintForcedLevelHint` in en + de;
+  `printLevelBed`-Text aktualisiert
+  ("ca. 200 s" / "~200 s" eingefuegt).
+- **Tests**: `files_and_camera_test.dart` neu
+  "M8 1026-Retry (BedMeshDataMissing)". Fake-Client gibt beim
+  ersten `startPrint` 1026, danach 0; Asserts:
+    - genau zwei `startPrint`-Calls,
+    - erster Call `bedlevel_force=false, printer_check=true`,
+    - zweiter Call `bedlevel_force=true, printer_check=true`,
+    - `lastHint == 'startprint.retry_forced_level'`.
+  Vollsuite **114/114 gruen** (+1 ggue vorher). Scrub strict:
+  0 Treffer.
+
+### Ungeprueft
+
+- **1026-Fall am echten Drucker**: nur wenn der CC2 wirklich ohne
+  Mesh-Daten startet (nach Factory-Reset oder gewisser
+  Firmware-Zustaende). Klaus kann das forcieren, muss aber nicht –
+  der Pfad ist auf Orca-Code gestuetzt und Unit-getestet.
+- **UI-Live-Verifikation** der neuen Switch-Beschriftung und des
+  Hint-Banners am Geraet.
+
+### Geht nicht
+
+- (keine offenen Blocker.)
+
+---
+
 ## 2026-10-31 19:30 UTC – M8 Nachbesserung 2: Start-Dialog, Cancel-Semantik, control-Labels
 
 Klaus-Test mit App d6849c8: Dateiliste / Thumbnails / Farben / Groesse,

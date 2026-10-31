@@ -273,12 +273,20 @@ class _PrinterFilesPanelState extends State<PrinterFilesPanel> {
     if (result == null || !mounted) return;
     final r = await widget.printerState.startPrintFile(
       filename: f.filename,
-      bedlevelForce: result.bedLevel,
-      printerCheck: result.printerCheck,
+      levelBed: result.levelBed,
       enableTimelapse: result.timelapse,
     );
     if (!mounted || r == null) return;
-    // Erfolg zeigt sich im Live-Status; wir setzen hier nichts weiter.
+    // M8-Nachbesserung 3: wenn der 1026-Retry gelaufen ist, dem
+    // Nutzer einen SnackBar zeigen. Der Reiter wechselt gleich auf
+    // Druckstatus – der Hint muss also ohne Infobox-Haltezustand
+    // ankommen.
+    if (widget.printerState.lastHint == 'startprint.retry_forced_level') {
+      final l = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l.startPrintForcedLevelHint)),
+      );
+    }
   }
 
   @override
@@ -575,9 +583,11 @@ class _ErrorState extends StatelessWidget {
 }
 
 class _PrintChoice {
-  _PrintChoice(this.bedLevel, this.printerCheck, this.timelapse);
-  final bool bedLevel;
-  final bool printerCheck;
+  _PrintChoice(this.levelBed, this.timelapse);
+  // Bindet an `printer_check` in method 1020. `bedlevel_force`
+  // bleibt immer `false` beim ersten Versuch; PrinterState setzt
+  // ihn nur im 1026-Retry auf `true`.
+  final bool levelBed;
   final bool timelapse;
 }
 
@@ -671,7 +681,7 @@ class _PrintSettingsDialogState extends State<_PrintSettingsDialog> {
             // merkt).
             widget.printerState.setTrayAssignmentForTool0(_tray);
             Navigator.of(context).pop(
-                _PrintChoice(_bedLevel, _bedLevel, _timelapse));
+                _PrintChoice(_bedLevel, _timelapse));
           },
           child: Text(l.printerFilesPrintStart),
         ),

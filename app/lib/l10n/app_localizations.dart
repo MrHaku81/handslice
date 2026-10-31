@@ -1463,8 +1463,14 @@ abstract class AppLocalizations {
   /// No description provided for @printLevelBed.
   ///
   /// In en, this message translates to:
-  /// **'Level the bed before this print'**
+  /// **'Level bed before printing (~200 s)'**
   String get printLevelBed;
+
+  /// No description provided for @startPrintForcedLevelHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Printer has no mesh data — forcing levelling'**
+  String get startPrintForcedLevelHint;
 
   /// No description provided for @controlVerbPause.
   ///

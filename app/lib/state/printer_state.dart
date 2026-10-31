@@ -132,6 +132,12 @@ class PrinterState extends ChangeNotifier {
     notifyListeners();
   }
 
+  @visibleForTesting
+  void setSlotsForTest(List<CanvasSlot> slots) {
+    _slots = List.unmodifiable(slots);
+    notifyListeners();
+  }
+
   // Status-Watchdog: haertet die Verbindungserkennung, falls der
   // Broker die TCP-Verbindung still kappt (keine CONNACK-Fehlerspur,
   // der mqtt_client meldet keinen Disconnect). Wenn in `_watchdogGrace`
@@ -531,8 +537,7 @@ class PrinterState extends ChangeNotifier {
   }
 
   Future<StartPrintResult?> startPrint({
-    required bool bedlevelForce,
-    required bool printerCheck,
+    required bool levelBed,
     required bool enableTimelapse,
     required bool boundsOk,
   }) async {
@@ -544,8 +549,7 @@ class PrinterState extends ChangeNotifier {
     }
     return _startPrintCore(
       filename: _lastUploadedName!,
-      bedlevelForce: bedlevelForce,
-      printerCheck: printerCheck,
+      printerCheck: levelBed,
       enableTimelapse: enableTimelapse,
     );
   }
@@ -555,8 +559,7 @@ class PrinterState extends ChangeNotifier {
   // Upload-Pipeline vor); ansonsten identisch zum Upload-Flow.
   Future<StartPrintResult?> startPrintFile({
     required String filename,
-    required bool bedlevelForce,
-    required bool printerCheck,
+    required bool levelBed,
     required bool enableTimelapse,
   }) async {
     if (_state != CanvasConnection.connected) {
@@ -581,32 +584,64 @@ class PrinterState extends ChangeNotifier {
     }
     return _startPrintCore(
       filename: filename,
-      bedlevelForce: bedlevelForce,
-      printerCheck: printerCheck,
+      printerCheck: levelBed,
       enableTimelapse: enableTimelapse,
     );
   }
 
+  // Transienter Hinweis fuer die UI (nicht persistiert). Wird vom
+  // 1026-Retry-Pfad gesetzt und beim naechsten Druckstart
+  // zurueckgesetzt. UI zeigt das als Info-Banner an.
+  String? _lastHint;
+  String? get lastHint => _lastHint;
+
+  // method 1020 config-Felder:
+  //   printer_check  = Nutzer-Switch "Bett vor dem Druck nivellieren"
+  //                    (bindet 1:1 wie in Orcas Vue-UI, siehe
+  //                    docs/networking-cc2.md "A — Orca 1:1").
+  //   bedlevel_force = Retry-Flag: immer initial `false`. Nur im
+  //                    Fehlerpfad `error_code = 1026 BedMeshDataMissing`
+  //                    wird derselbe Request mit `bedlevel_force=true`
+  //                    erneut geschickt – genauso wie der obere
+  //                    Caller im Orca-Bundle @2621481.
+
+  static const int _errBedMeshDataMissing = 1026;
+
   Future<StartPrintResult?> _startPrintCore({
     required String filename,
-    required bool bedlevelForce,
     required bool printerCheck,
     required bool enableTimelapse,
   }) async {
+    _lastHint = null;
     final bool delayVideo = supportsTimelapse && enableTimelapse;
+    final slotMap = [
+      SlotMapEntry(
+          toolIndex: 0,
+          canvasId: 0,
+          trayId: _trayAssignmentForTool0),
+    ];
     try {
-      final r = await _client.startPrint(
+      var r = await _client.startPrint(
         filename: filename,
-        bedlevelForce: bedlevelForce,
+        bedlevelForce: false,
         printerCheck: printerCheck,
         delayVideo: delayVideo,
-        slotMap: [
-          SlotMapEntry(
-              toolIndex: 0,
-              canvasId: 0,
-              trayId: _trayAssignmentForTool0),
-        ],
+        slotMap: slotMap,
       );
+      if (r.errorCode == _errBedMeshDataMissing) {
+        // Orca-Retry-Pfad (@2621481): "no mesh data" → gleiches
+        // Config-Objekt, nur bedlevel_force=true. Genau einmal
+        // wiederholen, danach durchreichen was auch immer kommt.
+        _lastHint = 'startprint.retry_forced_level';
+        notifyListeners();
+        r = await _client.startPrint(
+          filename: filename,
+          bedlevelForce: true,
+          printerCheck: printerCheck,
+          delayVideo: delayVideo,
+          slotMap: slotMap,
+        );
+      }
       _lastError = r.ok ? null : 'startprint.error_code.${r.errorCode}';
       notifyListeners();
       return r;

@@ -3575,3 +3575,68 @@ every verb × kind combination for `en` and `de` and asserts:
   `trayAssignmentForTool0` at print start; conflating the two in
   the file list caused Klaus's "wait, is Filament 1 really going
   to feed from slot A1?" moment.
+
+---
+
+## M8 follow-ups 3 – bedlevel_force vs printer_check: Orca 1:1 (2026-10-31)
+
+### Belege im Orca-ElegooLink-Bundle
+
+Datei
+`engine/OrcaSlicer/resources/web/elegoolink/lan_service_web/index.html`,
+drei Fundstellen:
+
+- **@2599216 (multicolor-Druckstart):**
+  `config: { delay_video, printer_check: d.value.bedLeveling,
+  print_layout, bedlevel_force: !1, slot_map }`.
+- **@2599552 (monochrom-Druckstart):**
+  `config: { delay_video, printer_check: d.value.bedLeveling,
+  print_layout }`. `bedlevel_force` fehlt hier ganz.
+- **@2621481 (Retry-Pfad):**
+  `ze.error_code === Th.BedMeshDataMissing && (y.value.config.
+  bedlevel_force = !0, N(y.value))`.
+
+### Interpretation
+
+- **`printer_check`** ist der sichtbare User-Switch
+  ("Bed Leveling") in Orcas Vue-UI. Bindet 1:1 an die Checkbox.
+- **`bedlevel_force`** ist **kein** User-Toggle: initial immer
+  `false`, nur beim Retry nach `error_code=1026
+  BedMeshDataMissing` auf `true` umgestellt – derselbe Request
+  wird dann noch einmal gesendet.
+
+### Umsetzung in Handslice (nach Klaus-Freigabe "A — Orca 1:1")
+
+- UI zeigt EINEN Switch mit neuem Label
+  "Bett vor dem Druck nivellieren (ca. 200 s)" / "Level bed
+  before printing (~200 s)" in beiden Start-Dialogen
+  (`PrintScreen._PrintScreenState` und
+  `PrinterFilesPanel._PrintSettingsDialog`).
+- `PrinterState.startPrint` / `startPrintFile` haben jetzt genau
+  einen Nutzer-Parameter `levelBed`, der an `printer_check`
+  gebunden wird. `bedlevel_force` kommt beim Client-Call fest
+  mit `false`.
+- `_startPrintCore` prüft die Antwort:
+  `errorCode == 1026 BedMeshDataMissing` → **genau ein Retry**
+  mit `bedlevel_force=true`, gleicher restlicher Config, kein
+  weiterer Loop. Vor dem Retry wird
+  `lastHint = 'startprint.retry_forced_level'` gesetzt; die UI
+  rendert daraus "Drucker hat keine Mesh-Daten – Nivellierung
+  wird erzwungen" (im Upload-Flow als Infobox, im Datei-Flow
+  als SnackBar).
+- Die vorherige "beide Felder auf denselben Wert"-Vereinfachung
+  wurde zurückgenommen; sie hätte beim angelassenen Switch
+  immer `bedlevel_force=true` gesendet, obwohl Orca das nur im
+  Retry tut.
+
+### Tests
+
+`files_and_camera_test.dart` neu `M8 1026-Retry (BedMeshDataMissing)`:
+Fake-Client gibt beim ersten `startPrint` 1026 zurück, danach 0.
+Asserts:
+
+- genau zwei `startPrint`-Calls,
+- erster Call `bedlevel_force=false, printer_check=true`,
+- zweiter Call `bedlevel_force=true, printer_check=true`,
+- `PrinterState.lastHint == 'startprint.retry_forced_level'`
+  nach dem Lauf.

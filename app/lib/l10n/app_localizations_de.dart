@@ -813,7 +813,11 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
-  String get printLevelBed => 'Bett vor dem Druck nivellieren';
+  String get printLevelBed => 'Bett vor dem Druck nivellieren (ca. 200 s)';
+
+  @override
+  String get startPrintForcedLevelHint =>
+      'Drucker hat keine Mesh-Daten – Nivellierung wird erzwungen';
 
   @override
   String get controlVerbPause => 'Pause';

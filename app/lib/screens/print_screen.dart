@@ -99,8 +99,7 @@ class _PrintScreenState extends State<PrintScreen> {
 
   Future<void> _startPrint() async {
     final r = await widget.printerState.startPrint(
-      bedlevelForce: _bedLevel,
-      printerCheck: _bedLevel,
+      levelBed: _bedLevel,
       enableTimelapse: _timelapse,
       boundsOk: widget.projectState.boundsOk,
     );
@@ -238,6 +237,19 @@ class _PrintScreenState extends State<PrintScreen> {
             icon: const Icon(Icons.play_arrow_outlined),
             label: Text(l.printStartButton),
           ),
+
+          // M8-Nachbesserung 3: 1026-Retry-Hinweis
+          // ("Drucker hat keine Mesh-Daten – Nivellierung wird
+          // erzwungen"). PrinterState setzt lastHint beim Retry;
+          // Hinweis bleibt kurz sichtbar.
+          if (printer.lastHint == 'startprint.retry_forced_level') ...[
+            const SizedBox(height: 8),
+            _InfoBox(
+              icon: Icons.flaky_outlined,
+              color: WorkshopTokens.accent,
+              message: l.startPrintForcedLevelHint,
+            ),
+          ],
 
           const SizedBox(height: 20),
           Text(l.printStatusHeading, style: theme.textTheme.titleMedium),

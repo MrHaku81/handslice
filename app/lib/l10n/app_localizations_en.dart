@@ -807,7 +807,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get printLevelBed => 'Level the bed before this print';
+  String get printLevelBed => 'Level bed before printing (~200 s)';
+
+  @override
+  String get startPrintForcedLevelHint =>
+      'Printer has no mesh data — forcing levelling';
 
   @override
   String get controlVerbPause => 'Pause';

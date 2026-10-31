@@ -294,7 +294,8 @@
   "printerFilesFilamentIndex": "Filament {idx}",
   "@printerFilesFilamentIndex": {"placeholders": {"idx": {"type": "int"}}},
 
-  "printLevelBed": "Level the bed before this print",
+  "printLevelBed": "Level bed before printing (~200 s)",
+  "startPrintForcedLevelHint": "Printer has no mesh data — forcing levelling",
 
   "controlVerbPause": "Pause",
   "controlVerbCancel": "Cancel",
