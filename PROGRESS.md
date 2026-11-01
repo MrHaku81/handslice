@@ -18,6 +18,70 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 15:31 UTC – Pflicht 7d (follow-up): silhouette grey, filament totals, by-time %, compact legend
+
+Device test on 66e7c46 landed four follow-ups; all fixed below
+with Orca source references.
+
+- **Silhouette shell.** Dark-cyan 0.3-mm wireframe looked
+  opaque enough to swallow the current layer. Rebrushed to
+  light cool-grey `(0.78, 0.80, 0.82)` at 0.1-mm width over
+  the object-only AABB. Orca's real shell is a 20 %-alpha
+  mesh (`GCodeViewer.cpp:240` `set_color({1,1,1,0.5})` ×
+  `GLCanvas3D.hpp:1017` `set_shell_transparence(alpha=0.2f)`
+  × `GCodeViewer.hpp:266` `set_shell_transparency(alpha=
+  0.15f)`); flutter_scene's `UnlitMaterial` has no public
+  blend-mode hook so a real translucent mesh is 7e scope —
+  the thin light-grey wireframe is the hint we can draw now.
+  Docs call this out explicitly.
+- **"Total Filament" was summing path length.** The box
+  showed 36.24 m on the cube; Orca shows 1.17 m. Our
+  `totalLengthMm` is the Euclidean sum of extrude path
+  lengths — Orca's total uses *extruded filament* length,
+  which is already what `extrudedMm` carries (positive sum
+  of per-move E-deltas, equal to the g-code's `; filament
+  used [mm]` footer within 0.001 % on the cube). The
+  "Total estimation" box now uses `extrudedMm / 1000`.
+  Reference: `GCodeViewer.cpp:3443-3448`
+  `get_used_filament_from_volume`.
+- **Legend semantics audited against Orca.** Three calls
+  were wrong on the 7d run:
+    - **"Length" per role** = extruded filament metres
+      (`extrudedByRole[r] / 1000`), not path metres. Orca
+      ref: `GCodeViewer.cpp:3432-3440` `used_filament_per_
+      role` → `model_used_filament_m`.
+    - **%** = by time, not by length. Orca ref:
+      `GCodeViewer.cpp:3410-3418` `role_time_and_percent`
+      / `travel_time_and_percent`. Inner wall on the cube:
+      94.7 s / 561 s ≈ 16.9 %, matching the reference.
+    - **Role time** is extrude-only. Travel / wipe /
+      retract / unretract / seam carry their own time via
+      `timeByMove`, and get Time + % + distance + count in
+      their rows (Orca ref: `GCodeViewer.cpp:3797-3812`
+      `option_stats`). Without the extrude-only filter per-
+      role sums would already equal 9m25s and the option
+      rows would double-count to ≈ 11 min — exactly the
+      11-min figure Klaus flagged on the device.
+  Parser grew `timeByMove`, `distanceByMove`, `countByMove`
+  mirroring Orca's `m_move_type_times` / `_distances` /
+  `_counts`. `timeByRole` is now filtered to
+  `MoveType.extrude`.
+- **Layout at 393 dp.** % broke to two lines and names
+  ellipsised ("Innenwa…"). Rebuilt the legend as a dedicated
+  `_LegendTable` with fixed-width columns (14 + 14 + 40 +
+  32 + 50 + 44 = 194 dp fixed, ≈ 150 dp left for the name
+  under the project card's 32-dp horizontal padding), 11-pt
+  monospace, and no space between numbers and units
+  (`0.07m`, `0.21g`) — matches `GCodeViewer.cpp:3653-3655`
+  (`%.2fm`, `%.2fg` via `format_compact_weight`). "Außenwand"
+  and "Innenwand" now fit on one line.
+
+Follow-ups queued for 7e (unchanged):
+- Tubes with per-move width AND height.
+- Real translucent model-mesh shell above the slider.
+- Range-within-layer slider + G-code excerpt.
+- 67 MB stress test on the Poco.
+
 ## 2026-11-01 15:03 UTC – Pflicht 7d: silhouette, numbering, grid, legend totals
 
 Follow-up to the 04684c0 device test. Five fixes land here;

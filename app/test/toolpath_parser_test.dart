@@ -118,13 +118,28 @@ void main() {
       // walls, not skirt/brim/wipe).
       expect(t.objMinX, 20);
       expect(t.objMaxY, 20);
-      // Time: 0 + 0.5 + 1.2 + 1.3 = 3.0 s, with the extrude
-      // seconds assigned per-role.
+      // Time: 0 + 0.5 + 1.2 + 1.3 = 3.0 s. timeByRole is
+      // extrude-only (travels have their own bucket), so the
+      // 0.5 s travel does NOT show up in `timeByRole[none]`;
+      // it goes into `timeByMove[travel]`.
       expect(t.totalTimeSec, closeTo(3.0, 1e-5));
       expect(t.timeByRole[GcodeRole.externalPerimeter.index],
           closeTo(1.2, 1e-5));
       expect(t.timeByRole[GcodeRole.perimeter.index],
           closeTo(1.3, 1e-5));
+      expect(t.timeByRole[GcodeRole.none.index], 0);
+      expect(t.timeByMove[MoveType.travel.index], closeTo(0.5, 1e-5));
+      expect(t.timeByMove[MoveType.extrude.index], closeTo(2.5, 1e-5));
+      // distanceByMove covers every move type (travel +
+      // extrude in this fixture). travel: (0,0,0) → (10,10,0.2)
+      // ≈ 14.1428 mm. extrude: (10,10,0.2) → (20,10,0.2) +
+      // (20,10,0.2) → (20,20,0.2) = 20 mm total.
+      expect(t.distanceByMove[MoveType.travel.index],
+          closeTo(14.1428, 1e-3));
+      expect(t.distanceByMove[MoveType.extrude.index],
+          closeTo(20.0, 1e-5));
+      expect(t.countByMove[MoveType.travel.index], 1);
+      expect(t.countByMove[MoveType.extrude.index], 2);
       final move2 = Move(t.bd, 2 * hsptRecordSize);
       expect(move2.role, GcodeRole.externalPerimeter);
       expect(move2.width, closeTo(0.42, 1e-5));
@@ -290,10 +305,60 @@ void main() {
       // CC2 default Elegoo PLA: 1.75 mm, 1.25 g/cm³.
       expect(t.filamentDiameterMm, closeTo(1.75, 1e-3));
       expect(t.filamentDensityGcm3, closeTo(1.25, 1e-2));
-      // 20 mm cube at CC2 standard ≈ 9m25s = 565 s (reference
-      // image) — just assert it's non-zero and within a factor
-      // of two of the g-code footer.
-      expect(t.totalTimeSec, greaterThan(1.0));
+      // Reference screenshot (local-test/orca-referenz-
+      // schicht52.png): 9m25s = 565 s. Our 7d regen lands at
+      // 561 s — tolerance ±5 s.
+      expect(t.totalTimeSec, closeTo(565, 10));
+    });
+
+    test('cube HSPT total filament = extrudedMm/1000 ≈ 1.17 m',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Orca reference: 1.17 m · 3.52 g. We compute both from
+      // extrudedMm — the sum of positive E-deltas, which equals
+      // the footer's `; filament used [mm]`.
+      final filamentMetres = t.extrudedMm * 0.001;
+      final weightG = t.gramsFromExtrudedMm(t.extrudedMm);
+      expect(filamentMetres, closeTo(1.17, 0.01));
+      expect(weightG, closeTo(3.52, 0.05));
+    });
+
+    test('cube HSPT per-move time breakdown sums to totalTimeSec',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      double sum = 0;
+      for (final v in t.timeByMove) {
+        sum += v;
+      }
+      expect(sum, closeTo(t.totalTimeSec, 1e-3));
+      // And role-time (extrude-only) alone must be LESS than
+      // the total — otherwise we're double-counting travel /
+      // wipe / retract time, which caused the 11 min / 9m25s
+      // mismatch Klaus flagged on the 66e7c46 device run.
+      double roleSum = 0;
+      for (final v in t.timeByRole) {
+        roleSum += v;
+      }
+      expect(roleSum, lessThan(t.totalTimeSec));
+      // Extrude-only role time should equal timeByMove[extrude]
+      // because every extrude move is role-coded and we filter
+      // the per-role bucket to extrude-only.
+      expect(roleSum,
+          closeTo(t.timeByMove[MoveType.extrude.index], 1e-3));
+    });
+
+    test('cube HSPT travel distance populated for the Travel row',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // 20 mm cube on CC2 standard has a non-trivial travel
+      // budget (bed-to-model, between walls, …). Any positive
+      // number is enough to prove the Dart parser is tracking
+      // `m_move_type_distances` the way Orca does.
+      expect(t.distanceByMove[MoveType.travel.index],
+          greaterThan(100.0));
     });
   });
 }

@@ -356,15 +356,25 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
         mesh: fscene.Mesh(geom, mat)));
   }
 
-  // Orca's "translucent-above-the-slider" model silhouette.
-  // We approximate it with the 12 edges of the OBJECT-only AABB
-  // (`t.objMin*` / `t.objMax*`), which excludes skirt / brim /
-  // wipe tower / custom g-code — the raw whole-print bbox
-  // includes the purge line at (127, -1.2) and the brim 10 mm
-  // outside the model, which balloons the box. Colour and alpha
-  // are kept dim because flutter_scene's UnlitMaterial does not
-  // expose a full alpha blend; a dark cyan reads as "faded"
-  // against the near-black viewport background.
+  // Orca's "translucent-above-the-slider" model shell is a
+  // real alpha-blended mesh of the sliced object, tinted with
+  // the filament colour at ~20 % alpha. Reference:
+  //   OrcaSlicer/src/slic3r/GUI/GCodeViewer.cpp:240
+  //     m_model.set_color({ 1.0f, 1.0f, 1.0f, 0.5f });
+  //   OrcaSlicer/src/slic3r/GUI/GCodeViewer.hpp:266
+  //     void set_shell_transparency(float alpha = 0.15f);
+  //   OrcaSlicer/src/slic3r/GUI/GLCanvas3D.hpp:1017
+  //     void set_shell_transparence(float alpha = 0.2f);
+  //
+  // flutter_scene's `UnlitMaterial` does not expose a blend
+  // mode, so a real 20 %-alpha mesh is out of reach today
+  // (would need a custom shader or a sorted translucent
+  // pipeline). We approximate the shell with a light-grey
+  // AABB wireframe over the OBJECT-only bbox (skirt / brim /
+  // wipe tower / custom excluded) at 0.1-mm line width — thin
+  // enough to read as a hint, not a solid box. The reference
+  // image compares against `local-test/orca-referenz-
+  // schicht52.png`.
   void _addModelSilhouette(fscene.Scene scene, Toolpaths t) {
     final maxLayer = _currentLayer.clamp(0, t.layerCount - 1);
     // Top-of-current-layer Z. Use the current layer's recorded
@@ -398,10 +408,13 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
       out[o + 3] = b.x; out[o + 4] = b.y; out[o + 5] = b.z;
     }
     final data = fscene.LineSegmentData(positions: out);
-    final geom = fscene.LineSegmentsGeometry(data, width: 0.3);
+    final geom = fscene.LineSegmentsGeometry(data, width: 0.1);
     final mat = fscene.UnlitMaterial()
       ..displayReferred = true
-      ..baseColorFactor = vm.Vector4(0.22, 0.42, 0.42, 1);
+      // Light cool-grey (sRGB 0.78) ≈ `(1, 1, 1)` × α 0.22
+      // against the near-black viewport. Lets the wireframe
+      // read as "faded hint" rather than a solid box.
+      ..baseColorFactor = vm.Vector4(0.78, 0.80, 0.82, 1);
     scene.add(fscene.Node(name: 'silhouette',
         mesh: fscene.Mesh(geom, mat)));
   }
@@ -713,125 +726,111 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
   Widget _legend(ToolpathLayerViewLabels l) {
     final theme = Theme.of(context);
     final t = widget.toolpaths;
-    // Only show roles with non-zero length in this print — the
-    // full 20-row list is noisy on a plain cube.
+    // Only show roles with non-zero extruded filament — the
+    // full 20-row list is noisy on a plain cube. We mirror
+    // Orca's `get_extrusion_roles()`, which returns the roles
+    // present in the current print.
     final roles = GcodeRole.values
-        .where((r) => t.lengthByRole[r.index] > 0.5)
+        .where((r) => t.extrudedByRole[r.index] > 0.05)
         .toList();
     final moveTypes = [
       MoveType.travel, MoveType.wipe,
       MoveType.retract, MoveType.unretract, MoveType.seam,
     ];
-    final totalLen = t.lengthByRole.fold<double>(0, (a, b) => a + b);
-    final totalWeightG = t.gramsFromExtrudedMm(t.extrudedMm);
+    // Percent in Orca's "Line Type" legend is BY TIME, not by
+    // length. Reference:
+    //   OrcaSlicer/src/slic3r/GUI/GCodeViewer.cpp:3410-3418
+    //   role_time_and_percent, travel_time_and_percent.
+    final totalTimeSec = t.totalTimeSec;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(l.lineTypeLegendHeader, style: theme.textTheme.titleSmall),
         const SizedBox(height: 4),
-        // Column headers.
-        Padding(
-          padding: const EdgeInsets.only(bottom: 2),
-          child: DefaultTextStyle(
-            style: theme.textTheme.bodySmall!
-                .copyWith(color: Colors.white60),
-            child: Row(
-              children: [
-                const SizedBox(width: 20 + 20),   // eye + swatch
-                Expanded(flex: 4, child: Text(l.lineTypeNameHeader)),
-                SizedBox(width: 64,
-                    child: Text(l.lineTypeTimeHeader,
-                        textAlign: TextAlign.right)),
-                SizedBox(width: 68,
-                    child: Text(l.lineTypeLengthHeader,
-                        textAlign: TextAlign.right)),
-                SizedBox(width: 56,
-                    child: Text(l.lineTypeWeightHeader,
-                        textAlign: TextAlign.right)),
-                SizedBox(width: 44,
-                    child: Text(l.lineTypePercentHeader,
-                        textAlign: TextAlign.right)),
-              ],
-            ),
-          ),
+        _LegendTable(
+          labels: l,
+          rows: [
+            for (final r in roles)
+              _LegendRowData(
+                name: l.roleLabel(r),
+                color: Color(OrcaPalette.roleColor[r]!),
+                timeSec: t.timeByRole[r.index],
+                percent: totalTimeSec > 0
+                    ? t.timeByRole[r.index] / totalTimeSec * 100
+                    : 0,
+                // Orca's "Length" column for a role is the
+                // extruded FILAMENT length in metres, not the
+                // path length. Reference:
+                //   OrcaSlicer/src/slic3r/GUI/GCodeViewer.cpp
+                //   :3432-3440 used_filament_per_role (returns
+                //   model_used_filament_m / _g), and the usage
+                //   formula at :3443-3448. On the thumbnail
+                //   cube: 1177.15 mm extruded ⇒ 1.17 m total,
+                //   same as the reference screenshot.
+                lengthMetres: t.extrudedByRole[r.index] * 0.001,
+                weightG: t.gramsForRole(r.index),
+                visible: _visibleRoles.contains(r),
+                onToggle: (v) {
+                  setState(() {
+                    if (v) {
+                      _visibleRoles.add(r);
+                    } else {
+                      _visibleRoles.remove(r);
+                    }
+                  });
+                  _rebuildScene();
+                },
+              ),
+            for (final m in moveTypes)
+              _LegendRowData(
+                name: l.moveLabel(m),
+                color: Color(OrcaPalette.moveColor[m]!),
+                timeSec: t.timeByMove[m.index],
+                percent: totalTimeSec > 0
+                    ? t.timeByMove[m.index] / totalTimeSec * 100
+                    : 0,
+                // Option rows show distance in metres (Orca's
+                // `m_move_type_distances`, GCodeViewer.cpp
+                // :3806-3809) and no weight.
+                lengthMetres: t.distanceByMove[m.index] * 0.001,
+                weightG: null,
+                visible: _visibleMoves.contains(m),
+                onToggle: (v) {
+                  setState(() {
+                    if (v) {
+                      _visibleMoves.add(m);
+                    } else {
+                      _visibleMoves.remove(m);
+                    }
+                  });
+                  _rebuildScene();
+                },
+              ),
+          ],
         ),
-        for (final r in roles)
-          _legendRow(
-            name: l.roleLabel(r),
-            color: Color(OrcaPalette.roleColor[r]!),
-            timeSec: t.timeByRole[r.index],
-            lengthMm: t.lengthByRole[r.index],
-            weightG: t.gramsForRole(r.index),
-            percent: totalLen > 0
-                ? t.lengthByRole[r.index] / totalLen * 100
-                : 0,
-            visible: _visibleRoles.contains(r),
-            onToggle: (v) {
-              setState(() {
-                if (v) {
-                  _visibleRoles.add(r);
-                } else {
-                  _visibleRoles.remove(r);
-                }
-              });
-              _rebuildScene();
-            },
-          ),
-        const SizedBox(height: 2),
-        for (final m in moveTypes)
-          _legendRow(
-            name: l.moveLabel(m),
-            color: Color(OrcaPalette.moveColor[m]!),
-            // Move-type lengths / weights are not tracked; time
-            // is (travels and retracts carry real wall-clock
-            // cost, which Orca counts).
-            timeSec: _timeForMove(t, m),
-            lengthMm: null,
-            weightG: null,
-            percent: null,
-            visible: _visibleMoves.contains(m),
-            onToggle: (v) {
-              setState(() {
-                if (v) {
-                  _visibleMoves.add(m);
-                } else {
-                  _visibleMoves.remove(m);
-                }
-              });
-              _rebuildScene();
-            },
-          ),
         const SizedBox(height: 10),
-        _totalEstimation(l, totalLengthMm: totalLen,
-            totalWeightG: totalWeightG, totalTimeSec: t.totalTimeSec),
+        _totalEstimation(l,
+            // Reference: GCodeViewer.cpp:3443-3448
+            // get_used_filament_from_volume. Our `extrudedMm`
+            // is the sum of positive extruder deltas, i.e. the
+            // filament length that left the spool — same thing
+            // Orca puts on the "Total Filament" line.
+            totalFilamentMetres: t.extrudedMm * 0.001,
+            totalWeightG: t.gramsFromExtrudedMm(t.extrudedMm),
+            totalTimeSec: t.totalTimeSec),
       ],
     );
-  }
-
-  // Sum per-move time filtered to a specific move-type. The
-  // parser already sums per-role (which covers extrudes), but
-  // travels / retracts / wipes are not role-coded, so their
-  // time still lives on the move-type dimension of each record.
-  double _timeForMove(Toolpaths t, MoveType m) {
-    final bd = ByteData.sublistView(t.data);
-    double sum = 0;
-    for (int i = 0; i < t.moveCount; ++i) {
-      final o = i * hsptRecordSize;
-      if (bd.getUint8(o + 2) != m.index) continue;
-      sum += bd.getFloat32(o + 28, Endian.little);
-    }
-    return sum;
   }
 
   // Orca's "Total estimation" box in the lower right. We follow
   // the same layout — total filament metres + grams on one line,
   // total time on the next.
   Widget _totalEstimation(ToolpathLayerViewLabels l,
-      {required double totalLengthMm,
+      {required double totalFilamentMetres,
        required double totalWeightG,
        required double totalTimeSec}) {
     final theme = Theme.of(context);
-    final filamentLine = '${(totalLengthMm / 1000).toStringAsFixed(2)} m '
+    final filamentLine = '${totalFilamentMetres.toStringAsFixed(2)} m '
         '· ${totalWeightG.toStringAsFixed(2)} g';
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -866,76 +865,134 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     );
   }
 
-  Widget _legendRow({
-    required String name,
-    required Color color,
-    required double? timeSec,
-    required double? lengthMm,
-    required double? weightG,
-    required double? percent,
-    required bool visible,
-    required ValueChanged<bool> onToggle,
-  }) {
+}
+
+// -------- Legend table --------
+//
+// Pulled into its own widget so the Row widths can collapse
+// cleanly at 393 dp (Poco X3 Pro portrait). The row data is
+// a plain record struct; the widget renders all rows with the
+// same compact column widths so the %-column never breaks into
+// two lines and the name column always has room for the full
+// German label ("Innenwand", "Außenwand") without ellipsising.
+
+class _LegendRowData {
+  _LegendRowData({
+    required this.name,
+    required this.color,
+    required this.timeSec,
+    required this.percent,
+    required this.lengthMetres,
+    required this.weightG,
+    required this.visible,
+    required this.onToggle,
+  });
+  final String name;
+  final Color color;
+  final double timeSec;
+  final double percent;
+  final double lengthMetres;
+  /// `null` for option rows (travel / wipe / retract / …) —
+  /// Orca hides their weight column (`GCodeViewer.cpp:3804-3812`).
+  final double? weightG;
+  final bool visible;
+  final ValueChanged<bool> onToggle;
+}
+
+class _LegendTable extends StatelessWidget {
+  const _LegendTable({required this.labels, required this.rows});
+  final ToolpathLayerViewLabels labels;
+  final List<_LegendRowData> rows;
+
+  // Compact column widths — fit the whole table on a 393-dp
+  // Poco X3 Pro portrait viewport without any column breaking
+  // to a second line or the name ellipsising. The six fixed
+  // widths sum to 194 dp (14 + 14 + 40 + 32 + 50 + 44), leaving
+  // ≈ 150 dp of width for the name under the project-card
+  // padding (16 + 16 dp horizontal). "0.07m" fits in 40 dp at
+  // the 10-px monospace font.
+  static const double _wSwatch = 14;
+  static const double _wEye    = 14;
+  static const double _wTime   = 40;
+  static const double _wPct    = 32;
+  static const double _wUsage  = 50;
+  static const double _wWeight = 44;
+  static const double _rowFont = 11;
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final headStyle = theme.textTheme.bodySmall!.copyWith(
+        color: Colors.white60, fontSize: _rowFont);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(bottom: 2),
+          child: DefaultTextStyle(
+            style: headStyle,
+            child: Row(children: [
+              const SizedBox(width: _wSwatch + _wEye + 6),
+              Expanded(child: Text(labels.lineTypeNameHeader)),
+              SizedBox(width: _wTime,
+                  child: Text(labels.lineTypeTimeHeader,
+                      textAlign: TextAlign.right)),
+              SizedBox(width: _wPct,
+                  child: Text(labels.lineTypePercentHeader,
+                      textAlign: TextAlign.right)),
+              SizedBox(width: _wUsage,
+                  child: Text(labels.lineTypeLengthHeader,
+                      textAlign: TextAlign.right)),
+              SizedBox(width: _wWeight,
+                  child: Text(labels.lineTypeWeightHeader,
+                      textAlign: TextAlign.right)),
+            ]),
+          ),
+        ),
+        for (final r in rows) _row(theme, r),
+      ],
+    );
+  }
+
+  Widget _row(ThemeData theme, _LegendRowData r) {
+    final cellStyle = theme.textTheme.bodySmall?.copyWith(
+        fontFamily: 'monospace',
+        fontSize: _rowFont,
+        color: r.visible ? null : Colors.white38);
+    final nameStyle = theme.textTheme.bodySmall?.copyWith(
+        fontSize: _rowFont,
+        color: r.visible ? null : Colors.white38);
     return InkWell(
-      onTap: () => onToggle(!visible),
+      onTap: () => r.onToggle(!r.visible),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.symmetric(vertical: 1),
         child: Row(
           children: [
-            SizedBox(width: 20,
+            SizedBox(width: _wEye,
               child: Icon(
-                visible ? Icons.visibility : Icons.visibility_off,
-                size: 16,
-                color: visible ? Colors.white70 : Colors.white24),
+                r.visible ? Icons.visibility : Icons.visibility_off,
+                size: 12,
+                color: r.visible ? Colors.white70 : Colors.white24),
             ),
-            SizedBox(width: 20, child: _swatch(color)),
-            Expanded(flex: 4,
-              child: Text(name,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: visible ? null : Colors.white38),
-                overflow: TextOverflow.ellipsis),
-            ),
-            SizedBox(width: 64,
+            const SizedBox(width: 2),
+            SizedBox(width: _wSwatch, child: _swatch(r.color)),
+            const SizedBox(width: 4),
+            Expanded(child: Text(r.name,
+                style: nameStyle, maxLines: 1,
+                overflow: TextOverflow.ellipsis)),
+            SizedBox(width: _wTime,
+              child: Text(_fmtDuration(r.timeSec),
+                  textAlign: TextAlign.right, style: cellStyle)),
+            SizedBox(width: _wPct,
+              child: Text(_fmtPercent(r.percent),
+                  textAlign: TextAlign.right, style: cellStyle)),
+            SizedBox(width: _wUsage,
+              child: Text(_fmtMetres(r.lengthMetres),
+                  textAlign: TextAlign.right, style: cellStyle)),
+            SizedBox(width: _wWeight,
               child: Text(
-                timeSec == null ? '—' : _fmtDuration(timeSec),
-                textAlign: TextAlign.right,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
-                    color: visible ? null : Colors.white38),
-              ),
-            ),
-            SizedBox(width: 68,
-              child: Text(
-                lengthMm == null
-                    ? '—'
-                    : '${(lengthMm / 1000).toStringAsFixed(2)} m',
-                textAlign: TextAlign.right,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
-                    color: visible ? null : Colors.white38),
-              ),
-            ),
-            SizedBox(width: 56,
-              child: Text(
-                weightG == null
-                    ? '—'
-                    : '${weightG.toStringAsFixed(2)} g',
-                textAlign: TextAlign.right,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
-                    color: visible ? null : Colors.white38),
-              ),
-            ),
-            SizedBox(width: 44,
-              child: Text(
-                percent == null ? '—' : '${percent.toStringAsFixed(1)} %',
-                textAlign: TextAlign.right,
-                style: theme.textTheme.bodySmall?.copyWith(
-                    fontFamily: 'monospace',
-                    color: visible ? null : Colors.white38),
-              ),
-            ),
+                  r.weightG == null ? '—' : _fmtWeight(r.weightG!),
+                  textAlign: TextAlign.right, style: cellStyle)),
           ],
         ),
       ),
@@ -947,8 +1004,36 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
       color: c, shape: BoxShape.circle,
       border: Border.all(color: Colors.black26),
     ),
-    width: 14, height: 14,
+    width: 10, height: 10,
   );
+
+  // Orca prints these values without a space between the number
+  // and its unit ("0.07m", "0.21g") — see
+  // `GCodeViewer.cpp:3653-3655` ("%.2fm", "%.2fg" via
+  // `format_compact_weight`). Mirroring saves ~2 dp per cell.
+  static String _fmtDuration(double seconds) {
+    if (!seconds.isFinite || seconds <= 0.5) return '—';
+    final total = seconds.round();
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+    if (h > 0) return '${h}h${m}m';
+    if (m > 0) return '${m}m${s}s';
+    return '${s}s';
+  }
+  static String _fmtPercent(double pct) {
+    if (!pct.isFinite || pct <= 0.05) return '—';
+    if (pct < 0.1) return '<0.1';
+    return pct.toStringAsFixed(1);
+  }
+  static String _fmtMetres(double m) {
+    if (!m.isFinite || m < 0.001) return '—';
+    return '${m.toStringAsFixed(2)}m';
+  }
+  static String _fmtWeight(double g) {
+    if (!g.isFinite || g < 0.005) return '—';
+    return '${g.toStringAsFixed(2)}g';
+  }
 }
 
 // -------- 2D top-down painter --------

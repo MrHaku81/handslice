@@ -129,6 +129,9 @@ class Toolpaths {
     required this.extrudedByRole,
     required this.lengthByRole,
     required this.timeByRole,
+    required this.timeByMove,
+    required this.distanceByMove,
+    required this.countByMove,
     required this.totalTimeSec,
     required this.filamentDensityGcm3,
     required this.filamentDiameterMm,
@@ -161,17 +164,34 @@ class Toolpaths {
   /// Per-role sum of extruded `delta_extruder` (mm). Same filter
   /// as above. Length == `GcodeRole.values.length`.
   final Float64List extrudedByRole;
-  /// Per-role sum of Euclidean segment lengths (mm). What Orca
-  /// shows as "Length" in the Line-Type legend.
+  /// Per-role sum of Euclidean path lengths of EXTRUDE moves
+  /// (mm). Kept for the 2D painter's debug uses; not used in
+  /// the legend any more — Orca shows filament length there.
   final Float64List lengthByRole;
-  /// Per-role sum of per-move `time_s` (Normal mode, seconds).
-  /// Not filtered to `MoveType.extrude` — travels count. Sum
-  /// across all roles plus the move-type bucket equals the
-  /// print's "Total estimated time".
+  /// Per-role sum of per-move `time_s` (Normal mode, seconds),
+  /// filtered to `MoveType.extrude` moves. Mirrors Orca's
+  /// `Viewer::get_extrusion_role_estimated_time(role)` (see
+  /// `OrcaSlicer/src/slic3r/GUI/GCodeViewer.cpp:3410-3413` →
+  /// `role_time_and_percent`). Travels/retracts/wipes carry
+  /// their own time via [timeByMove].
   final Float64List timeByRole;
+  /// Per-move-type sum of per-move `time_s` (seconds). Mirrors
+  /// Orca's `m_move_type_times` (see `OrcaSlicer/src/slic3r/
+  /// GUI/GCodeViewer.cpp:3798`). Lets the legend attribute
+  /// travel/retract/… time without a full re-scan.
+  final Float64List timeByMove;
+  /// Per-move-type sum of Euclidean segment lengths (mm).
+  /// Mirrors Orca's `m_move_type_distances`
+  /// (`GCodeViewer.cpp:3806`). The "Travel" distance Orca
+  /// shows in the legend's "Usage" column equals
+  /// `distanceByMove[MoveType.travel.index]`.
+  final Float64List distanceByMove;
+  /// Per-move-type record count. Mirrors Orca's
+  /// `m_move_type_counts` (`GCodeViewer.cpp:3810`).
+  final Uint32List countByMove;
   /// Total print time (seconds), sum of per-move Normal-mode
-  /// time including all move types. Matches Orca's
-  /// "Total time" footer.
+  /// time across every move. Matches Orca's
+  /// `get_estimated_time()` and the g-code footer.
   final double totalTimeSec;
   /// Filament density (g/cm³) for extruder 0; comes from the
   /// g-code's config block via `filament_density`.
@@ -303,6 +323,9 @@ Toolpaths _parseInline(Uint8List bytes) {
   final extrudedByRole = Float64List(GcodeRole.values.length);
   final lengthByRole   = Float64List(GcodeRole.values.length);
   final timeByRole     = Float64List(GcodeRole.values.length);
+  final timeByMove     = Float64List(MoveType.values.length);
+  final distanceByMove = Float64List(MoveType.values.length);
+  final countByMove    = Uint32List(MoveType.values.length);
   double totalTime = 0;
   double px = 0, py = 0, pz = 0;
   bool hasPrev = false;
@@ -320,7 +343,20 @@ Toolpaths _parseInline(Uint8List bytes) {
     final rc = roleCode < extrudedByRole.length
         ? roleCode
         : GcodeRole.none.index;
-    timeByRole[rc] += tSec;
+    final mc = moveCode < timeByMove.length
+        ? moveCode
+        : MoveType.noop.index;
+    timeByMove[mc] += tSec;
+    countByMove[mc] += 1;
+    // Role-time is extrude-only — mirrors Orca's
+    // `get_extrusion_role_estimated_time` (see
+    // `GCodeViewer.cpp:3410-3413`). Travels and retracts have
+    // their own per-move-type bucket above, otherwise we'd
+    // double-count them in both the role rows and the Travel
+    // row and show ~11 min for a 9m25s cube.
+    if (moveCode == MoveType.extrude.index) {
+      timeByRole[rc] += tSec;
+    }
     if (layerId != lastLayerId) {
       if (layerStarts.isEmpty || layerId > lastLayerId) {
         layerStarts.add(i);
@@ -361,6 +397,10 @@ Toolpaths _parseInline(Uint8List bytes) {
         }
       }
     }
+    if (hasPrev) {
+      final dx = x - px, dy = y - py, dz = z - pz;
+      distanceByMove[mc] += math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
     px = x; py = y; pz = z;
     hasPrev = true;
   }
@@ -389,6 +429,9 @@ Toolpaths _parseInline(Uint8List bytes) {
     extrudedByRole: extrudedByRole,
     lengthByRole: lengthByRole,
     timeByRole: timeByRole,
+    timeByMove: timeByMove,
+    distanceByMove: distanceByMove,
+    countByMove: countByMove,
     totalTimeSec: totalTime,
     filamentDensityGcm3: density,
     filamentDiameterMm: diameter,

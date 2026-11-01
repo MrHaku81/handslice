@@ -140,11 +140,23 @@ time, which pushed orange walls into peach on the first on-
 device run (Klaus, 2026-11-01).
 
 Layers below the slider are drawn at their full Orca palette
-value — no stacked dimming. Above the slider the viewport
-renders a 12-edge AABB wireframe in a dim cyan to mark the
-"model still to come". 7d uses the OBJECT-only AABB
-(`t.objMin*/objMax*`), not the raw whole-print one, so the box
-does not swallow the purge line / brim.
+value — no stacked dimming. Above the slider we approximate
+Orca's translucent model shell with a light-grey AABB
+wireframe over the OBJECT-only bbox (`t.objMin*/objMax*`),
+not the raw whole-print one — otherwise the purge line and
+brim pull the corners well past the model.
+
+Orca's shell is a real alpha-blended STL mesh:
+`GCodeViewer.cpp:240` sets `m_model.set_color({1.0f, 1.0f,
+1.0f, 0.5f})` and `GLCanvas3D.hpp:1017` /
+`GCodeViewer.hpp:266` cap the final alpha at 0.2 / 0.15
+respectively, so it reads as a faint white glass shell.
+`flutter_scene`'s `UnlitMaterial` has no public blend-mode
+hook, so we cannot fire a 20 %-alpha fill today — the AABB
+wireframe at 0.1-mm line width in `(0.78, 0.80, 0.82)` sRGB
+grey is the hint we can draw instead. Porting the real
+mesh is tracked under "pipe-ribbon shader" in the 7e
+backlog, since both items need a custom shader anyway.
 
 ### 2D top-down fit
 
@@ -175,23 +187,64 @@ not to fight the extrusions.
 
 ### Legend table
 
-Columns: toggle (eye icon), swatch, name, time, length (m),
-weight (g), %. Only roles with ≥ 0.5 mm of recorded path
+Columns: toggle (eye icon), swatch, name, time, %, length,
+weight. Only roles with ≥ 0.05 mm of extruded filament
 appear so a plain cube does not drag the full 20-row palette
-into view. Length is `Toolpaths.lengthByRole` (Euclidean),
-time is `Toolpaths.timeByRole` (sum of HSPT per-move
-`time_s`), weight is derived in Dart from
-`extrudedByRole × π·(d/2)² × density × 1e-3`. Percent is
-role length ÷ total length. For the five visible move types
-(travel / wipe / retract / unretract / seam) only the time
-column is populated — lengths and weights are not meaningful
-there.
+into view (mirrors Orca's `Viewer::get_extrusion_roles()`
+which lists only roles present in the current print).
+
+| Column | Roles                                | Options (travel/wipe/retract/unretract/seam) | Orca ref |
+|--------|--------------------------------------|----------------------------------------------|----------|
+| Time   | `timeByRole[r]` (extrude-only)       | `timeByMove[m]`                              | `GCodeViewer.cpp:3410-3418` + `:3798` |
+| %      | `timeByRole[r] / totalTimeSec`       | `timeByMove[m] / totalTimeSec`               | `GCodeViewer.cpp:3412` + `:3804` |
+| Length | `extrudedByRole[r] / 1000` (filament metres) | `distanceByMove[m] / 1000` (path metres) | `GCodeViewer.cpp:3432-3448` + `:3806` |
+| Weight | `gramsFromExtrudedMm(extrudedByRole[r])` | — (Orca hides it)                        | `GCodeViewer.cpp:3443-3448` |
+
+Three semantic calls worth highlighting, because Klaus caught
+each one on the 66e7c46 device run:
+
+- **Percent is by TIME, not by length.** Orca's
+  `role_time_and_percent` returns `time / total_estimated_time`
+  (`GCodeViewer.cpp:3412`). On the thumbnail cube the inner-
+  wall row is 94.7 s / 561 s ≈ 16.9 %, which matches the
+  reference screenshot. The length-based percentage we had on
+  7d would have shown ≈ 20.5 % instead.
+- **Length for roles is filament metres, not path metres.**
+  `used_filament_per_role` in `GCodeViewer.cpp:3432-3440`
+  returns the extruded filament length (= `role_cache /
+  (π·r²) · 0.001`, `GCodeProcessor.cpp:1626-1628`). For the
+  cube that is 1.17 m total; the sum of path lengths is
+  36 m and would wildly disagree with Orca's "1.17 m" footer.
+  Dart simply divides `extrudedByRole[r]` by 1000.
+- **Role times are extrude-only.** `timeByRole` is populated
+  only when `moveCode == Extrude`; travels / retracts /
+  wipes drop into `timeByMove`. Without that filter the
+  per-role totals already equal 9m25s on their own and the
+  Travel row then pushes the sum to ~11 min. Orca's
+  `get_extrusion_role_estimated_time` is extrude-only for
+  the same reason.
 
 Below the role table a "Total estimation" box carries two
-rows: total filament (metres + grams) and total print time
-(`Toolpaths.totalTimeSec`, formatted as `9m25s` /
-`1h12m` / `35s`). The reference screenshot's `Total 1.17 m ·
-3.52 g · 9m25s` is the target.
+rows:
+
+- `Total Filament` = `extrudedMm / 1000` m · gramsFromExtruded
+  Mm(extrudedMm) g. On the cube that is 1.17 m · 3.52 g,
+  matching the reference image exactly.
+- `Total time` = `totalTimeSec`, formatted `9m25s` /
+  `1h12m` / `35s`.
+
+#### Compact mobile layout
+
+The whole table is designed to fit a 393-dp Poco X3 Pro
+portrait viewport without any column breaking to a second
+line or the name ellipsising German role labels like
+"Innenwand" / "Außenwand". Numbers are rendered at 11-pt
+monospace with no space between number and unit (`0.07m`,
+`0.21g`) — matches Orca's `GCodeViewer.cpp:3653-3655`
+("%.2fm", "%.2fg" via `format_compact_weight`). Fixed widths
+sum to 194 dp (14 eye + 14 swatch + 40 time + 32 % + 50
+length + 44 weight), leaving ≈ 150 dp for the name column
+under the project card's 32-dp horizontal padding.
 
 ---
 
