@@ -2,15 +2,23 @@
 // binary that `handslice-cli --export-toolpaths` writes next
 // to the g-code (or standalone via `--input-gcode`).
 //
-// Format v2 (little-endian throughout):
+// Format v3 (little-endian throughout):
 //
-//   Header (24 B):
-//     magic         = "HSPT"            (4 B)
-//     version       = u32 2             (4 B)
-//     flags         = u32 0             (4 B, reserved)
-//     n_moves       = u32               (4 B)
-//     density_g_cm3 = f32  (filament 0) (4 B)
-//     diameter_mm   = f32  (filament 0) (4 B)
+//   Header (32 B):
+//     magic             = "HSPT"            (4 B)
+//     version           = u32 3             (4 B)
+//     flags             = u32 0             (4 B, reserved)
+//     n_moves           = u32               (4 B)
+//     density_g_cm3     = f32  (filament 0) (4 B)
+//     diameter_mm       = f32  (filament 0) (4 B)
+//     total_filament_mm = f32               (4 B) — Orca Path B:
+//                         `stats.total_used_filament`
+//                         (`libslic3r/GCode.cpp:1936`), the
+//                         number Orca's GUI prints on its
+//                         "Total Filament" line
+//                         (`GCodeViewer.cpp:4605`).
+//     total_weight_g    = f32               (4 B) — Orca Path B:
+//                         `stats.total_weight` (same source).
 //
 //   Per-move record (32 B each):
 //     u8  role            libslic3r ExtrusionRole (see [GcodeRole])
@@ -88,7 +96,7 @@ enum MoveType {
 const int hsptRecordSize = 32;
 
 /// On-wire header size (bytes).
-const int hsptHeaderSize = 24;
+const int hsptHeaderSize = 32;
 
 /// Compact result from the HSPT parser. The byte stream is
 /// stored unmodified; accessors into the per-move fields read
@@ -116,6 +124,8 @@ class Toolpaths {
     required this.totalTimeSec,
     required this.filamentDensityGcm3,
     required this.filamentDiameterMm,
+    required this.totalFilamentUsedMm,
+    required this.totalWeightG,
   });
 
   /// Raw record stream. Length == `moveCount * hsptRecordSize`.
@@ -172,6 +182,17 @@ class Toolpaths {
   /// Filament diameter (mm) for extruder 0; comes from
   /// `filament_diameter`.
   final double filamentDiameterMm;
+  /// "Total Filament" the way Orca's GUI shows it (Path B,
+  /// `stats.total_used_filament`). The HSPT v3 header carries
+  /// the authoritative number so the legend's "Total Filament"
+  /// row matches Orca without the Dart side having to pick a
+  /// path. For `--input-gcode` sidecars (no Print object)
+  /// `handslice-cli` writes the HSPT-dE sum here as a
+  /// fallback.
+  final double totalFilamentUsedMm;
+  /// Companion to [totalFilamentUsedMm] — Orca Path B
+  /// `stats.total_weight`.
+  final double totalWeightG;
 
   /// Z-height at the start of each layer, parallel to
   /// `layerStarts`. Set from the LAST non-custom extrude move of
@@ -260,9 +281,9 @@ Toolpaths _parseInline(Uint8List bytes) {
   }
   final bd = ByteData.sublistView(bytes);
   final version = bd.getUint32(4, Endian.little);
-  if (version != 2) {
+  if (version != 3) {
     throw FormatException(
-        'unsupported HSPT version $version (expected 2); re-slice to '
+        'unsupported HSPT version $version (expected 3); re-slice to '
         'regenerate the HSPT');
   }
   if (bytes.length < hsptHeaderSize) {
@@ -273,6 +294,8 @@ Toolpaths _parseInline(Uint8List bytes) {
   final n = bd.getUint32(12, Endian.little);
   final density  = bd.getFloat32(16, Endian.little);
   final diameter = bd.getFloat32(20, Endian.little);
+  final totalFilamentUsedMm = bd.getFloat32(24, Endian.little);
+  final totalWeightG        = bd.getFloat32(28, Endian.little);
   final expected = hsptHeaderSize + n * hsptRecordSize;
   if (bytes.length != expected) {
     throw FormatException(
@@ -396,6 +419,8 @@ Toolpaths _parseInline(Uint8List bytes) {
     totalTimeSec: totalTime,
     filamentDensityGcm3: density,
     filamentDiameterMm: diameter,
+    totalFilamentUsedMm: totalFilamentUsedMm,
+    totalWeightG: totalWeightG,
   );
 }
 

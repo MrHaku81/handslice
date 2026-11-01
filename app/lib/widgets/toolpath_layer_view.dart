@@ -29,6 +29,7 @@ import 'package:flutter_scene/scene.dart' as fscene;
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../engine/toolpath_parser.dart';
+import 'format.dart';
 import 'orbit_scene_bed.dart';
 
 class ToolpathLayerViewLabels {
@@ -623,20 +624,6 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
         label: Text(label, overflow: TextOverflow.ellipsis),
       );
 
-  // Format helpers for the legend. "9m25s" / "35s" / "1h12m" —
-  // Orca drops the hours bucket when zero, and the seconds
-  // bucket when hours are present.
-  String _fmtDuration(double seconds) {
-    if (!seconds.isFinite || seconds <= 0.5) return '—';
-    final total = seconds.round();
-    final h = total ~/ 3600;
-    final m = (total % 3600) ~/ 60;
-    final s = total % 60;
-    if (h > 0) return '${h}h${m}m';
-    if (m > 0) return '${m}m${s}s';
-    return '${s}s';
-  }
-
   Widget _legend(ToolpathLayerViewLabels l) {
     final theme = Theme.of(context);
     final t = widget.toolpaths;
@@ -724,13 +711,15 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
         ),
         const SizedBox(height: 10),
         _totalEstimation(l,
-            // Reference: GCodeViewer.cpp:3443-3448
-            // get_used_filament_from_volume. Our `extrudedMm`
-            // is the sum of positive extruder deltas, i.e. the
-            // filament length that left the spool — same thing
-            // Orca puts on the "Total Filament" line.
-            totalFilamentMetres: t.extrudedMm * 0.001,
-            totalWeightG: t.gramsFromExtrudedMm(t.extrudedMm),
+            // HSPT v3 carries Orca's own GUI number
+            // (`stats.total_used_filament` / `.total_weight`,
+            // the "Path B" at `OrcaSlicer/src/libslic3r/GCode
+            // .cpp:1914-1936`), so the legend's "Total
+            // Filament" row shows exactly what Orca shows and
+            // the project card reads the same value from the
+            // same source via `stats` JSON.
+            totalFilamentMetres: t.totalFilamentUsedMm * 0.001,
+            totalWeightG: t.totalWeightG,
             totalTimeSec: t.totalTimeSec),
       ],
     );
@@ -758,7 +747,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           Text(l.totalEstimation, style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
           _totalEstimationRow(l.totalFilament, filamentLine),
-          _totalEstimationRow(l.totalPrintTime, _fmtDuration(totalTimeSec)),
+          _totalEstimationRow(l.totalPrintTime, formatDurationShort(totalTimeSec)),
         ],
       ),
     );
@@ -895,7 +884,7 @@ class _LegendTable extends StatelessWidget {
                 style: nameStyle, maxLines: 1,
                 overflow: TextOverflow.ellipsis)),
             SizedBox(width: _wTime,
-              child: Text(_fmtDuration(r.timeSec),
+              child: Text(formatDurationShort(r.timeSec),
                   textAlign: TextAlign.right, style: cellStyle)),
             SizedBox(width: _wPct,
               child: Text(_fmtPercent(r.percent),
@@ -925,16 +914,6 @@ class _LegendTable extends StatelessWidget {
   // and its unit ("0.07m", "0.21g") — see
   // `GCodeViewer.cpp:3653-3655` ("%.2fm", "%.2fg" via
   // `format_compact_weight`). Mirroring saves ~2 dp per cell.
-  static String _fmtDuration(double seconds) {
-    if (!seconds.isFinite || seconds <= 0.5) return '—';
-    final total = seconds.round();
-    final h = total ~/ 3600;
-    final m = (total % 3600) ~/ 60;
-    final s = total % 60;
-    if (h > 0) return '${h}h${m}m';
-    if (m > 0) return '${m}m${s}s';
-    return '${s}s';
-  }
   static String _fmtPercent(double pct) {
     if (!pct.isFinite || pct <= 0.05) return '—';
     if (pct < 0.1) return '<0.1';

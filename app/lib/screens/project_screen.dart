@@ -1094,7 +1094,7 @@ class _SliceSummary extends StatelessWidget {
           const Divider(),
           WorkshopRow(
             label: l.printTimeLabel,
-            value: result.estimatedTimeFmt,
+            value: formatDurationShort(result.estimatedSeconds),
             mono: true,
           ),
           const Divider(),

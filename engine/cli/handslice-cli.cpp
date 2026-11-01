@@ -496,15 +496,22 @@ Vec3d compute_bed_center(const DynamicPrintConfig& cfg) {
 }
 
 // Pflicht 7c/7d — write a GCodeProcessorResult as the packed HSPT
-// (Handslice ToolPaths) binary. Format v2:
+// (Handslice ToolPaths) binary. Format v3:
 //
-//   Header (24 B, LE):
-//     magic         = "HSPT"            (4 B)
-//     version       = u32 2             (4 B)
-//     flags         = u32 0             (4 B, reserved)
-//     n_moves       = u32               (4 B)
-//     density_g_cm3 = f32  (filament 0) (4 B)
-//     diameter_mm   = f32  (filament 0) (4 B)
+//   Header (32 B, LE):
+//     magic           = "HSPT"            (4 B)
+//     version         = u32 3             (4 B)
+//     flags           = u32 0             (4 B, reserved)
+//     n_moves         = u32               (4 B)
+//     density_g_cm3   = f32  (filament 0) (4 B)
+//     diameter_mm     = f32  (filament 0) (4 B)
+//     total_filament_mm = f32             (4 B) — Orca Path B:
+//                        `stats.total_used_filament` (
+//                        `GCode.cpp:1936`). Equals Orca's GUI
+//                        "Total Filament" line
+//                        (`GCodeViewer.cpp:4605`).
+//     total_weight_g  = f32               (4 B) — Orca Path B:
+//                        `stats.total_weight` (same source).
 //
 //   Per-move record (32 B each, LE):
 //     u8  role            Orca ExtrusionRole (erNone=0 … erCount)
@@ -529,6 +536,8 @@ Vec3d compute_bed_center(const DynamicPrintConfig& cfg) {
 // bump.
 void write_toolpaths_hspt(const std::string& out_path,
                           const GCodeProcessorResult& gcr,
+                          float total_filament_mm_orca,
+                          float total_weight_g_orca,
                           bool quiet) {
     std::ofstream f(out_path, std::ios::binary);
     if (!f) die("cannot open toolpaths output: " + out_path);
@@ -560,11 +569,13 @@ void write_toolpaths_hspt(const std::string& out_path,
     const float diameter = gcr.filament_diameters.empty()
         ? 0.0f : gcr.filament_diameters.front();
     f.write("HSPT", 4);
-    w32(2u);
+    w32(3u);
     w32(0u);
     w32(n_out);
     wf(density);
     wf(diameter);
+    wf(total_filament_mm_orca);
+    wf(total_weight_g_orca);
     using ETM = PrintEstimatedStatistics::ETimeMode;
     const auto normal = static_cast<size_t>(ETM::Normal);
     auto clamp16 = [](float v) -> uint16_t {
@@ -622,51 +633,27 @@ json emit_statistics(const Print& print,
     }
     j["estimated_time_s"] = modes.empty() ? 0.0 : modes[(int)ETM::Normal].time;
     j["estimated_time_fmt"] = stats.estimated_normal_print_time;
-    // Compute "total filament used" from the HSPT-equivalent
-    // source so the project card, the layer-view legend and
-    // Orca's own g-code footer all show the same number.
+    // "Total filament" uses Orca's own Path B — the number its
+    // GUI puts on the "Total Filament" line
+    // (`OrcaSlicer/src/slic3r/GUI/GCodeViewer.cpp:4605`,
+    // `ps.total_used_filament / koef`). Set by
+    // `DoExport::update_print_estimated_stats`
+    // (`libslic3r/GCode.cpp:1914-1936`): accumulates
+    // `volume / s` per extruder from `total_volumes_per_
+    // extruder`. On the cube it lands at 1171.97 mm — ≈ 5 mm
+    // less than the g-code footer at `; filament used [mm] =
+    // 1177.15`. The 5 mm come from the start-g-code purge
+    // which Orca's footer path (`extruder.used_filament()`)
+    // tracks and the Path-B accumulator does not.
     //
-    // Orca populates two different `total_used_filament`
-    // paths in the Print:
-    //   * `GCode.cpp:2358` (used_filament()) during footer
-    //     emission — sum of per-extruder motor movement (dE
-    //     after retract cancellation), includes custom-role
-    //     purge extrudes. Equals the g-code's
-    //     `; filament used [mm] = 1177.15` line on the cube.
-    //   * `GCode.cpp:1936` (volume / cross_section) during
-    //     `update_print_estimated_stats`, which runs AFTER
-    //     the footer path and overrides it. Excludes custom-
-    //     role moves (purge line), so it was 1172 mm on the
-    //     cube — the number Klaus flagged.
-    //
-    // We rebuild the footer-shaped number from
-    // `GCodeProcessorResult::moves` directly: sum of positive
-    // `delta_extruder` across every non-internal Extrude
-    // vertex. That is exactly what `Toolpaths.extrudedMm`
-    // computes on the Dart side (modulo the internal-only
-    // filter the CLI applies at HSPT write time), so the
-    // project card and the legend now feed from one source.
-    double total_filament_mm = 0.0;
-    for (const auto& m : gcr.moves) {
-        if (m.internal_only) continue;
-        if (m.type != EMoveType::Extrude) continue;
-        if (m.delta_extruder > 0.0f)
-            total_filament_mm += m.delta_extruder;
-    }
-    // Weight: filament volume = π·(d/2)² · length × density.
-    // Mirrors the formula at `GCodeProcessor.cpp:1626-1628`
-    // (`UsedFilaments::process_role_cache`): `s = π·(0.5·d)²`,
-    // `weight = volume · density · 0.001`.
-    const double diameter_mm = gcr.filament_diameters.empty()
-        ? 0.0 : static_cast<double>(gcr.filament_diameters.front());
-    const double density_g_cm3 = gcr.filament_densities.empty()
-        ? 0.0 : static_cast<double>(gcr.filament_densities.front());
-    const double cross_mm2 = M_PI * (0.5 * diameter_mm) * (0.5 * diameter_mm);
-    const double volume_mm3 = total_filament_mm * cross_mm2;
-    const double weight_g = volume_mm3 * density_g_cm3 * 0.001;
-    j["total_filament_used_mm"] = total_filament_mm;
-    j["total_filament_weight_g"] = weight_g;
-    j["total_extruded_volume_mm3"] = volume_mm3;
+    // Klaus asked for "Anzeige wie Orcas GUI, aber die
+    // Rechnung muss nachvollziehbar stimmen". Reading
+    // `stats.total_used_filament` and `stats.total_weight`
+    // puts us one line away from Orca's own view; the
+    // formula they came from is pinned above.
+    j["total_filament_used_mm"] = stats.total_used_filament;
+    j["total_filament_weight_g"] = stats.total_weight;
+    j["total_extruded_volume_mm3"] = stats.total_extruded_volume;
     j["total_cost"] = stats.total_cost;
     j["total_toolchanges"] = stats.total_toolchanges;
     json per_filament = json::object();
@@ -858,10 +845,29 @@ static int run(int argc, char** argv) {
         GCodeProcessor::s_IsBBLPrinter = false;
         GCodeProcessor proc;
         proc.process_file(args.input_gcode_path);
-        write_toolpaths_hspt(args.toolpaths_path, proc.get_result(),
+        const auto& gcr = proc.get_result();
+        // No `Print` object in --input-gcode mode, so we cannot
+        // read Orca's Path B stats. Compute an HSPT-dE-sum
+        // substitute (= g-code footer value) and derive the
+        // weight from the HSPT's density/diameter. Full-slice
+        // callers below use Orca's own numbers.
+        double de_sum = 0.0;
+        for (const auto& m : gcr.moves) {
+            if (m.internal_only) continue;
+            if (m.type != EMoveType::Extrude) continue;
+            if (m.delta_extruder > 0.0f) de_sum += m.delta_extruder;
+        }
+        const double d  = gcr.filament_diameters.empty()
+            ? 0.0 : static_cast<double>(gcr.filament_diameters.front());
+        const double rho = gcr.filament_densities.empty()
+            ? 0.0 : static_cast<double>(gcr.filament_densities.front());
+        const double weight = de_sum * (M_PI * 0.25 * d * d) * rho * 0.001;
+        write_toolpaths_hspt(args.toolpaths_path, gcr,
+                             static_cast<float>(de_sum),
+                             static_cast<float>(weight),
                              args.quiet);
         std::cout << "{\"toolpaths_only\":true,\"moves\":"
-                  << proc.get_result().moves.size() << "}\n" << std::flush;
+                  << gcr.moves.size() << "}\n" << std::flush;
         return 0;
     }
 
@@ -1234,9 +1240,15 @@ static int run(int argc, char** argv) {
 
     // 7b. Pflicht 7c: optional dump toolpaths. `gcr.moves` is
     // populated by GCodeProcessor inside export_gcode(); no extra
-    // parse pass needed.
+    // parse pass needed. The HSPT v3 header carries Orca's
+    // Path B totals so the legend can show the GUI number
+    // without a second accumulator pass.
     if (!args.toolpaths_path.empty()) {
-        write_toolpaths_hspt(args.toolpaths_path, gcr, args.quiet);
+        const auto& ps = print.print_statistics();
+        write_toolpaths_hspt(args.toolpaths_path, gcr,
+                             static_cast<float>(ps.total_used_filament),
+                             static_cast<float>(ps.total_weight),
+                             args.quiet);
     }
 
     // 8. Kennzahlen als JSON auf stdout.

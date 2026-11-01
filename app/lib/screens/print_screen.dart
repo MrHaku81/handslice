@@ -307,7 +307,10 @@ class _SliceDetails extends StatelessWidget {
               value: formatBytes(slice.sizeBytes, localeTag),
               mono: true),
           const Divider(),
-          WorkshopRow(label: l.printTimeLabel, value: slice.estimatedTimeFmt, mono: true),
+          WorkshopRow(
+              label: l.printTimeLabel,
+              value: formatDurationShort(slice.estimatedSeconds),
+              mono: true),
           const Divider(),
           WorkshopRow(
             label: l.printFilamentLabel,

@@ -246,7 +246,12 @@ void main() {
     await state.slice(_FakeSlicer(), '/tmp/x.gcode');
     await tester.pumpAndSettle();
 
-    expect(find.text('9m 25s'), findsOneWidget);
+    // _FakeSlicer sets estimatedSeconds=565, which both the
+    // card and the layer-view legend now render via
+    // `formatDurationShort` → "9m25s" (no space, matching
+    // Orca's `short_time(get_time_dhms(565))` at
+    // `OrcaSlicer/src/libslic3r/Utils.hpp:494-537`).
+    expect(find.text('9m25s'), findsOneWidget);
     expect(find.text('x.gcode'), findsOneWidget);
     // _FakeSlicer sets filamentUsedMm = 1172.33, which the
     // card now prints as `1.17 m · 3.52 g` to match the

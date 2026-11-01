@@ -22,16 +22,20 @@ Uint8List _hspt({
   required List<Map<String, dynamic>> moves,
   double density = 1.25,
   double diameter = 1.75,
+  double totalFilamentUsedMm = 0,
+  double totalWeightG = 0,
 }) {
   final bytes = BytesBuilder();
-  // Header (24 B).
+  // Header (32 B).
   bytes.add(const [0x48, 0x53, 0x50, 0x54]);
-  final hdr = ByteData(20)
-    ..setUint32(0, 2, Endian.little)
+  final hdr = ByteData(28)
+    ..setUint32(0, 3, Endian.little)
     ..setUint32(4, 0, Endian.little)
     ..setUint32(8, moves.length, Endian.little)
     ..setFloat32(12, density, Endian.little)
-    ..setFloat32(16, diameter, Endian.little);
+    ..setFloat32(16, diameter, Endian.little)
+    ..setFloat32(20, totalFilamentUsedMm, Endian.little)
+    ..setFloat32(24, totalWeightG, Endian.little);
   bytes.add(hdr.buffer.asUint8List());
   for (final m in moves) {
     final b = ByteData(hsptRecordSize);
@@ -62,10 +66,21 @@ void main() {
     });
 
     test('rejects HSPT v1 with a clear error', () {
-      // 16-byte v1 header + no moves.
       final b = Uint8List(16)
         ..[0] = 0x48 ..[1] = 0x53 ..[2] = 0x50 ..[3] = 0x54;
       ByteData.sublistView(b).setUint32(4, 1, Endian.little);
+      expect(() => parseToolpathsInline(b),
+          throwsA(isA<FormatException>()));
+    });
+
+    test('rejects HSPT v2 with a clear error', () {
+      // v3 is the current wire format; a stale v2 sidecar from
+      // before Pflicht 7d follow-up 8 must surface with an
+      // explicit "re-slice" message rather than silently
+      // reading garbage.
+      final b = Uint8List(24)
+        ..[0] = 0x48 ..[1] = 0x53 ..[2] = 0x50 ..[3] = 0x54;
+      ByteData.sublistView(b).setUint32(4, 2, Endian.little);
       expect(() => parseToolpathsInline(b),
           throwsA(isA<FormatException>()));
     });
@@ -320,17 +335,29 @@ void main() {
       expect(t.totalTimeSec, closeTo(565, 10));
     });
 
-    test('cube HSPT total filament = extrudedMm/1000 ≈ 1.17 m',
+    test(
+        'cube HSPT v3 header carries Orca GUI totals',
         () async {
       if (!hspt.existsSync()) return;
       final t = await loadToolpaths(hspt.path);
-      // Orca reference: 1.17 m · 3.52 g. We compute both from
-      // extrudedMm — the sum of positive E-deltas, which equals
-      // the footer's `; filament used [mm]`.
-      final filamentMetres = t.extrudedMm * 0.001;
-      final weightG = t.gramsFromExtrudedMm(t.extrudedMm);
-      expect(filamentMetres, closeTo(1.17, 0.01));
-      expect(weightG, closeTo(3.52, 0.05));
+      // Pin Orca's own "Total Filament" line
+      // (`OrcaSlicer/src/slic3r/GUI/GCodeViewer.cpp:4605`
+      // reads `ps.total_used_filament`). HSPT v3 writes this
+      // field at header offset 24; the Dart parser surfaces
+      // it as `totalFilamentUsedMm`.
+      //
+      // On the thumbnail cube the x86 build of our Orca pin
+      // (v2.4.2) lands at ~1177 mm / 3.54 g — equal to the
+      // g-code footer `; filament used [mm] = 1177.15` which
+      // we also verify in the parser's other tests. arm64 is
+      // slightly different (open block
+      // `project_byte_divergence_arm64_x86.md`); the device
+      // shows whatever its own CLI emits. Either way the
+      // field is sourced from Orca's `stats.total_used
+      // _filament`, so legend and project card are
+      // guaranteed to carry the SAME number.
+      expect(t.totalFilamentUsedMm, closeTo(1177, 10));
+      expect(t.totalWeightG, closeTo(3.54, 0.05));
     });
 
     test('cube HSPT per-move time breakdown sums to totalTimeSec',
