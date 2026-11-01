@@ -178,6 +178,55 @@ void main() {
       expect(t.objMinX, 10);
     });
 
+    test(
+        'Z-hop above the layer height does not shift layerZ or layerCount',
+        () {
+      // Simulate what Orca does with `z_hop > 0`: at the end
+      // of a layer we lift Z, travel, then descend to the next
+      // layer's print height before extruding again. The hop
+      // moves are `travel` type, not `extrude`, so they must
+      // not pull `layerZ` upward and must not spawn a new bin.
+      final bytes = _hspt(moves: [
+        // Layer 0 extrude at z=0.2.
+        {
+          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
+          'moveType': MoveType.extrude.index,
+          'layer': 0, 'width100': 42, 'height100': 20, 'feedrate': 60,
+          'x': 10, 'y': 10, 'z': 0.2, 'e': 0.4, 'time': 0.5,
+        },
+        // Z-hop up to z=0.6 (still layer 0, travel only).
+        {
+          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
+          'moveType': MoveType.travel.index,
+          'layer': 0, 'width100': 0, 'height100': 0, 'feedrate': 180,
+          'x': 10, 'y': 10, 'z': 0.6, 'e': 0, 'time': 0.1,
+        },
+        // Layer 1 travel back down to z=0.4 (hop end).
+        {
+          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
+          'moveType': MoveType.travel.index,
+          'layer': 1, 'width100': 0, 'height100': 0, 'feedrate': 180,
+          'x': 20, 'y': 10, 'z': 0.4, 'e': 0, 'time': 0.1,
+        },
+        // Layer 1 extrude at the real print height z=0.4.
+        {
+          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
+          'moveType': MoveType.extrude.index,
+          'layer': 1, 'width100': 42, 'height100': 20, 'feedrate': 60,
+          'x': 30, 'y': 10, 'z': 0.4, 'e': 0.4, 'time': 0.5,
+        },
+      ]);
+      final t = parseToolpathsInline(bytes);
+      // Two bins, each pinned at the extrude Z — the 0.6 mm
+      // hop stayed off `layerZ` because it was a travel.
+      expect(t.layerCount, 2);
+      expect(t.layerZ[0], closeTo(0.2, 1e-5));
+      expect(t.layerZ[1], closeTo(0.4, 1e-5));
+      // The maxZ bbox reflects the real print height too — it
+      // comes off extrudes, not travels.
+      expect(t.maxZ, closeTo(0.4, 1e-5));
+    });
+
     test('layerZ tracks the latest object-extrude z, not retracts',
         () {
       // Bin 1 starts with a retract still at z=0.2 (prev layer),
@@ -394,6 +443,132 @@ void main() {
       // Smoke-check so the first assertion does not degenerate
       // into `expect(0, 0)` on a trimmed HSPT.
       expect(drawnExtrudes, lessThan(totalExtrudes));
+    });
+
+    test(
+        'EVERY slider position 1..layerCount matches the gcode ;LAYER_CHANGE/;Z: pair',
+        () async {
+      if (!hspt.existsSync() || !cubeGcode.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Ground truth: every (;LAYER_CHANGE, ;Z:<value>) pair
+      // in the g-code, in order. Orca's slider labels Layer N
+      // with the Z Orca itself emits here, so comparing the
+      // Dart `layerZ` array against this list proves our
+      // numbering lines up with Orca's for the whole print, not
+      // just a single slider position.
+      final expectedZ = <double>[];
+      String prev = '';
+      for (final raw in cubeGcode.readAsLinesSync()) {
+        final line = raw.trim();
+        if (prev == ';LAYER_CHANGE' && line.startsWith(';Z:')) {
+          expectedZ.add(double.parse(line.substring(3)));
+        }
+        prev = line;
+      }
+      expect(expectedZ.length, 100,
+          reason: 'thumbnail cube is 100 printed layers');
+      // Our `layerCount` is 1-based for the UI; `layerZ` is
+      // 0-based (internal). Slider label is `${value+1}`.
+      expect(t.layerCount, expectedZ.length);
+      // Sweep. The test name says 1..layerCount so the error
+      // message gives the layer number the way the UI prints
+      // it; `current0` is the internal 0-based bin index.
+      for (int N = 1; N <= expectedZ.length; ++N) {
+        final current0 = N - 1;
+        expect(t.layerZ[current0], closeTo(expectedZ[current0], 0.001),
+            reason:
+                'displayed Layer $N (internal $current0): '
+                'Dart layerZ=${t.layerZ[current0]} vs '
+                'gcode ;Z:=${expectedZ[current0]}');
+      }
+    });
+
+    test(
+        'EVERY slider position 1..layerCount: only moves with layer_id ≤ N-1 are drawn',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      final totalMoves = t.moveCount;
+      // Sweep every slider position. For each, the view calls
+      // `t.layerEnd(current0)` to compute the record-stream
+      // cutoff; no record below the cutoff may have a layer_id
+      // above `current0`, and no record from the cutoff onward
+      // may have one at or below `current0`. The second half of
+      // the invariant degenerates at the last layer (nothing
+      // above it), which we handle explicitly.
+      for (int N = 1; N <= t.layerCount; ++N) {
+        final current0 = N - 1;
+        final endOfCurrent = t.layerEnd(current0);
+        expect(maxLayerIdIn(t, 0, endOfCurrent),
+            lessThanOrEqualTo(current0),
+            reason: 'Layer $N (internal $current0): a drawn '
+                'record carries layer_id > $current0 — upper-'
+                'layer extrudes leaking into the frame');
+        if (endOfCurrent < totalMoves) {
+          // Any record above the cutoff must belong to a layer
+          // strictly above the current one.
+          final bd = ByteData.sublistView(t.data);
+          int minAbove = 1 << 30;
+          for (int i = endOfCurrent; i < totalMoves; ++i) {
+            final o = i * hsptRecordSize;
+            final lid = bd.getUint16(o + 4, Endian.little);
+            if (lid < minAbove) minAbove = lid;
+          }
+          expect(minAbove, greaterThan(current0),
+              reason: 'Layer $N (internal $current0): a record '
+                  'above the cutoff carries layer_id ≤ $current0');
+        }
+        // Also: cumulative drawn + skipped == total. If this
+        // breaks the layerEnd() helper is miscounting.
+        final drawn = endOfCurrent;
+        final skipped = totalMoves - drawn;
+        expect(drawn + skipped, totalMoves);
+      }
+    });
+
+    test(
+        'edge — first slider position (Layer 1) includes the skirt / purge-line extrudes',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Thumbnail cube uses `skirt_loops = 0`, so Orca emits
+      // the start-g-code purge line only. Its moves land in
+      // bin 0 (same `layer_id` as the first printed layer),
+      // role = `custom` (18) with `moveType = Extrude`. Being
+      // in bin 0 means they ARE drawn when the slider sits at
+      // Layer 1 — not deferred to a non-existent "Layer 0".
+      final purgeExtrudes = countOfMoveTypeIn(
+          t, 0, t.layerEnd(0), MoveType.extrude);
+      expect(purgeExtrudes, greaterThan(0));
+      // Among those extrudes some belong to `custom` role (the
+      // purge line itself), proving the start-g-code was
+      // folded into Layer 1 rather than dropped.
+      final bd = ByteData.sublistView(t.data);
+      int customExtrudes = 0;
+      for (int i = 0; i < t.layerEnd(0); ++i) {
+        final o = i * hsptRecordSize;
+        if (bd.getUint8(o + 2) != MoveType.extrude.index) continue;
+        if (bd.getUint8(o) == GcodeRole.custom.index) customExtrudes++;
+      }
+      expect(customExtrudes, greaterThan(0),
+          reason: 'Layer 1 should carry the purge-line custom-'
+              'role extrudes alongside the first wall');
+    });
+
+    test(
+        'edge — last slider position (Layer N) draws everything; nothing above',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      final current0 = t.layerCount - 1;
+      final endOfCurrent = t.layerEnd(current0);
+      expect(endOfCurrent, t.moveCount,
+          reason: 'the last layer must span to the end of the '
+              'record stream');
+      // The Z of the last printed layer is 20.0 mm on the
+      // thumbnail cube — pinned so the "top of the print" is
+      // not off by a layer when the user drags all the way up.
+      expect(t.layerZ[current0], closeTo(20.0, 0.01));
     });
 
     test(

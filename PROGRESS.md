@@ -18,6 +18,46 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 16:16 UTC – Pflicht 7d (follow-up 3): sweep tests across every slider position
+
+Klaus asked for layer-coverage proof over the whole slider,
+not just stichprobenartig. Added four tests (all pin on the
+thumbnail cube, 100 printed layers) plus a Z-hop synthetic
+test on hand-rolled HSPT:
+
+- `EVERY slider position 1..layerCount matches the gcode
+  ;LAYER_CHANGE/;Z: pair` — rebuilds the ground truth from
+  the g-code's `;LAYER_CHANGE` + `;Z:` pairs (which is what
+  Orca's slider reads), then compares against our
+  `t.layerZ[N-1]` for every N=1..100 within 0.001 mm. The
+  test name is explicit about the convention: displayed N is
+  1-based, internal `current0 = N-1` is 0-based.
+- `EVERY slider position 1..layerCount: only moves with
+  layer_id ≤ N-1 are drawn` — for every N=1..100, asserts
+  `maxLayerIdIn(0, layerEnd(N-1)) ≤ N-1` and (for
+  N < layerCount) `min layer_id above the cutoff > N-1`.
+  Plus the drawn+skipped == totalMoves sanity.
+- `edge — first slider position (Layer 1) includes the
+  skirt / purge-line extrudes` — on the thumbnail cube
+  `skirt_loops = 0`, so the purge line is Orca's start-
+  g-code with `role = custom` (18). It lands in bin 0, so
+  it IS drawn at Layer 1. The test asserts there are > 0
+  extrudes at `layerEnd(0)` AND among them some are
+  role=custom.
+- `edge — last slider position (Layer N) draws everything;
+  nothing above` — pins `layerEnd(99) == moveCount` and
+  `layerZ[99] ≈ 20.0 mm`.
+- `Z-hop above the layer height does not shift layerZ or
+  layerCount` — synthetic HSPT with a travel at z=0.6
+  during layer 0 (extrude at z=0.2) and a travel at z=0.4
+  before layer 1's extrude. Asserts bins stay at 2 and
+  `layerZ[0]=0.2, layerZ[1]=0.4` — the 0.6-mm hop stays off
+  the slider label. The `maxZ` bbox is also pinned to the
+  real print height.
+
+Test headline: 172 of 172 pass (added 5). CLIs rebuilt at
+91a3060+1 and the APK installed on the Poco. Nothing pushed.
+
 ## 2026-11-01 16:00 UTC – Pflicht 7d (follow-up 2): silhouette default-off, layer-cutoff test, red-area explained
 
 Device test on 409e425 said the grey AABB wireframe is still
