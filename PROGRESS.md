@@ -18,6 +18,136 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 23:09 UTC – Divergenz Stufe 4 (nur Skizze): zwei Wege
+
+Klaus hat Stufe 4 explizit als "NICHT umsetzen, nur skizzieren"
+gesetzt. Hier sind beide Wege konkret genug fuer eine Entscheidung
+nach dem Morgenbericht.
+
+### Weg A: Deterministischer Allocator fuer die arm64-CLI
+
+**Welcher**: entweder **jemalloc** (BSD-Lizenz, mature, deterministisch
+bei fester RNG-Saat, 15 MB statische Lib) oder **mimalloc**
+(MIT-Lizenz, Microsoft, API-kompatibel, 2 MB Lib). jemalloc hat eine
+`--with-malloc-conf="prof:false,junk:false,xmalloc:true"`-Konfig,
+die Reproducibility maximiert; mimalloc ist per default
+deterministischer als jemalloc und Scudo.
+
+Beide als Statische Link direkt in `handslice-cli-arm64` einbauen
+oder als `LD_PRELOAD` am Device aufrufen; statisch ist sauberer
+und braucht keine Device-Env-Variable.
+
+**Aufwand**:
+- Build-System: jemalloc oder mimalloc zu `engine/build-deps-arm64.sh`
+  hinzufuegen (1 ExternalProject-Eintrag + 1 Link-Flag). ~2-3 Std.
+- Keine Code-Aenderung an libslic3r noetig (Allocator-Replacement
+  ueber `malloc`/`free`-Hooks).
+- Validierung: 10× Wuerfel + 3× Auryn am Poco (muesste Klaus mit
+  Geraet machen). ~1 Std.
+- **Gesamt**: 3-4 Std. aktive Arbeit + Device-Zeit.
+
+**Erwartung**:
+- **Determinismus pro arm64-Build**: hoch wahrscheinlich erfuellt
+  (mimalloc und jemalloc geben bei gleicher Konfig gleiche Adress-
+  Reihenfolge).
+- **Byte-Gleichheit arm64 ↔ x86**: **unwahrscheinlich**. Scudo-
+  Experiment hat gezeigt, dass die x86-Determinismus auch MIT
+  Allocator-Randomisierung bleibt. Umgekehrt: arm64 mit nicht-
+  randomisierendem Allocator wird reproduzierbar, aber ob die
+  reproduzierbare Variante dann bei `92951c26…` landet, ist offen.
+  Vermutung (unbewiesen): Nein — die Divergenz kommt wahrscheinlich
+  nicht vom Allocator, sondern von libc++ vs. libstdc++ im Compare.
+
+**Vorteil**: Klein, isoliert, kein Patch an Orca-Upstream, kein
+Impact auf x86.
+
+**Nachteil**: Loest die Reproduzierbarkeit, aber nicht zwingend
+die Byte-Gleichheit zu x86.
+
+### Weg B: Tie-Break-Patch an den Stellen aus Stufe 3
+
+**Wo**: dafuer muesste Stufe 3 (Grep + eingrenzen auf eine konkrete
+Call-Site) erst gelaufen sein, was bisher nicht passiert ist, weil
+die Scudo-Hypothese nicht bestaetigt wurde. Als blinde Skizze:
+Perimeter-Erzeugung in `libslic3r/PerimeterGenerator.cpp`,
+Fill-Entscheidung in `libslic3r/Fill/Fill.cpp` oder
+`libslic3r/LayerRegion.cpp`, Sort-Operationen auf
+`ExtrusionEntityCollection` in `libslic3r/ExtrusionEntityCollection
+.cpp`.
+
+**Was**: eine Tie-Break-Regel am Compare, die bei Float-Gleichheit
+auf ein stabiles sekundaeres Kriterium ausweicht. Beispiel-Pattern:
+```cpp
+// vorher
+std::sort(v.begin(), v.end(), [](auto& a, auto& b){
+    return a.cost < b.cost;
+});
+// nachher
+std::sort(v.begin(), v.end(), [](auto& a, auto& b){
+    if (a.cost != b.cost) return a.cost < b.cost;
+    return a.stable_id < b.stable_id;  // oder bbox-Mitte, oder Hash
+});
+```
+
+Jeder solche Patch ist klein (einstellige Zeilenanzahl), aber die
+Suche nach der korrekten Call-Site und die Validierung, dass es
+den Druck nicht veraendert, ist viel Arbeit.
+
+**Aufwand**:
+- Vorarbeit (Grep + Bisect per Scudo-x86-Instrumentierung):
+  1-2 Werktage. Setzt voraus, dass Scudo doch die Divergenz
+  reproduziert — aktuell NICHT der Fall. Alternative: direkte
+  TBB-serielle x86-Bisect auf Compiler-Flag-Variationen oder
+  per-Datei-Vergleich zwischen GCC-x86 und Clang-x86-Build.
+  **Allein die Call-Site-Lokalisierung kann 2-5 Werktage dauern.**
+- Patch selbst: 1-4 Zeilen.
+- Validierung: `engine/test/run-reference-test.sh` muss weiter
+  `92951c26…` liefern — der Patch darf x86 **NICHT** aendern.
+  Fuer eine echte Tie-Break-Regel ist das moeglich (sie greift
+  nur bei exakter Float-Gleichheit, was auf x86 selten echt
+  auftritt).
+- Upstream-Faehigkeit: hoch. Orca akzeptiert kleine Patches, die
+  Determinismus auf Nicht-x86 verbessern, wenn sie den x86-Output
+  nicht aendern.
+
+**Erwartung**:
+- **Determinismus pro Plattform**: ja.
+- **Byte-Gleichheit arm64 ↔ x86**: **wahrscheinlich** (das ist genau
+  der Zweck des Patches).
+- **x86-Slice**: **unveraendert**.
+
+**Vorteil**: Loest die eigentliche Divergenz-Ursache; Upstream-faehig;
+nachhaltig.
+
+**Nachteil**: Deutlich mehr Aufwand als Weg A (Lokalisierung ist
+nicht trivial). Benoetigt ein Testmodell, das die Divergenz
+reproduziert — Wuerfel reicht nicht (Reihenfolge nur), Auryn reicht
+(fehlende Moves). Klaus-Entscheid, ob die 2-5 Werktage
+gerechtfertigt sind.
+
+### Entscheidungs-Matrix
+
+| Kriterium | Weg A (Allocator) | Weg B (Tie-Break-Patch) |
+|-----------|-------------------|-------------------------|
+| arm64 reproduzierbar | ✓ hoch wahrscheinlich | ✓ |
+| arm64 = x86 byte-gleich | ✗ unwahrscheinlich | ✓ wahrscheinlich |
+| x86 unveraendert | ✓ | ✓ (bei korrektem Patch) |
+| Aufwand | 3-4 Std. | 2-5 Werktage |
+| Upstream-faehig | nicht relevant | ✓ |
+| Loest Grundursache | nein, nur Symptom | ja |
+
+### Empfehlung (Vermutung, kein Beschluss)
+
+Weg A als **schneller Zwischenschritt** fuer die arm64-
+Reproduzierbarkeit (die "fehlende Infill-Variante" wuerde dann
+entweder stabil nicht mehr auftreten ODER immer auftreten — beides
+ist eine echte Aussage). Weg B als **Langzeitziel**, abhaengig
+davon, wie oft wir auf der niedrigen Variante landen und wie viel
+Druckqualitaets-Risiko Klaus dort sieht.
+
+Klaus entscheidet nach dem Morgenbericht; nichts von Stufe 4 ist
+umgesetzt.
+
 ## 2026-11-01 23:06 UTC – Divergenz Stufe 3: wo fehlen die solidInfill-Moves?
 
 Nachtrag von Klaus zur Nachtschicht. Stufe 2 (Scudo) hat die
