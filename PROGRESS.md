@@ -18,6 +18,96 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 19:17 UTC – Pflicht 7d (follow-up 8) + Pflicht 7e plan
+
+Two small polish items on the card / legend, then a plan-only
+pass on tubes (no code).
+
+Weight proof (why 3.52 g, which density / which length):
+
+- Density = **1.25 g/cm³**. Chain: `Elegoo PLA @ECC2 → Elegoo
+  PLA @base`, `filament_density: ["1.25"]`
+  (`engine/OrcaSlicer/resources/profiles/Elegoo/filament/BASE/
+  Elegoo PLA @base.json`).
+- Diameter = **1.75 mm**. Chain continues to
+  `fdm_filament_common` (Elegoo),
+  `filament_diameter: ["1.75"]`.
+- Formula `weight_g = extruded_mm × π·(d/2)² × density × 1e-3`
+  (direct port of `OrcaSlicer/src/libslic3r/GCode/
+  GCodeProcessor.cpp:1626-1628`: `s = π·(0.5·d)²`,
+  `weight = volume · density · 0.001`).
+- "3.52 g" ⟵ 1172 mm · 2.4053 · 1.25 · 0.001 = 3.524 g
+  (Orca Path B — `stats.total_used_filament`,
+  `GCode.cpp:1914-1936`). This is Orca's own GUI number
+  (`GCodeViewer.cpp:4605`).
+- "3.54 g" ⟵ 1177.15 mm · 2.4053 · 1.25 · 0.001 = 3.539 g
+  (Path A — g-code footer / HSPT dE sum).
+
+Fix: CLI's `emit_statistics` now reads `stats.total_used
+_filament` + `stats.total_weight` directly (reverting the
+follow-up-7 HSPT-dE-sum override). HSPT bumps to **v3** with
+two additional header fields `total_filament_mm` +
+`total_weight_g`, both populated from Orca's Path B. The
+legend's "Total Filament" row reads them from the HSPT
+header, so the project card and the legend show the same
+number from the same source. One wire for two displays.
+
+Time format unified on short_time (no spaces):
+
+- Legend already used `9m25s` style.
+- Card used `estimatedTimeFmt` from CLI stats = Orca's
+  `get_time_dhms` with spaces → "9m 25s".
+- `_fmtDuration` moved into `widgets/format.dart` as
+  `formatDurationShort`. Mirrors `short_time(get_time_dhms(
+  seconds))` from `OrcaSlicer/src/libslic3r/Utils.hpp:494-537`,
+  the formatter Orca's own "Total time" row uses
+  (`GCodeViewer.cpp:4023`). Both cards format
+  `estimatedSeconds` through it — "9m25s" everywhere.
+- 10 new tests pin the formatter against cube, Auryn and
+  edge cases (minute-rounding, days bucket).
+
+Pflicht 7e plan (NO CODE) — written into
+`docs/layer-view.md` under "Pflicht 7e plan — toolpath
+pipes (tubes)":
+
+- How Orca draws its pipes: instanced octahedral-prism
+  template (`SegmentTemplate.cpp:18-27`, 8 vertices and 8
+  triangles) rendered via `glDrawArraysInstanced`
+  (`:72-83`). Vertex shader fetches endpoint positions,
+  `(height, width, corner_angle, bias)` and colour from
+  texture buffers and expands the template per vertex.
+- Width/height/direction per move: `v.width` / `v.height`
+  per extrude vertex; travels get `travels_radius`.
+  `atan2(prev × curr, prev · curr)` per vertex for the
+  twist-fix at corners. Bias isolates options from z-fight.
+  `OrcaSlicer/src/libvgcode/src/ViewerImpl.cpp:954-981`.
+- Lighting: ambient 0.2, emission 0.15, top + front
+  directional lights, blinn-phong-ish specular. All in the
+  vertex shader (`Shaders.hpp:13-48`).
+- HSPT sufficiency: v3 already carries width_x100,
+  height_x100 at 0.01-mm resolution — same precision Orca
+  uses. **No format bump for 7e.**
+- flutter_scene fit: `InstancedMesh` + `ShaderMaterial` are
+  both available in 0.24.3. Build pipeline through
+  `flutter_gpu_shaders` 0.5.2. 32 B / instance.
+- Poco budget: cube is trivial (100 KB). Auryn full-print
+  ~68 MB instance buffer, ~17 M vertices / frame → ~18 fps on
+  Adreno 640 (lower bound). Slider-position mode (~1 M
+  instances) lands ~35 fps. LOD escape hatch mirrors Orca's
+  `top_layer_only_view_range` at
+  `OrcaSlicer/src/libvgcode/src/ViewerImpl.cpp:1234-1244`:
+  tubes for the top layer only, thin lines for the stacked-
+  below.
+- Device acceptance list: reference-image parity on cube
+  layer 52, corner-join inspection, Auryn scrub ≥ 20 fps,
+  PSS < 500 MB, LOD visibly kicks in on degraded path.
+
+Test headline: 190 of 190 pass (added 10 for
+`formatDurationShort`). CLIs rebuilt at 8b8ef43+1 (next commit
+is the plan-only). Plan lives in `docs/layer-view.md`; APK
+rebuilds will be triggered on Klaus' go-ahead for the actual
+pipes work.
+
 ## 2026-11-01 18:29 UTC – Pflicht 7d (follow-up 7): one filament number, umlauts, readable sizes
 
 Klaus' finish-pass on the project-tab G-code card.

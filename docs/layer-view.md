@@ -5,15 +5,21 @@ CLI's HSPT binary produced by `handslice-cli --export-toolpaths`.
 The Dart g-code parser documented below stays as a fallback for
 files that do not come with an HSPT sidecar.
 
-Pflicht 7d (2026-11-01): the HSPT format bumps to v2 to carry
+Pflicht 7d (2026-11-01): the HSPT format bumps to carry
 per-move time (needed for the legend's time column and the
 "Total estimation" footer) and the per-filament density /
 diameter in the header (needed to turn extruded millimetres
-into grams). The Dart parser rejects v1 files with a clear
-error so a stale sidecar from before the bump surfaces
-immediately rather than silently reading garbage.
+into grams). The parser rejects older versions with a clear
+error so a stale sidecar surfaces immediately rather than
+silently reading garbage.
 
-## HSPT — handslice toolpaths binary (v2)
+Pflicht 7d follow-up 8 (2026-11-01): v3 appends Orca's own
+"Total Filament" totals (length + weight) to the header so
+the layer-view legend and the project card both read Orca's
+GUI number from the same two floats — no second accumulator
+pass on the Dart side.
+
+## HSPT — handslice toolpaths binary (v3)
 
 Dumped by `handslice-cli --export-toolpaths <path>` either as a
 byproduct of slicing or in `--input-gcode <path>` mode (which
@@ -25,14 +31,25 @@ the g-code's config block (`filament_density`,
 `filament_diameter`), so a sidecar written by `--input-gcode`
 matches a slice-time sidecar.
 
+The `total_filament_mm` + `total_weight_g` header fields come
+from Orca's `print_statistics` (Path B — see
+`OrcaSlicer/src/libslic3r/GCode.cpp:1914-1936`), the same
+numbers Orca's GUI puts on its "Total Filament" line at
+`GCodeViewer.cpp:4605`. For `--input-gcode` sidecars no `Print`
+object exists, so the CLI writes the HSPT-dE sum (equal to the
+g-code footer `; filament used [mm]`) and a weight derived
+from the HSPT's density/diameter as a fallback.
+
 ```
-Header (24 B, little-endian):
-  magic           "HSPT"                 4 B
-  version         u32 = 2                4 B
-  flags           u32 = 0 (reserved)     4 B
-  n_moves         u32                    4 B
-  density_g_cm3   f32 (filament 0)       4 B
-  diameter_mm     f32 (filament 0)       4 B
+Header (32 B, little-endian):
+  magic             "HSPT"               4 B
+  version           u32 = 3              4 B
+  flags             u32 = 0 (reserved)   4 B
+  n_moves           u32                  4 B
+  density_g_cm3     f32 (filament 0)     4 B
+  diameter_mm       f32 (filament 0)     4 B
+  total_filament_mm f32 (Orca Path B)    4 B
+  total_weight_g    f32 (Orca Path B)    4 B
 
 Per-move record (32 B each, little-endian):
   u8  role            libslic3r::ExtrusionRole code (0..19)
@@ -545,3 +562,196 @@ blows out, the user can switch to the 2D top-down renderer with
 one tap; that path never allocates a `LineSegmentsGeometry` and
 uses roughly `6 * current_layer_segments` floats per repaint
 instead of all stacked layers.
+
+## Pflicht 7e plan — toolpath pipes (tubes)
+
+Status: **plan**, no code yet. Klaus set the goal: paths look
+like Orca's — each move with its real width and height from the
+slice, Orca's light and colours. The decision stands: port
+Orca's own technique (libvgcode) to Dart / flutter_scene;
+embedding `libvgcode` directly is off the table (OpenGL ES,
+different render loop, big C++ surface we don't need).
+
+### How Orca draws its pipes
+
+Instanced template-mesh. One tiny generic "octahedral prism"
+geometry, drawn once per segment via `glDrawArraysInstanced`.
+
+- Template geometry — 8 vertices, 8 triangles — two spiky caps
+  and four side faces. Vertex data is a packed byte array of
+  indices 0..7.
+  Ref: `OrcaSlicer/src/libvgcode/src/SegmentTemplate.cpp:18-27`
+  (`VERTEX_DATA`), the ASCII diagram at :13-17.
+- Draw call: `glDrawArraysInstanced(GL_TRIANGLES, 0, 24,
+  count)`, where `count` is the number of currently visible
+  segments.
+  Ref: `OrcaSlicer/src/libvgcode/src/SegmentTemplate.cpp:72-83`.
+
+Per-instance, the vertex shader fetches four pieces of data
+from texture buffers:
+
+1. `position_tex[id_a]` + `position_tex[id_a+1]` — the segment
+   endpoints (3 floats each).
+2. `height_width_angle_tex[id]` — a `vec4` carrying
+   `(height, width, corner_angle, bias)` for the current
+   endpoint.
+3. `color_tex[id]` — one float encoding the segment's RGB
+   colour.
+4. `segment_index_tex[gl_InstanceID]` — the index into the
+   position buffer for this instance.
+
+Width, height and corner angle are what shape the tube:
+
+- `line_dir = normalize(pos_b - pos_a)` → the segment's
+  along-direction.
+- `line_right_dir` and `line_up_dir` are built orthogonally.
+- Each template vertex is offset by `width · line_right_dir`
+  and `height · line_up_dir` relative to the segment endpoint.
+
+Corner joins get a twist-fix: the angle between adjacent
+segments is pre-computed on CPU and passed per-vertex via the
+`angle` channel so the vertex shader can rotate the cap plane
+to match the previous segment's cross-section. Prevents visible
+kinks between consecutive extrudes.
+
+Lighting is baked into the vertex shader (no separate fragment
+pass):
+
+- `ambient = 0.2`
+- `emission = 0.15`
+- `light_top_dir = (-0.457, 0.457, 0.762)`, diffuse 0.48,
+  specular 0.075, shininess 20.
+- `light_front_dir = (0.699, 0.140, 0.699)`, diffuse 0.12.
+
+Ref: `OrcaSlicer/src/libvgcode/src/Shaders.hpp:13-48` for the
+block, and the `main()` function at :49-110 for the per-vertex
+positioning.
+
+How width / height / direction feed in per move
+(what Orca writes into the texture buffers):
+
+- Extrudes: `height = v.height`, `width = v.width` from the
+  g-code's `;WIDTH:` / `;HEIGHT:` comments (passed through the
+  processor's `MoveVertex` as-is).
+- Travels: `height = width = travels_radius` (fixed small
+  radius so they read as thin threads).
+- Wipes: same with `wipes_radius`.
+- Options (Seam/Retract/Unretract/…): `bias = 0.1` so a tiny
+  z-offset keeps them from z-fighting the extrudes.
+- Corner angle: `atan2(prev × curr, prev · curr)` per vertex,
+  signed.
+Ref: `OrcaSlicer/src/libvgcode/src/ViewerImpl.cpp:954-981`
+(`extract_pos_and_or_hwa`).
+
+### HSPT sufficiency — no new format bump needed
+
+Our v3 HSPT already carries everything the shader needs:
+
+| libvgcode input | HSPT source | Record offset |
+|-----------------|-------------|--------------|
+| position (xyz)  | `x`/`y`/`z` floats | 12..24 |
+| height / width  | `height_x100` / `width_x100` | 6..10 |
+| colour          | `role` byte + `OrcaPalette.roleColor` | 0 |
+| corner angle    | derived in Dart from prev/curr segment directions | — |
+| per-type bias   | derived in Dart from `move_type` | — |
+
+The width and height fields are already stored at 0.01-mm
+resolution (`handslice-cli.cpp:567-572` writes
+`clamp16(m.width · 100)` and `clamp16(m.height · 100)`), which
+is the same precision Orca uses in its textures. **No HSPT
+version bump for the pipes work.**
+
+### flutter_scene fit
+
+flutter_scene 0.24.3 (what we're on) has the two pieces we
+need:
+
+- **Instanced meshes**: `InstancedMesh` + `InstancedMeshComponent`
+  (`src/instanced_mesh.dart:23`) + per-instance attributes
+  via `setInstanceAttribute(index, name, value)` and
+  `setInstanceAttributes(index, Float32List packed)`
+  (:131, :165). An `InstanceAttributeSchema` declares the
+  per-instance record layout.
+- **Custom shaders**: `ShaderMaterial`
+  (`src/material/shader_material.dart:131`) wraps a
+  `gpu.Shader` loaded from a `.shaderbundle` produced by
+  `flutter_gpu_shaders` (`flutter_gpu_shaders` 0.5.2 is
+  already on disk, so adding it as a dev dep is a one-line
+  pubspec change). Instance attributes can be passed through
+  via `instanceAttributes:` on the constructor.
+
+Build pipeline:
+
+1. Write the vertex + fragment shaders in GLSL (ES3.00 /
+   Impeller-compatible SPIR-V). Port of
+   `Shaders.hpp:13-48`; one each per feature flag we need
+   (regular, dim-stacked, outline).
+2. `flutter_gpu_shaders` compiles them to a shaderbundle at
+   build time.
+3. Dart: `ShaderMaterial(fragmentShader: ...,
+   vertexShader: ...)` + `InstancedMesh(geometry: template,
+   material: shaderMaterial)`. One template geometry (8
+   vertices, 8 indexed triangles, ~24 B), one or two
+   `InstancedMesh` instances (one for current layer, one for
+   stacked-below), add instances per visible segment.
+
+### Memory + performance budget on the Poco X3 Pro
+
+The Poco is Snapdragon 860 (Adreno 640, roughly 300 Mvert/s
+in practice), 6 GB RAM, 1080p screen. Target: ≥ 20 fps during
+scrub on Auryn.
+
+Per-instance record (minimum we need): pos_prev (12 B) + width
+(4 B) + height (4 B) + corner_angle (4 B) + bias (4 B) +
+colour (4 B packed RGBA8) = **32 B / instance**. Position of
+pos_curr is next instance's pos_prev, so we don't duplicate it.
+
+| Model     | Visible instances (full print) | Instance buffer | Vertices / frame (8/instance) | Expected fps on Adreno 640 |
+|-----------|-------------------------------|-----------------|-------------------------------|-----------------------------|
+| Cube      | ~3 300                        | ~ 100 KB        | ~26 k                         | 60+ (trivial)               |
+| Auryn — full print | ~2.1 M              | ~ 68 MB         | ~17 M                         | ~18 fps (lower bound)        |
+| Auryn — slider at layer 500 | ~1.0 M        | ~ 32 MB         | ~8 M                          | ~35 fps (acceptable scrub)  |
+
+Headroom math: 300 Mvert/s is a vendor-y number; the Adreno
+pipeline also runs the full tube-expansion math per vertex, so
+the real throughput is probably 150–200 Mvert/s in practice.
+Auryn at full print is right at the edge — a scrub stays
+smooth, parking the slider at the top may feel sluggish.
+
+**LOD escape hatch** (follow Orca):
+
+- `top_layer_only_view_range`: the current layer renders as
+  tubes, everything below renders as `DUMMY_COLOR` (grey) with
+  the SAME tube geometry — same vertex cost. See
+  `OrcaSlicer/src/libvgcode/src/ViewerImpl.cpp:1234-1244`.
+- Our follow-up idea: tubes only for the top layer, thin
+  `LineSegmentsGeometry` (what we draw today) for the stacked-
+  below. Costs ~8× less per below-layer segment. Keeps Auryn
+  smooth at the Poco's budget.
+
+Memory check: 68 MB for Auryn's full-print instance buffer
+leaves plenty of room next to the 46 MB positions / 1.9 MB
+types the parser already produces. Total working set ~130 MB,
+well under the 500 MB cap we aim for.
+
+### Device acceptance — what Klaus checks at the device
+
+1. **Reference image parity** on the cube at Layer 52: the
+   screenshot in `local-test/orca-referenz-schicht52.png` is
+   the pass criterion. Side-by-side on-device vs. the PNG.
+   Walls must read as 0.42 mm bands (not thinner, not
+   thicker), top-light highlights visible on the top edge of
+   each ribbon.
+2. **Pipe orientation at corners**: a 90° corner of the outer
+   wall must not show a gap or a visible seam. Pick a corner
+   around (120, 120) at layer 52 and zoom in.
+3. **Scrub frame-rate**: Auryn, drag the slider from Layer 100
+   to Layer 1045 and back. No dropped frames below ~20 fps
+   (watch for jitter rather than hard stutter).
+4. **Memory**: `adb shell dumpsys meminfo dev.handslice` on
+   the Auryn full print. PSS below 500 MB.
+5. **Degraded path**: pinch to full-print then drag — the LOD
+   kicks in and only the current layer stays tube-shaded, the
+   stacked-below drops to thin lines. Flutter devtools say so;
+   on-device the eye sees the current layer still popping with
+   width/height.
