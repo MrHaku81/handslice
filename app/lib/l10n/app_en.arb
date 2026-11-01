@@ -106,6 +106,7 @@
   "layerTotalEstimation": "Total estimation",
   "layerTotalFilament": "Total Filament",
   "layerTotalPrintTime": "Total time",
+  "layerModelOutline": "Model outline",
   "projectPlateLabelTextured": "A · Textured — 256×256×256 mm³",
   "projectPlateLabelSmooth": "B · Smooth — 256×256×256 mm³",
   "projectZOffset": "Z-offset per plate (applied at slice time)",

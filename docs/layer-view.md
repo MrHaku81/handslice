@@ -140,11 +140,14 @@ time, which pushed orange walls into peach on the first on-
 device run (Klaus, 2026-11-01).
 
 Layers below the slider are drawn at their full Orca palette
-value — no stacked dimming. Above the slider we approximate
-Orca's translucent model shell with a light-grey AABB
-wireframe over the OBJECT-only bbox (`t.objMin*/objMax*`),
-not the raw whole-print one — otherwise the purge line and
-brim pull the corners well past the model.
+value — no stacked dimming. We **do not** render anything
+above the slider by default any more. Klaus (409e425+1
+device run) found the dense AABB-wireframe shell "unruhig"
+on the Poco; it now hides behind a `Model outline` option
+in the legend's option block and defaults to off. When the
+user toggles it on, we draw the 12 edges of the object-only
+AABB (`t.objMin*/objMax*`) at 0.1-mm line width in light
+cool-grey `(0.78, 0.80, 0.82)` sRGB.
 
 Orca's shell is a real alpha-blended STL mesh:
 `GCodeViewer.cpp:240` sets `m_model.set_color({1.0f, 1.0f,
@@ -152,11 +155,44 @@ Orca's shell is a real alpha-blended STL mesh:
 `GCodeViewer.hpp:266` cap the final alpha at 0.2 / 0.15
 respectively, so it reads as a faint white glass shell.
 `flutter_scene`'s `UnlitMaterial` has no public blend-mode
-hook, so we cannot fire a 20 %-alpha fill today — the AABB
-wireframe at 0.1-mm line width in `(0.78, 0.80, 0.82)` sRGB
-grey is the hint we can draw instead. Porting the real
-mesh is tracked under "pipe-ribbon shader" in the 7e
-backlog, since both items need a custom shader anyway.
+hook, so we cannot fire a 20 %-alpha fill today. Porting
+the real mesh is tracked under "pipe-ribbon shader" in the
+7e backlog, since both items need a custom shader anyway.
+
+### What is drawn vs skipped at each slider position
+
+The `_rebuildScene` loop clamps records to
+`[0, t.layerEnd(current))` — every move with
+`layer_id ≤ current` is drawn, every move above it is
+dropped. On the thumbnail cube at Orca Layer 52 (0-indexed
+bin 51) the HSPT splits cleanly: **2674 moves drawn (1626
+extrudes), 2800 moves skipped**. Pinned by
+`toolpath_parser_test.dart` → `Layer 52 draws only moves
+with layer_id ≤ 51 (never above the slider)` so a regression
+that lets upper-layer extrudes leak into the frame fails CI
+instead of showing up as a visual bug.
+
+### The "red top area" at Layer 52
+
+When Klaus asked whether the dark-red mass visible at the
+top of the device screenshot comes from a layer above the
+slider, the answer is **no** — it is the current layer's
+`internalInfill` role painted in Orca's dark red
+`0xFFB03029`. At Orca Layer 52 the drawn set contains:
+
+| Role | Count (layers 0..51) | Notes |
+|------|----------------------|-------|
+| `internalInfill` (role 4, red 0xFFB03029) | **833** | 17 of them at `z=10.40` mm, the current layer. |
+| `solidInfill` (role 5) | 270 | |
+| `perimeter` + `externalPerimeter` | 208 + 208 | |
+| `bottomSurface` (role 7) | 105 | first few layers only. |
+| `topSolidInfill` (role 6, bright red 0xFFF04040) | **0** | not yet printed — only arrives near Layer 100. |
+
+Perspective makes the current layer's infill fill the top
+quarter of the oblique viewport; because the role is
+`internalInfill` the colour is Orca's dark red. Pinned by
+`at Layer 52 the dominant drawn role is internalInfill
+(red)`.
 
 ### 2D top-down fit
 

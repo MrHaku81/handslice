@@ -548,6 +548,37 @@ int colorForMove(int roleCode, int moveCode) {
   return OrcaPalette.moveColor[mt] ?? 0xFFCCCCCC;
 }
 
+/// Return the maximum `layer_id` of any record in the range
+/// `[fromIdx, toIdx)`. Used by tests to pin "the view at Layer
+/// N draws nothing with layer_id > N-1".
+int maxLayerIdIn(Toolpaths t, int fromIdx, int toIdx) {
+  if (toIdx <= fromIdx) return -1;
+  final bd = ByteData.sublistView(t.data);
+  int maxLid = -1;
+  for (int i = fromIdx; i < toIdx; ++i) {
+    final o = i * hsptRecordSize;
+    final lid = bd.getUint16(o + 4, Endian.little);
+    if (lid > maxLid) maxLid = lid;
+  }
+  return maxLid;
+}
+
+/// Count records of a given move type in the range
+/// `[fromIdx, toIdx)`. Mirrors the "I only drew these moves"
+/// invariant the view enforces when the slider sits below the
+/// top layer.
+int countOfMoveTypeIn(Toolpaths t, int fromIdx, int toIdx,
+    MoveType type) {
+  if (toIdx <= fromIdx) return 0;
+  final bd = ByteData.sublistView(t.data);
+  int count = 0;
+  for (int i = fromIdx; i < toIdx; ++i) {
+    final o = i * hsptRecordSize;
+    if (bd.getUint8(o + 2) == type.index) count++;
+  }
+  return count;
+}
+
 /// Axis-aligned bounding box of extruded moves in the range
 /// [[fromIdx], [toIdx]). Returns `null` when no extrude move
 /// falls in the range. Used by the 2D top-down painter to fit

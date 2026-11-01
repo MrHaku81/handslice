@@ -18,6 +18,46 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 16:00 UTC – Pflicht 7d (follow-up 2): silhouette default-off, layer-cutoff test, red-area explained
+
+Device test on 409e425 said the grey AABB wireframe is still
+too busy on the phone. Three deliverables:
+
+- **Silhouette hidden by default.** `_rebuildScene` no longer
+  calls `_addModelSilhouette` unconditionally. A new
+  `_silhouetteVisible` state defaults to `false`; a new
+  "Model outline" row in the legend's options block
+  (German: "Modellumriss") toggles it, same visibility
+  pattern as Travel / Wipe / Retract / Unretract / Seam.
+  Added `layerModelOutline` ARB entry (en/de), threaded
+  through `ToolpathLayerViewLabels` and `project_screen`.
+  Docs note that porting Orca's real translucent STL shell
+  stays in the 7e backlog — flutter_scene has no blend-mode
+  hook on `UnlitMaterial`.
+- **Layer-cutoff invariant pinned.** New parser helpers
+  `maxLayerIdIn(t, from, to)` and
+  `countOfMoveTypeIn(t, from, to, type)`. New test
+  `Layer 52 draws only moves with layer_id ≤ 51` asserts the
+  exact counts on the thumbnail cube: 2674 moves drawn
+  (1626 extrudes), 2800 skipped. A regression that leaks
+  upper-layer extrudes into the frame now fails CI instead
+  of surfacing as a visual bug.
+- **"Red area at the top of the viewport" — belongs to
+  layer ≤ 52.** At Orca Layer 52 the drawn set contains 833
+  `internalInfill` extrudes (role 4, Orca dark red
+  `0xFFB03029`), 17 of them at `z=10.40` mm = the current
+  layer. `topSolidInfill` (role 6, bright red
+  `0xFFF04040`) does not appear until near Layer 100, so no
+  "red" leaks in from above the slider. New test
+  `at Layer 52 the dominant drawn role is internalInfill
+  (red)` locks in the count. Reported in detail in
+  `docs/layer-view.md` under "What is drawn vs skipped" and
+  "The red top area at Layer 52".
+
+Test headline: 167 of 167 pass. CLIs rebuilt at
+409e425+1 and the APK installed on the Poco. Nothing
+pushed.
+
 ## 2026-11-01 15:31 UTC – Pflicht 7d (follow-up): silhouette grey, filament totals, by-time %, compact legend
 
 Device test on 66e7c46 landed four follow-ups; all fixed below

@@ -360,5 +360,69 @@ void main() {
       expect(t.distanceByMove[MoveType.travel.index],
           greaterThan(100.0));
     });
+
+    test(
+        'Layer 52 draws only moves with layer_id ≤ 51 (never above the slider)',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Orca "Layer 52" == 0-indexed bin 51. The view's
+      // _rebuildScene walks records up to `t.layerEnd(51)` and
+      // never beyond.
+      const current0 = 51; // Orca label 52
+      final endOfCurrent = t.layerEnd(current0);
+      final totalMoves = t.moveCount;
+      final totalExtrudes =
+          countOfMoveTypeIn(t, 0, totalMoves, MoveType.extrude);
+      final drawnMoves = endOfCurrent;
+      final drawnExtrudes =
+          countOfMoveTypeIn(t, 0, endOfCurrent, MoveType.extrude);
+      final skippedMoves = totalMoves - drawnMoves;
+      // Pin the numbers against the HSPT dump used in the
+      // report: 2674 drawn, 1626 of them extrudes; 2800 skipped.
+      expect(drawnMoves, 2674);
+      expect(drawnExtrudes, 1626);
+      expect(skippedMoves, 2800);
+      // Core invariant: no record below `endOfCurrent` has a
+      // layer_id above `current0`. If this ever regresses the
+      // view will leak upper-layer extrudes into the frame.
+      expect(maxLayerIdIn(t, 0, endOfCurrent), lessThanOrEqualTo(current0));
+      // And every record from `endOfCurrent` onward belongs to
+      // a strictly higher layer.
+      expect(maxLayerIdIn(t, endOfCurrent, totalMoves),
+          greaterThan(current0));
+      // Smoke-check so the first assertion does not degenerate
+      // into `expect(0, 0)` on a trimmed HSPT.
+      expect(drawnExtrudes, lessThan(totalExtrudes));
+    });
+
+    test(
+        'at Layer 52 the dominant drawn role is internalInfill (red)',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Pins the explanation for the "big red area" Klaus
+      // flagged on 409e425: at Orca Layer 52 the top of the
+      // drawn stack is dominated by internalInfill (role 4,
+      // colour 0xFFB03029 → dark red). topSolidInfill (role 6,
+      // 0xFFF04040 → bright red) does not appear in layers ≤
+      // 51 yet, so no "red" comes from above the slider.
+      const current0 = 51;
+      final endOfCurrent = t.layerEnd(current0);
+      final counts = <int, int>{};
+      final bd = ByteData.sublistView(t.data);
+      for (int i = 0; i < endOfCurrent; ++i) {
+        final o = i * hsptRecordSize;
+        if (bd.getUint8(o + 2) != MoveType.extrude.index) continue;
+        final r = bd.getUint8(o);
+        counts[r] = (counts[r] ?? 0) + 1;
+      }
+      expect(counts[GcodeRole.internalInfill.index], 833);
+      // topSolidInfill arrives only near the end of the print.
+      expect(counts[GcodeRole.topSolidInfill.index] ?? 0, 0);
+      // And the colour the UI picks is Orca's dark red.
+      expect(OrcaPalette.roleColor[GcodeRole.internalInfill]!
+          .toRadixString(16), 'ffb03029');
+    });
   });
 }

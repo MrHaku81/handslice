@@ -59,6 +59,7 @@ class ToolpathLayerViewLabels {
     required this.totalEstimation,
     required this.totalFilament,
     required this.totalPrintTime,
+    required this.modelOutline,
   });
   final String layer;
   final String of;
@@ -88,6 +89,9 @@ class ToolpathLayerViewLabels {
   final String totalEstimation;
   final String totalFilament;
   final String totalPrintTime;
+  /// Legend-options row label, Orca would call this
+  /// "Model outline" — Pflicht 7d-follow-up (409e425+1).
+  final String modelOutline;
 }
 
 enum _RendererMode { three, twoDTopDown }
@@ -116,6 +120,15 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
 
   final Set<GcodeRole> _visibleRoles = Set.of(OrcaDefaults.visibleRoles);
   final Set<MoveType>  _visibleMoves = Set.of(OrcaDefaults.visibleMoveOptions);
+  // The AABB-wireframe "model outline" we draw above the slider
+  // is a cheap stand-in for Orca's translucent shell. Klaus
+  // (409e425 device run) called the default-on wireframe
+  // "unruhig" on the phone, so it's off by default now and
+  // lives behind the "Model outline" option in the legend. The
+  // real alpha mesh is 7e scope (needs a blend-capable custom
+  // shader; `UnlitMaterial` in flutter_scene does not expose
+  // one).
+  bool _silhouetteVisible = false;
 
   vm.Vector3 _orbitCentre = vm.Vector3.zero();
   double _orbitRadius = 100.0;
@@ -242,14 +255,11 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           widthMm: 0.2,
           from: 0, to: endOfCurrent);
     }
-    // Translucent model silhouette above the current layer —
-    // approximated by the 12 edges of the OBJECT-ONLY AABB in
-    // Orca's cyan. "Object-only" means skirt / brim / purge /
-    // wipe tower are excluded, because the raw whole-print bbox
-    // extends ~10 mm past the model (brim) and off-bed (purge
-    // line), which balloons the box well beyond the printed
-    // part. Called out by Klaus on the first 7d device test.
-    if (maxLayer < t.layerCount - 1) {
+    // Model-outline wireframe above the current layer. Default
+    // off: Klaus (409e425 device test) found the many edges
+    // noisy on a 393-dp screen. User can turn it back on via the
+    // legend's "Model outline" option.
+    if (_silhouetteVisible && maxLayer < t.layerCount - 1) {
       _addModelSilhouette(scene, t);
     }
   }
@@ -806,6 +816,22 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
                   _rebuildScene();
                 },
               ),
+            // Model-outline toggle. No time / %, no palette
+            // swatch — the colour cell is a neutral grey chip
+            // so it reads as a hint, not an extrusion colour.
+            _LegendRowData(
+              name: l.modelOutline,
+              color: const Color(0xFFC6CBD1),
+              timeSec: 0,
+              percent: 0,
+              lengthMetres: 0,
+              weightG: null,
+              visible: _silhouetteVisible,
+              onToggle: (v) {
+                setState(() { _silhouetteVisible = v; });
+                _rebuildScene();
+              },
+            ),
           ],
         ),
         const SizedBox(height: 10),
