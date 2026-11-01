@@ -18,6 +18,112 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 23:06 UTC – Divergenz Stufe 3: wo fehlen die solidInfill-Moves?
+
+Nachtrag von Klaus zur Nachtschicht. Stufe 2 (Scudo) hat die
+Pointer-Ordering-Hypothese **nicht bestaetigt**, daher wird die
+geplante Grep-Suche nach `std::sort/set/map/unordered_*` auf `T*`-
+Elementen in `libslic3r/{Perimeter,Fill,GCode/*}` **nicht
+durchgefuehrt** — Klaus' Regel: "nur wenn Stufe 2 bestaetigt".
+
+Was in dieser Stufe gemacht wurde (unabhaengig vom Stufe-2-Ergebnis,
+weil Klaus die Lokalisierung der fehlenden Moves separat angefragt
+hat): per-Schicht- und per-Z-Bereich-Analyse der verlorenen
+`solidInfill`-Moves.
+
+### Lokalisierung der fehlenden solidInfill-Moves
+
+Vergleich x86-Default (`adefd3a51a…`) vs. arm64-niedrig
+(`8a50e806…`). Je Schicht `layer_id → count(solidInfill extrude
+moves)`:
+
+| Statistik | Wert |
+|-----------|------|
+| Schichten mit Differenz | **818 von 1033 (79 %)** |
+| Davon: Schichten mit FEHLENDEN Moves | 651 (−23 580 Moves gesamt) |
+| Davon: Schichten mit MEHR Moves | 167 (+264 Moves gesamt) |
+| **Netto Shortfall** | **−23 316 Moves** |
+
+**Verteilung ueber die Druckhoehe** (20-mm-Z-Buckets):
+
+| Z-Bereich (mm) | Fehlend | Gesamt (x86) | Anteil ausgelassen |
+|----------------|---------|--------------|---------------------|
+| 0 – 20 | 454 | 10 138 | 4.48 % |
+| 20 – 40 | 1 618 | 38 646 | 4.19 % |
+| 40 – 60 | 2 142 | 29 778 | 7.19 % |
+| 60 – 80 | 3 173 | 57 814 | 5.49 % |
+| **80 – 100** | **4 544** | **51 501** | **8.82 %** |
+| 100 – 120 | 4 084 | 76 219 | 5.36 % |
+| 120 – 140 | 2 917 | 53 507 | 5.45 % |
+| 140 – 160 | 2 403 | 35 958 | 6.68 % |
+| 160 – 180 | 1 708 | 38 333 | 4.46 % |
+| 180 – 200 | 517 | 24 662 | 2.10 % |
+| 200 – 220 | 20 | 3 474 | 0.58 % |
+
+**Verteilung ueber die XY-Flaeche** (Beispiel-Schichten mit den
+groessten Shortfalls, Bounding-Box der betroffenen `solidInfill`-
+Region):
+
+| Z (mm) | Layer | Moves fehlend | X-Bereich der Region | Y-Bereich |
+|--------|-------|--------------|---------------------|-----------|
+| 109.80 | 548 | −125 | [58.2, 206.6] (148 mm) | [107.8, 137.6] (30 mm) |
+| 107.40 | 536 | −119 | [45.5, 211.8] | [107.7, 137.1] |
+| 83.60 | 417 | −114 | [60.8, 211.7] | [104.0, 130.7] |
+| 112.20 | 560 | −112 | [45.7, 210.9] | [108.5, 138.4] |
+| 50.20 | 250 | −111 | [56.8, 195.2] | [104.0, 121.7] |
+
+Die Y-Ausdehnung der betroffenen Regionen ist konsistent **~30 mm
+breit um Y = 120 mm herum**; die X-Ausdehnung erstreckt sich ueber
+**fast die ganze Modellbreite (150-170 mm)**. Keine ortsabhaengige
+Konzentration auf einen einzigen Hohlraum oder einen einzigen
+Bereich — die Luecken verteilen sich DIFFUS ueber zwei Drittel aller
+Schichten.
+
+Gegenprobe mit "hoher" Variante `e4f28cab…`:
+- Nur 600 Schichten mit Diff.
+- Davon 16 Schichten mit weniger Moves (−424 gesamt).
+- 584 Schichten mit mehr Moves (+1 033 gesamt).
+- Netto **+609** — reine Reihenfolgefluktuation, keine Luecke.
+
+Und die `--threads 1`-Variante `ab0704c7…`:
+- 819 Schichten mit Diff, 656 mit weniger Moves (−23 954 gesamt).
+- Netto **−23 695** — **praktisch identisches Muster** wie
+  `8a50e806…`. Die "niedrige" Verhaltensklasse ist also kein
+  einmaliger Ausreisser; sie tritt bei `--threads 1` wie bei
+  Default-Multi-Thread auf.
+
+### Was heisst das fuer die Ursache (nur Vermutungen)
+
+Das Shortfall-Muster ist **nicht in einer Schicht konzentriert**
+und **nicht in einem XY-Bereich konzentriert**. Es trifft fast
+jede zweite Schicht und erstreckt sich ueber die volle Modell-
+breite in einer Y-Bandbreite von etwa 30 mm. Pro betroffene
+Schicht fehlen jeweils 10-20 % der `solidInfill`-Moves. Das legt
+nahe (nicht bewiesen):
+
+- **NICHT** eine kaputte Flaechen-Erkennung in einer Schicht
+  (dann waere EINE Schicht komplett ohne, nicht 650 Schichten
+  mit jeweils 15 %).
+- **NICHT** eine kaputte vertikale-Wandstaerken-Erkennung (dann
+  waere ein zusammenhaengender Z-Bereich betroffen, nicht alle).
+- **NICHT** eine kaputte Bruecken-Erkennung (die wuerde nur an
+  Bruecken-Schichten greifen).
+- **Plausibel** ein per-Island-Entscheid, der auf einem Teil der
+  solid-infill-Inseln kippt. Z. B. "ist diese Flaeche breit genug
+  fuer dense infill" oder "liegt sie in der Line-Width-Toleranz
+  einer vorhandenen Perimeter". Wenn so ein Entscheid auf einem
+  Float-Vergleich an der Toleranzgrenze haengt, kippt er bei
+  arm64 (Clang/libc++) anders als bei x86 (GCC/libstdc++).
+
+Nicht gegrept, weil das die Stufe-3-Grep-Arbeit waere, die laut
+Klaus-Regel ohne Scudo-Bestaetigung nicht laeuft.
+
+Reference-Test weiter green:
+`92951c26…`, 8479 Zeilen.
+
+Keine Code-Aenderung in dieser Stufe. Analyse-Skripte liegen unter
+`/tmp/div-analysis/` (gitignored).
+
 ## 2026-11-01 23:03 UTC – Divergenz Stufe 2: Scudo-Allocator-Hypothese widerlegt
 
 **Scudo-Setup**: `/usr/lib/clang/23/lib/linux/libclang_rt.scudo_
