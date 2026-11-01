@@ -18,6 +18,150 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 22:02 UTC – arm64/x86 Divergenz Runde 3: task_arena-Fix, x86 jetzt byte-gleich zu Orca-GUI
+
+Klaus hatte recht: der Hang war KEIN struktureller Orca-Fehler. Unser
+`tbb::global_control` begrenzte den Worker-Pool, nicht die Arena-
+Kapazitaet. `tbb::this_task_arena::max_concurrency()` lieferte weiter
+HW-Cores zurueck, und Orcas Barriere in `Thread.cpp:235-247` wartete
+auf HW-viele Tasks, von denen nur N tatsaechlich liefen. Der TBB-
+Standardweg ist eine eigene `tbb::task_arena(N)` plus
+`arena.execute(...)`.
+
+### 1. CLI auf task_arena umgestellt
+
+`engine/cli/handslice-cli.cpp:877-914`: `tbb::global_control` raus,
+`tbb::task_arena(args.threads)` plus `run_in_arena(fn)`-Helfer rein.
+Beide heissen Slice-Phasen (`print.process()` auf :1105 und
+`print.export_gcode(...)` auf :1257) laufen jetzt in dem Arena-
+Context.
+
+**Belegstellen in der mitgezogenen oneTBB** (im Repo via
+`engine/OrcaSlicer/deps/build-x86/dep_TBB-prefix/src/dep_TBB/include/
+oneapi/tbb/task_arena.h`):
+
+- Konstruktor `task_arena(int max_concurrency_)` → `:264-271`
+  (`"@arg max_concurrency specifies total number of slots in arena
+  where threads work"`).
+- Methode `task_arena::max_concurrency()` → `:432-436` liefert
+  `my_max_concurrency` zurueck (das vom Konstruktor gesetzt wird).
+- Freie Funktion `tbb::this_task_arena::max_concurrency()` → `:464-
+  467` + `:492-500`. Sie dispatcht auf die *aktuelle* Arena, also
+  die durch `arena.execute(...)` betretene.
+
+Default-Verhalten unveraendert: ohne `--threads` wird keine Arena
+konstruiert und Orca laeuft wie bisher in seiner Default-Arena mit
+HW-Cores.
+
+### 2. x86 jetzt byte-gleich zu Orca-GUI-Referenz
+
+Wuerfel-Test, GUI-Referenz-sha `92951c26…`
+(`engine/test/reference/cube_20mm_cc2_gui_v2.4.2.gcode`):
+
+| Modus (x86) | Zeit | Zeilen | sha | Vergleich |
+|-------------|------|--------|-----|-----------|
+| default (ohne --threads) | 0.71 s | 8479 | `92951c26…` | **= GUI-Ref ✓** |
+| --threads 1 | 0.74 s | 8479 | `92951c26…` | **= GUI-Ref ✓** |
+| --threads 2 | 0.70 s | 8479 | `92951c26…` | **= GUI-Ref ✓** |
+| --threads 4 | 0.70 s | 8479 | `92951c26…` | **= GUI-Ref ✓** |
+
+Der Hang ist weg, UND alle vier Thread-Zahlen produzieren den
+GUI-identischen Byte-Strom. **x86 erreicht Phase C
+("sha256 identisch zum Desktop") im strikten Sinn** —
+Erfolgskriterium aus `engine/test/run-reference-test.sh:33`.
+
+Hinweis zur Vermutung in Runde 2 ("Hang strukturell blockiert"):
+widerlegt. Die Beschreibung war falsch; richtige Analyse hat Klaus
+geliefert.
+
+### 3. Poco (arm64): Hang weg, Determinismus leider nicht hergestellt
+
+**Wuerfel 10× mit `--threads 1`:**
+
+| Variante | Anzahl | sha | Zeilen |
+|----------|--------|-----|--------|
+| A | 7/10 | `a30ffec3…` | 8479 |
+| B | 3/10 | `7c88f484…` | 8321 |
+
+Beide shas kennen wir aus Runde 2 (Default-Lauf hatte dasselbe
+Varianten-Paar, 8:2). Keine der zwei trifft die GUI-Referenz
+`92951c26…`. Slice-Zeit: 0.75-0.79 s (gleiches Niveau wie Default,
+= HW-vielen Threads). **Non-Determinismus auf arm64 bleibt also
+bestehen**, obwohl nur ein Worker-Slot aktiv ist.
+
+Vermutung (nicht geprueft): die verbleibende arm64-Divergenz hat
+NICHTS mit TBB-Scheduling zu tun — sie bleibt bei N=1 Worker. Mögliche
+andere Ursachen (jede davon unbewiesen):
+- `std::sort` (libc++ via NDK) wird bei gleichwertigen Keys von
+  Pointer-Werten "entschieden", und ASLR gibt bei jedem Lauf andere
+  Adressen.
+- Hash-basierte Container iterieren in Reihenfolge, die vom
+  Allocator-Layout abhaengt.
+- Codegen-Unterschiede (Clang vs. GCC) in equal-metric-Pfaden.
+
+Alles Hypothesen, keine Messung.
+
+### 4. Auryn `--threads 1` am Poco
+
+Drei Laeufe nacheinander:
+
+| Lauf | Zeit | Zeilen | Filament | sha |
+|------|------|--------|----------|-----|
+| 1 | 154 s | 2 746 185 | 38 903.29 mm | `ab0704c7…` |
+| 2 | 153 s | 2 747 284 | 38 906.23 mm | `9a04d5a9…` |
+| 3 | 153 s | 2 834 114 | 39 224.94 mm | `e1a84d6e…` |
+
+**Alle drei shas sind verschieden** — Auryn mit `--threads 1` ist am
+Poco **nicht reproduzierbar**. Lauf 3 trifft zufaellig die dominante
+Default-Variante (`e1a84d6e`), Laeufe 1 und 2 produzieren die vorher
+"seltene" niedrige-Filament-Range (38 903-38 906 mm) in zwei weiteren,
+unter sich auch nicht identischen Varianten.
+
+Zum Vergleich x86 (`--threads 1`, 94 s): 2 826 766 Zeilen, 39 223.579
+mm, sha `adefd3a5…`. x86 ist deterministisch; arm64 bleibt
+non-deterministisch.
+
+### 5. Haeufigkeit der "seltenen 3." Auryn-Variante (nur notiert)
+
+Hintergrund: in Runde 1 war sha `8a50e806…` (38 906.85 mm) ein
+einmaliger Ausreisser, in Runde 2 nicht reproduziert.
+
+Jetzt (Runde 3) in 3× `--threads 1`-Laeufen:
+- 2× in der niedrigen Range (38 903 & 38 906 mm, zwei verschiedene
+  shas, keine davon = `8a50e806…`)
+- 1× in der hohen Range (39 224.94 mm, sha `e1a84d6e…`)
+
+Das heisst: die "niedrige Filament"-Range tritt bei `--threads 1`
+offenbar HAEUFIGER auf als bei Default-Multi-Thread. Vermutung
+(nicht geprueft): die beiden Ranges entsprechen zwei verschiedenen
+Perimeter-Sort-Entscheidungen, deren Praevalenz von der Thread-Zahl
+abhaengt. Weiter nicht gejagt wie von Klaus vorgegeben; nur
+dokumentiert.
+
+### Was aendert sich im Repo
+
+- `engine/cli/handslice-cli.cpp`: `tbb::global_control` auf
+  `tbb::task_arena(N)` + `arena.execute(fn)` umgestellt. Default-
+  Pfad (ohne `--threads`) ist unveraendert.
+- Beide CLIs neu gebaut (x86 und arm64) am aktuellen Commit.
+- Keine App-Aenderung, kein APK-Build (CLI-Diagnostik, keine
+  User-Facing-Feature-Aenderung).
+
+### Was heisst das fuer die Roehren-Pflicht
+
+- **x86**: Byte-Gleichheit zu Orca-GUI ist jetzt in jedem Modus
+  erfuellt. Phase C strikt bestanden.
+- **arm64**: Byte-Gleichheit zu x86/GUI ist auch mit `--threads 1`
+  nicht erreicht. Non-Determinismus ist NICHT TBB-Scheduling (durch
+  Arena-Fix ausgeschlossen); Ursache liegt tiefer (ASLR,
+  Hash-Container-Reihenfolge, libc++ sort — alles Hypothesen).
+- Weitere Diagnose waere der TSan-Weg aus Runde 2 oder gezieltes
+  Instrumentieren der Perimeter-Sort-Call-Sites in Orca.
+- **Entscheidung an Klaus**: Roehren starten (mit arm64-Bimodalitaet
+  dokumentiert) oder weitere arm64-Jagd?
+
+Nichts gepusht. Nothing committed in app/; kein APK.
+
 ## 2026-11-01 21:30 UTC – arm64/x86 Divergenz, zweite Runde: Hang-Ursache + FMA-Hypothese
 
 Vier präzise Prüfungen nach Klaus' Rückfrage. Keine App- oder

@@ -41,6 +41,7 @@
 #include <sys/resource.h>  // getrusage – fuer Peak-RSS im Stats-JSON
 
 #include <tbb/global_control.h>
+#include <tbb/task_arena.h>
 
 #include "nlohmann/json.hpp"
 
@@ -871,17 +872,49 @@ static int run(int argc, char** argv) {
         return 0;
     }
 
-    // TBB-Parallelitaet optional begrenzen. Muss vor dem ersten
-    // parallel_for der Pipeline konstruiert werden und ueber die gesamte
-    // Slice-Dauer am Leben bleiben; `global_control` ist stackbasiert.
-    std::unique_ptr<tbb::global_control> tbb_limit;
+    // TBB-Parallelitaet optional begrenzen.
+    //
+    // VORHER lief hier `tbb::global_control(max_allowed_parallelism, N)`.
+    // Das reduziert die Zahl der Worker im globalen Pool, aber eben
+    // nicht die Kapazitaet der default-Arena — und Orcas
+    // `name_tbb_thread_pool_threads_set_locale`
+    // (`OrcaSlicer/src/libslic3r/Thread.cpp:222`) fragt genau
+    // `tbb::this_task_arena::max_concurrency()` ab. Der Default-Arena-
+    // Wert blieb bei HW-Cores; die Barriere auf Zeile 246 wartete auf
+    // HW-viele Tasks, von denen aber nur N tatsaechlich liefen. Deadlock.
+    //
+    // Richtiger TBB-Weg: eine eigene `tbb::task_arena(N)` konstruieren
+    // und den Slice via `arena.execute(...)` darin laufen lassen. Innen
+    // meldet `tbb::this_task_arena::max_concurrency()` dann N, und
+    // Orcas Barriere passt zur tatsaechlichen Thread-Zahl.
+    //
+    // Belegstellen in der mitgezogenen oneTBB:
+    //   * `tbb::task_arena(int max_concurrency_)` Konstruktor:
+    //     `oneapi/tbb/task_arena.h:264-271` ("@arg max_concurrency
+    //     specifies total number of slots in arena where threads work").
+    //   * `tbb::task_arena::max_concurrency()`:
+    //     `task_arena.h:432-436` liefert `my_max_concurrency` zurueck,
+    //     das vom Konstruktor gesetzt wird.
+    //   * `tbb::this_task_arena::max_concurrency()`:
+    //     `task_arena.h:464-467` + `:492-500` — benennt die Methode der
+    //     *aktuellen* Arena, also der durch `arena.execute(...)`
+    //     betretenen.
+    //
+    // Default (`--threads 0`): kein Arena-Wrapping; wir nutzen Orcas
+    // Default-Arena mit HW-Cores wie bisher.
+    std::unique_ptr<tbb::task_arena> tbb_arena;
     if (args.threads > 0) {
-        tbb_limit = std::make_unique<tbb::global_control>(
-            tbb::global_control::max_allowed_parallelism,
-            static_cast<std::size_t>(args.threads));
+        tbb_arena = std::make_unique<tbb::task_arena>(args.threads);
         if (!args.quiet)
-            std::cerr << "TBB max_allowed_parallelism = " << args.threads << "\n";
+            std::cerr << "TBB task_arena max_concurrency = "
+                      << args.threads << "\n";
     }
+    // Helfer, der die TBB-arbeitenden Phasen entweder in der
+    // konfigurierten Arena ausfuehrt oder (Default) direkt.
+    auto run_in_arena = [&tbb_arena](auto&& fn) {
+        if (tbb_arena) tbb_arena->execute(fn);
+        else           fn();
+    };
 
     // Orca-Interna: Resource-Pfad bekannt machen (fuer system_paths-Default).
     set_resources_dir(args.resources_dir);
@@ -1090,7 +1123,11 @@ static int run(int argc, char** argv) {
     print.is_BBL_printer() = false;
     GCodeProcessor::s_IsBBLPrinter = false;
     print.apply(model, cfg);
-    print.process();
+    // Slice-Phase 1: Perimeter, Infill, Support, Toolordering.
+    // Alles TBB-heavy; muss in der konfigurierten Arena laufen,
+    // sonst sieht Orcas Thread.cpp:222 die HW-Cores-Kapazitaet statt
+    // der limitierten N.
+    run_in_arena([&] { print.process(); });
 
     // 6a. Preview-Mesh-Export (Pflicht 7 – plate-view benchmark).
     //
@@ -1233,8 +1270,14 @@ static int run(int argc, char** argv) {
         };
 
     // 7. G-Code exportieren.
+    // Slice-Phase 2: GCodeProcessor fuehrt eigene `parallel_pipeline`-
+    // und `parallel_for`-Aufrufe aus; aus demselben Grund wie
+    // print.process() in der Arena ausfuehren.
     GCodeProcessorResult gcr;
-    const std::string written_path = print.export_gcode(args.output_path, &gcr, thumbnail_cb);
+    std::string written_path;
+    run_in_arena([&] {
+        written_path = print.export_gcode(args.output_path, &gcr, thumbnail_cb);
+    });
     if (written_path.empty())
         die("export_gcode returned empty path – nothing written");
 
