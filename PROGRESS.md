@@ -18,6 +18,186 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 21:30 UTC – arm64/x86 Divergenz, zweite Runde: Hang-Ursache + FMA-Hypothese
+
+Vier präzise Prüfungen nach Klaus' Rückfrage. Keine App- oder
+CLI-Verhaltensänderung; nur ein zusätzliches Experimental-Build-Skript
+`engine/build-cli-arm64-fpoff.sh` und Doku.
+
+**Nachtrag zum vorigen Bericht**: "funktional korrekt" war unbelegt
+und wird hier nicht wiederholt — der Auryn-Lauf aus der ersten Runde
+war ein seltener Außen­seiter (sha 8a50e806, 38 906 mm Filament).
+Reproduktion mit drei Fresh-Läufen zeigt, dass arm64 normalerweise
+*näher* an x86 landet (Details unten).
+
+### 1. Hängt `--threads < N` auch auf x86?
+
+Ja. x86 AMR5-Host: `--threads 1`, `--threads 2`, `--threads 4` hängen
+jeweils 60 s im Timeout. Also **kein arm64-Spezifikum, sondern unsere
+Nutzung von `tbb::global_control`**.
+
+Stacktrace vom x86-Hang (gdb-gestarteter Prozess, Interrupt nach 15 s):
+```
+#0 __futex_abstimed_wait_cancelable
+#1 pthread_cond_wait
+#2 std::condition_variable::wait
+#3 tbb::detail::d1::start_for<…lambda…>::execute
+#4 tbb::detail::r1::task_dispatcher::local_wait_for_all
+#5 tbb::detail::r1::task_dispatcher::execute_and_wait
+#6 Slic3r::name_tbb_thread_pool_threads_set_locale
+#7 Slic3r::Print::process
+```
+
+**Belegstelle in Orca**: `engine/OrcaSlicer/src/libslic3r/Thread.cpp
+:212-247`. Die Funktion macht:
+
+```cpp
+const size_t nthreads_hw = tbb::this_task_arena::max_concurrency();  // :222
+size_t       nthreads    = nthreads_hw;
+...
+tbb::parallel_for(
+    tbb::blocked_range<size_t>(0, nthreads, 1),                     // :236
+    [&](const tbb::blocked_range<size_t>&) {
+      if (++nthreads_running == nthreads) cv.notify_all();          // :239
+      else cv.wait(lk, [&]{return nthreads_running == nthreads;});  // :246
+      ...
+    });
+```
+
+Der Haken (Vermutung, mit Beleg plausibel, aber nicht formal
+bewiesen): `tbb::this_task_arena::max_concurrency()` liefert die
+Arena-Kapazität (= HW-Cores), **nicht** die durch
+`tbb::global_control(max_allowed_parallelism, N)` erzwungene aktive
+Thread-Zahl. Die `parallel_for` queued HW-viele Tasks, aber nur N
+davon laufen gleichzeitig. Die ersten N-1 Tasks sitzen in `cv.wait`
+und warten auf die restlichen HW-N Tasks, die mangels Worker nie
+starten. Deadlock.
+
+**Konsequenz für uns**: `--threads < HW-Cores` ist mit diesem Orca-
+Pin strukturell blockiert. Betrifft x86 (`N < 16`) und arm64
+(`N < 8`) gleichermaßen. **Nicht unser Fehler**, sondern Orcas Code,
+aber ohne Orca-Patch nicht umgehbar.
+
+### 2. FMA-Hypothese per `-ffp-contract=off`-Build geprüft
+
+**Build-Flags im Standardbuild** (für `src/libslic3r/libslic3r.a`):
+
+| Arch | Compiler | Relevante Flags (gefiltert) |
+|------|----------|-----------------------------|
+| x86  | `/usr/bin/c++` (GCC) | `-O3 -DNDEBUG -fPIC -fsigned-char` + Warnungen |
+| arm64 | `aarch64-linux-android29-clang++` (NDK r27d) | `-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -D_FORTIFY_SOURCE=2 -O3 -DNDEBUG -fPIC -fsigned-char` + Warnungen |
+
+Keine Seite setzt `-ffp-contract` explizit → GCC-Default auf x86 ist
+`fast`, Clang-Default (Android-Target) ist `on`. Beide erlauben FMA.
+
+**Experimental-Build**: `engine/build-cli-arm64-fpoff.sh` erzeugt
+`engine/bin/handslice-cli-arm64-fpoff` mit `-ffp-contract=off`
+eingezogen über `sed -i` ins `build.ninja` (272 FLAGS-Zeilen
+getroffen, CMake-Weg war unwirksam weil Orcas CMakeLists.txt
+`CMAKE_CXX_FLAGS_INIT` überschreibt). **Default-Build bleibt
+unangetastet.**
+
+Messergebnis (Würfel 10×, Poco):
+
+| Modus | Variante A | Variante B | Shas |
+|-------|-----------|-----------|------|
+| arm64 default | 8/10 (8479 Z) | 2/10 (8321 Z) | `a30ffec3` / `7c88f484` |
+| arm64 fpoff | 9/10 (8482 Z) | 1/10 (8326 Z) | `82d1c1db` / `7ada37b6` |
+
+`-ffp-contract=off` erzeugt **andere** Shas als der Default-Build und
+**nähert sich der x86-GUI-Referenz `92951c26…` nicht an**. Die
+Bimodalität bleibt. Filamentwerte liegen ähnlich nah an x86
+(1177.1511 mm fpoff vs. 1177.1516 mm default vs. 1177.1511 mm x86 —
+alle innerhalb 0.5 µm).
+
+Auryn-fpoff (1 Lauf): 76 s, 2 833 930 Z, 39 224.87 mm, sha
+`75d6a7f1…`. Nahe am dominanten arm64-Default-Variant A (39 224.94
+mm), aber eigenes sha. Keine Konvergenz zu x86's 39 223.58 mm.
+
+**Fazit (Vermutung bleibt Vermutung)**: Die FMA-Hypothese ist durch
+dieses Experiment **nicht gestützt**. Abschalten verändert die Zahlen
+(dritte und vierte stabile Variante), bringt arm64 aber nicht in
+Byte-Deckung mit x86. Konsistent mit der älteren
+`engine-integration.md:679-682`-Beobachtung, dass die
+abweichenden Zahlen *nicht* ULP-nah zueinander sind — Spiegel/Rotations-
+Swap statt FP-Rundung. Nicht endgültig widerlegt (fpoff deckt nicht
+jede FP-Nuance ab), aber keine Entlastung des Signals.
+
+### 3. Auryn-Reproduzierbarkeit: 3× arm64 default
+
+| Lauf | Zeit | Zeilen | Filament | Sha |
+|------|------|--------|----------|-----|
+| 1 | 80.68 s | 2 834 114 | 39 224.94 mm | `e1a84d6e…` |
+| 2 | 77.75 s | 2 834 114 | 39 224.94 mm | `e1a84d6e…` |
+| 3 | 77.45 s | 2 832 521 | 39 220.36 mm | `e4f28cab…` |
+
+Auch Auryn **bimodal**: Variante A 2/3, Variante B 1/3. Filament-Diff
+zwischen A und B: 4.6 mm (0.012 %). Zu x86 (39 223.58 mm):
+A liegt +1.4 mm drüber, B liegt -3.2 mm drunter.
+
+**Nachtrag zum vorigen Bericht**: Der erste Auryn-Lauf gestern
+(sha `8a50e806…`, 2 408 014 Druckbefehle, 38 906 mm) war ein
+seltener dritter Variant. Die typische arm64-Auryn-Ausgabe liegt
+innerhalb von 5 mm Filament und 90 % textgleicher Druckbefehle
+zum x86-Slice. Die "317 mm Divergenz" aus dem gestrigen Bericht ist
+ein **Außenseiter-Vergleich**, nicht die typische Divergenz.
+
+Textgleiche Druckbefehle (dominanter arm64-Variant vs. x86):
+
+- x86: 2 464 570 Zeilen
+- arm64 (sha `e4f28cab…`): 2 468 810 Zeilen
+- textgleich (sortierte Intersection): **2 219 457 (90 %)**
+
+Die Divergenz auf Auryn ist in der Größenordnung ähnlich wie am
+Würfel (84-92 % textgleich je nach Variant und Metrik), nicht
+dramatisch anders.
+
+### 4. ThreadSanitizer-Vorschlag (nur Konzept, nicht umgesetzt)
+
+Falls die FMA-Hypothese verworfen bleibt, der nächste Diagnose-Weg
+wäre ein TSan-Build der x86-Version:
+
+- `-fsanitize=thread` beim Compile+Link; libslic3r und
+  handslice-cli neu bauen, Deps mit Normalbuild lassen (TSan ist in
+  Deps nicht nötig).
+- Laufzeit-Overhead: 5-15× Verlangsamung, 5-10× Speicher-Overhead
+  (Shadow-Memory). Würfel 1 s → ~15 s. Auryn 22 s → **~5-10 min**
+  pro Lauf.
+- Ziel: Melden, ob zwischen den TBB-Workern unsynchronisierter
+  Memory-Zugriff passiert. Wenn ja (Vermutung), hätten wir eine
+  Belegstelle für Orcas Perimeter-/TopInfill-Code.
+- Aufwand grob: 1-2 Werktage für Setup (TSan-Build-Skript, Patches
+  für `-fsanitize=thread`-Propagation zu allen libslic3r-Deps-Links,
+  Suppression-File für bekannte TBB-interne Races), + 1 Tag für
+  Analyse der Reports.
+- **Wichtige Einschränkung**: TSan findet nur echte Memory-Rennen,
+  nicht Scheduling-Reihenfolge-Nondeterminismus auf serialisierbaren
+  Datenstrukturen. Falls die Divergenz **ausschließlich** aus
+  `std::sort`-Instabilität + TBB-Partitionierung kommt (ohne shared-
+  state-Rennen), schweigt TSan. In dem Fall wäre der nächste Schritt
+  gezieltes Instrumentieren der Perimeter-Sort-Call-Sites (ein
+  deterministisches Logging) — weitere 1-2 Tage.
+- Vermuteter Ertrag: 50/50. Falls nichts gefunden wird, ist der Weg
+  "Orca-Upstream-Patch mit Tie-Break-Regel" wahrscheinlich der
+  einzige verbleibende, wie `engine-integration.md:620-625` ohnehin
+  andeutet.
+
+### Was heißt das für die Röhren-Pflicht
+
+- Byte-Gleichheit arm64 ↔ x86 ist mit unseren Mitteln (Thread-Zahl,
+  Core-Pinning, FMA aus) **nicht erreichbar**.
+- Die typische arm64-Abweichung zum x86-Slice ist 1-5 mm Filament
+  (0.01 %), 90 % textgleiche Druckbefehle. Zwei stabile Varianten je
+  Modell. **Nicht als "funktional korrekt" belegt** — nur "nahe am
+  x86-Slice, nicht byte-gleich, bimodal".
+- Phase-C-Entscheidung aus `engine-integration.md:601-619` bleibt
+  wie dort formuliert: ±-Toleranzen und dokumentierte Varianten
+  gelten als Erfolg. Byte-Gleichheit ist Fernziel.
+
+Nichts an der App oder am Standard-CLI geändert. Experimental-
+Binary `handslice-cli-arm64-fpoff` liegt nur lokal; APK und
+`handslice-cli-arm64` sind unverändert.
+
 ## 2026-11-01 20:53 UTC – arm64/x86 Divergenz: Thread-Probe am Poco
 
 Vor den Röhren hat Klaus die arm64/x86-Divergenz als Blocker eingeordnet
