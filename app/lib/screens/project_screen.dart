@@ -17,6 +17,7 @@ import '../theme/workshop_theme.dart';
 import '../engine/gcode_parser.dart';
 import '../engine/toolpath_parser.dart';
 import '../widgets/build_info_badge.dart';
+import '../widgets/format.dart';
 import '../widgets/layer_view.dart';
 import '../widgets/plate_view.dart';
 import '../widgets/printer_panel.dart';
@@ -1066,25 +1067,40 @@ class _SliceSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l = AppLocalizations.of(context);
+    final localeTag =
+        Localizations.localeOf(context).toLanguageTag();
+    // Mirror the layer-view legend's "Total Filament 1.17 m ·
+    // 3.52 g" so the project card shows the SAME number. The
+    // underlying `result.filamentUsedMm` is derived from the
+    // same source Orca puts on the g-code footer (sum of
+    // positive dE across non-internal Extrude moves — see
+    // handslice-cli.cpp:emit_statistics for the full
+    // argument).
+    final metres = (result.filamentUsedMm / 1000).toStringAsFixed(2);
+    final grams = result.filamentWeightG.toStringAsFixed(2);
     return WorkshopCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           WorkshopRow(
-              label: 'G-Code', value: result.gcodePath.split('/').last, mono: true),
-          const Divider(),
-          WorkshopRow(label: 'Groesse', value: '${result.sizeBytes} B', mono: true),
+              label: l.printFileLabel,
+              value: result.gcodePath.split('/').last, mono: true),
           const Divider(),
           WorkshopRow(
-            label: 'Geschaetzte Zeit',
+              label: l.printSizeLabel,
+              value: formatBytes(result.sizeBytes, localeTag),
+              mono: true),
+          const Divider(),
+          WorkshopRow(
+            label: l.printTimeLabel,
             value: result.estimatedTimeFmt,
             mono: true,
           ),
           const Divider(),
           WorkshopRow(
-            label: 'Filament',
-            value:
-                '${result.filamentUsedMm.toStringAsFixed(0)} mm — ${result.filamentWeightG.toStringAsFixed(2)} g',
+            label: l.printFilamentLabel,
+            value: '$metres m · $grams g',
             mono: true,
           ),
         ],

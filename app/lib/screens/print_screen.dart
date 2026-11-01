@@ -11,6 +11,7 @@ import '../state/printer_state.dart';
 import '../state/project_state.dart';
 import '../theme/workshop_theme.dart';
 import '../widgets/labeled_switch_row.dart';
+import '../widgets/format.dart';
 import '../widgets/workshop_card.dart';
 import '../widgets/workshop_row.dart';
 
@@ -291,20 +292,26 @@ class _SliceDetails extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l = AppLocalizations.of(context);
+    final localeTag =
+        Localizations.localeOf(context).toLanguageTag();
+    final metres = (slice.filamentUsedMm / 1000).toStringAsFixed(2);
+    final grams = slice.filamentWeightG.toStringAsFixed(2);
     return WorkshopCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           WorkshopRow(label: l.printFileLabel, value: slice.gcodePath.split('/').last, mono: true),
           const Divider(),
-          WorkshopRow(label: l.printSizeLabel, value: '${slice.sizeBytes} B', mono: true),
+          WorkshopRow(
+              label: l.printSizeLabel,
+              value: formatBytes(slice.sizeBytes, localeTag),
+              mono: true),
           const Divider(),
           WorkshopRow(label: l.printTimeLabel, value: slice.estimatedTimeFmt, mono: true),
           const Divider(),
           WorkshopRow(
             label: l.printFilamentLabel,
-            value:
-                '${slice.filamentUsedMm.toStringAsFixed(0)} mm — ${slice.filamentWeightG.toStringAsFixed(2)} g',
+            value: '$metres m · $grams g',
             mono: true,
           ),
         ],

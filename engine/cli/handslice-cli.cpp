@@ -622,9 +622,51 @@ json emit_statistics(const Print& print,
     }
     j["estimated_time_s"] = modes.empty() ? 0.0 : modes[(int)ETM::Normal].time;
     j["estimated_time_fmt"] = stats.estimated_normal_print_time;
-    j["total_filament_used_mm"] = stats.total_used_filament;
-    j["total_filament_weight_g"] = stats.total_weight;
-    j["total_extruded_volume_mm3"] = stats.total_extruded_volume;
+    // Compute "total filament used" from the HSPT-equivalent
+    // source so the project card, the layer-view legend and
+    // Orca's own g-code footer all show the same number.
+    //
+    // Orca populates two different `total_used_filament`
+    // paths in the Print:
+    //   * `GCode.cpp:2358` (used_filament()) during footer
+    //     emission — sum of per-extruder motor movement (dE
+    //     after retract cancellation), includes custom-role
+    //     purge extrudes. Equals the g-code's
+    //     `; filament used [mm] = 1177.15` line on the cube.
+    //   * `GCode.cpp:1936` (volume / cross_section) during
+    //     `update_print_estimated_stats`, which runs AFTER
+    //     the footer path and overrides it. Excludes custom-
+    //     role moves (purge line), so it was 1172 mm on the
+    //     cube — the number Klaus flagged.
+    //
+    // We rebuild the footer-shaped number from
+    // `GCodeProcessorResult::moves` directly: sum of positive
+    // `delta_extruder` across every non-internal Extrude
+    // vertex. That is exactly what `Toolpaths.extrudedMm`
+    // computes on the Dart side (modulo the internal-only
+    // filter the CLI applies at HSPT write time), so the
+    // project card and the legend now feed from one source.
+    double total_filament_mm = 0.0;
+    for (const auto& m : gcr.moves) {
+        if (m.internal_only) continue;
+        if (m.type != EMoveType::Extrude) continue;
+        if (m.delta_extruder > 0.0f)
+            total_filament_mm += m.delta_extruder;
+    }
+    // Weight: filament volume = π·(d/2)² · length × density.
+    // Mirrors the formula at `GCodeProcessor.cpp:1626-1628`
+    // (`UsedFilaments::process_role_cache`): `s = π·(0.5·d)²`,
+    // `weight = volume · density · 0.001`.
+    const double diameter_mm = gcr.filament_diameters.empty()
+        ? 0.0 : static_cast<double>(gcr.filament_diameters.front());
+    const double density_g_cm3 = gcr.filament_densities.empty()
+        ? 0.0 : static_cast<double>(gcr.filament_densities.front());
+    const double cross_mm2 = M_PI * (0.5 * diameter_mm) * (0.5 * diameter_mm);
+    const double volume_mm3 = total_filament_mm * cross_mm2;
+    const double weight_g = volume_mm3 * density_g_cm3 * 0.001;
+    j["total_filament_used_mm"] = total_filament_mm;
+    j["total_filament_weight_g"] = weight_g;
+    j["total_extruded_volume_mm3"] = volume_mm3;
     j["total_cost"] = stats.total_cost;
     j["total_toolchanges"] = stats.total_toolchanges;
     json per_filament = json::object();

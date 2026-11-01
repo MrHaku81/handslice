@@ -18,6 +18,71 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 18:29 UTC – Pflicht 7d (follow-up 7): one filament number, umlauts, readable sizes
+
+Klaus' finish-pass on the project-tab G-code card.
+
+- **"Filament 1172 mm" vs "1.17 m" vs "1177.15 mm" — one
+  source now.** Orca writes TWO different
+  `print_statistics.total_used_filament` values and the
+  second overrides the first:
+    - `GCode.cpp:2358`
+      (`update_print_stats_and_format_filament_stats`) sums
+      `extruder.used_filament()` which is the extruder motor
+      movement — this is Path A, equals the g-code footer
+      `; filament used [mm] = 1177.15`.
+    - `GCode.cpp:1936`
+      (`update_print_estimated_stats`, called at
+      `_do_export()` line 2176 AFTER the footer path) sets
+      `total_used_filament = sum(volume / cross_section)`
+      from `GCodeProcessorResult::print_statistics.total
+      _volumes_per_extruder` — Path B, excludes custom-role
+      extrudes (purge line) so on the cube it lands at
+      ≈1172 mm.
+  Our CLI's `emit_statistics` was reading `stats.total_used
+  _filament` → Path B → the card showed 1172 mm. The HSPT
+  the legend consumes sums positive `delta_extruder` across
+  all non-internal Extrude moves → Path A → 1177.15 mm,
+  matching the footer.
+  Fix in `engine/cli/handslice-cli.cpp:emit_statistics`:
+  compute `total_filament_mm` by iterating
+  `gcr.moves` the same way the HSPT writer does (skip
+  `internal_only`, require `Extrude`, sum positive
+  `delta_extruder`) and derive the volume + weight from
+  the HSPT's density/diameter header fields. The project
+  card now shows the same number the legend does and the
+  g-code footer does — one source, zero drift.
+  Formatting: card line is now `1.17 m · 3.52 g` (meters
+  with 2 decimals, matches the legend's "Total Filament"
+  footer); the raw-mm format `1177 mm — 3.52 g` is retired.
+  Reference image's `1.17 m · 3.52 g` is Orca's own GUI
+  which still uses Path B — the ~5 mm / 0.4 % gap is
+  called out in docs so a future reader does not get
+  confused.
+- **German umlauts.** The ARB file was already clean (no
+  `fuer`/`groesse`/etc. hits via the scrubber). The two
+  live offenders were hard-coded strings in
+  `_SliceSummary`: `'Groesse'` and `'Geschaetzte Zeit'`.
+  Moved both to the existing l10n keys `printSizeLabel` /
+  `printTimeLabel` (which already read "Größe" / "Geschätzte
+  Zeit" in German) and reused those from the Print card
+  too. Side-effect: `'G-Code'` and `'Filament'` are now
+  `printFileLabel` / `printFilamentLabel`.
+- **File size now human-readable.** New helper
+  `widgets/format.dart:formatBytes(int, localeTag)` uses SI
+  prefixes (base-1000, matches Klaus' "216 KB" / "64,5 MB"
+  examples) and `NumberFormat` with the current locale →
+  German build renders decimals as commas, English as
+  dots. Both the project card and the print card use it.
+  Pinned by `format_test.dart` on the two cube/Auryn
+  sizes plus the boundary cases.
+
+Test headline: 185 of 185 pass (added 6 for `formatBytes`;
+the pre-existing `PrintScreen zeigt Slice-Ergebnis` test
+updated to match the new `1.17 m · 3.52 g` line). CLIs
+rebuilt at d3943b0+1 and the APK installed on the Poco.
+Nothing pushed.
+
 ## 2026-11-01 17:41 UTC – Pflicht 7d (follow-up 6): drop silhouette, pin removeAll invariants
 
 Klaus' decision after the d2bb034 device test: "Sichtbar ist

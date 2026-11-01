@@ -248,7 +248,11 @@ void main() {
 
     expect(find.text('9m 25s'), findsOneWidget);
     expect(find.text('x.gcode'), findsOneWidget);
-    expect(find.textContaining('1172 mm'), findsOneWidget);
+    // _FakeSlicer sets filamentUsedMm = 1172.33, which the
+    // card now prints as `1.17 m · 3.52 g` to match the
+    // layer-view legend and Orca's "Total Filament" line.
+    expect(find.textContaining('1.17 m'), findsOneWidget);
+    expect(find.textContaining('3.52 g'), findsOneWidget);
   });
 
   // Phase 4.2: SettingsScreen rendert nur noch gegen ein echtes Schema.
