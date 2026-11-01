@@ -269,6 +269,41 @@ rows:
 - `Total time` = `totalTimeSec`, formatted `9m25s` /
   `1h12m` / `35s`.
 
+### No hard upper layer limit
+
+The HSPT wire format pins `layer_id` to `u16` (`handslice-cli
+.cpp:514, :582` — Orca already clamps to 65535 when writing).
+The Dart side has no fixed-size state: `layerStarts` is a
+`Uint32List`, `layerZ` a `Float32List`, both grown to
+`t.layerCount` at parse time. The slider's `divisions`
+property scales to the layer count. The only sanity cap in
+the view is `(t.layerCount - 1).clamp(0, 1 << 30)` — ~1 B,
+3 orders of magnitude above the HSPT's hard limit.
+
+Verified on two prints with the same test code:
+
+| Model          | Layers | HSPT size | Moves (extrude) | Total time | Load (Pixel-shaped laptop) |
+|----------------|--------|-----------|-----------------|------------|----------------------------|
+| Thumbnail cube | 100    | 170 KB    | 3300 (1680)     | 9m 25s     | < 10 ms                     |
+| Auryn x86      | 1045   | 67 MB     | 2.11 M (?)      | 7h 11m 23s | ~ 400 ms (isolate)          |
+
+The sweep tests `EVERY slider position …` run on both: the
+Dart `layerZ[N-1]` matches the g-code `;LAYER_CHANGE`+`;Z:`
+ground truth within 0.001 mm for every slider position
+1..1045 on Auryn and 1..100 on the cube. The record-stream
+cutoff invariant (nothing with `layer_id > current` below
+the cutoff, nothing with `layer_id ≤ current` above) holds
+for every slider position too. The 2.1 M-record sweep uses
+`prefixMax`/`suffixMin` tables so the inner check is O(1)
+and the whole test finishes in well under a second.
+
+**Slider ± 1** navigates every individual layer: pinned by
+`layerStarts strictly monotonic`, which asserts
+`layerStart[i+1] > layerStart[i]` for every bin. If two
+adjacent bins ever had the same start index the IconButton
+`+` tap could not resolve them individually; the test
+guards against that regression on both the cube and Auryn.
+
 #### Compact mobile layout
 
 The whole table is designed to fit a 393-dp Poco X3 Pro

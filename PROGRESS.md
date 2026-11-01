@@ -18,6 +18,59 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 16:30 UTC – Pflicht 7d (follow-up 4): confirm no layer cap, sweep Auryn (1045 layers)
+
+Klaus asked whether the layer-view has a hard upper limit and
+to run the all-layer sweep on a large print too.
+
+- **No hard limit under 65535.** HSPT wire caps `layer_id` at
+  `u16` (handslice-cli.cpp:514, :582 — Orca itself clamps
+  there in `wu16((m.layer_id > 65535u) ? 65535u : m.layer_id)`).
+  Dart has no fixed-size state: `layerStarts` is a
+  `Uint32List`, `layerZ` a `Float32List`, both sized at parse
+  time from `t.layerCount`. Slider `divisions` scales to the
+  layer count. The only sanity cap is `(t.layerCount - 1)
+  .clamp(0, 1 << 30)` — ~1 B, three orders of magnitude above
+  the HSPT limit. Documented in `docs/layer-view.md` under
+  "No hard upper layer limit".
+- **Auryn as the 67 MB stress + large-print proof.** Ran the
+  CLI's standalone mode on the existing local file:
+  ```
+  handslice-cli-x86 --input-gcode local-test/auryn-x86.gcode \
+    --export-toolpaths local-test/auryn.hspt
+  ```
+  → 2 113 471 moves, **1045 printed layers**, 67.6 MB HSPT,
+  25 883 s = **7h 11m 23s** total time. Density/diameter
+  come through at 1.25 / 1.75 (same as cube).
+- **Sweep tests on Auryn.** Four new tests, all gated on
+  `local-test/auryn.hspt`:
+    - `Auryn HSPT loads and reports a plausible layer count`
+      — bounds the parse (> 500 k moves, > 500 layers,
+      > 100 mm total height, > 1 h time).
+    - `Auryn: EVERY slider position matches the gcode
+      ;LAYER_CHANGE/;Z: pair` — rebuilds the ground truth
+      list (1045 entries) from the g-code and compares
+      against `t.layerZ[N-1]` for every N=1..1045 within
+      0.001 mm.
+    - `Auryn: EVERY slider position: only moves with
+      layer_id ≤ N-1 are drawn` — uses `prefixMax` and
+      `suffixMin` sweep tables so the O(N²) check reduces to
+      O(1) per layer; passes on 2.1 M records in well under
+      a second.
+    - `Auryn: layerStarts strictly monotonic — slider ± 1
+      lands on a distinct layer`.
+- **Slider ± 1 affordance.** Pinned on both prints: the
+  IconButton `-`/`+` calls `_setLayer(value ± 1)` which maps
+  directly to `layerStart`, so monotonic bin starts guarantee
+  the user reaches every individual layer. On Auryn the
+  slider track is ~150 dp with 1045 divisions ≈ 0.14 dp per
+  tick — drag resolution is coarser than one layer, but the
+  `-`/`+` buttons are exact.
+
+Test headline: 177 of 177 pass (added 5). CLIs rebuilt at
+efa065a9f3+1 and the APK installed on the Poco. Nothing
+pushed.
+
 ## 2026-11-01 16:16 UTC – Pflicht 7d (follow-up 3): sweep tests across every slider position
 
 Klaus asked for layer-coverage proof over the whole slider,

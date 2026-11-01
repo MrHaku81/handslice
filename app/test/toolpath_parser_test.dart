@@ -572,6 +572,26 @@ void main() {
     });
 
     test(
+        'layerStarts strictly monotonic — slider ± 1 always lands on a distinct layer',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // The IconButton `+` / `-` affordance calls
+      // `_setLayer(value ± 1)` which maps to `layerStart`
+      // directly. If two adjacent bins had the same start we
+      // could not step through them one at a time. Pinning
+      // monotonicity rules that out across the whole print.
+      for (int i = 1; i < t.layerCount; ++i) {
+        expect(t.layerStart(i), greaterThan(t.layerStart(i - 1)),
+            reason:
+                'layerStart[$i] (${t.layerStart(i)}) must be '
+                'strictly greater than layerStart[${i - 1}] '
+                '(${t.layerStart(i - 1)}) — otherwise the slider '
+                'cannot select bin $i independently from ${i - 1}');
+      }
+    });
+
+    test(
         'at Layer 52 the dominant drawn role is internalInfill (red)',
         () async {
       if (!hspt.existsSync()) return;
@@ -599,5 +619,122 @@ void main() {
       expect(OrcaPalette.roleColor[GcodeRole.internalInfill]!
           .toRadixString(16), 'ffb03029');
     });
+  });
+
+  group('on real HSPT (local only, large print)', () {
+    // Auryn: a ~209-mm print at 0.2 mm layers → 1045 printed
+    // layers, 2.1 M HSPT records, 7h 11m print time. The HSPT
+    // is regenerated with `handslice-cli-x86 --input-gcode
+    // local-test/auryn-x86.gcode --export-toolpaths local-test
+    // /auryn.hspt`; both are gitignored. The tests gate on
+    // file-exists so CI without the file passes silently.
+    final hspt = File('local-test/auryn.hspt');
+    final auryn = File('local-test/auryn-x86.gcode');
+
+    // Longer than the cube — load once per test. The cube takes
+    // ~2 ms to parse; Auryn's 2.1 M records takes ~400 ms.
+    const timeout = Timeout(Duration(minutes: 2));
+
+    test('Auryn HSPT loads and reports a plausible layer count',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Report rather than assert exact values; the gcode may
+      // be re-sliced locally. These bounds just rule out a
+      // broken parse.
+      expect(t.moveCount, greaterThan(500000));
+      expect(t.layerCount, greaterThan(500));
+      // 0.2-mm layer height × thousand+ layers → ≥ 100 mm.
+      expect(t.layerZ[t.layerCount - 1], greaterThan(100.0));
+      // Multi-hour print.
+      expect(t.totalTimeSec, greaterThan(3600.0));
+    }, timeout: timeout);
+
+    test(
+        'Auryn: EVERY slider position matches the gcode ;LAYER_CHANGE/;Z: pair',
+        () async {
+      if (!hspt.existsSync() || !auryn.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      final expectedZ = <double>[];
+      String prev = '';
+      for (final raw in auryn.readAsLinesSync()) {
+        final line = raw.trim();
+        if (prev == ';LAYER_CHANGE' && line.startsWith(';Z:')) {
+          expectedZ.add(double.parse(line.substring(3)));
+        }
+        prev = line;
+      }
+      // The HSPT might trail off before the last `;LAYER_CHANGE`
+      // (Orca emits one as a sentinel). We check all bins
+      // present in the HSPT; if there are extra gcode markers
+      // beyond those they're the trailing sentinel.
+      expect(t.layerCount, lessThanOrEqualTo(expectedZ.length));
+      expect(expectedZ.length - t.layerCount, lessThanOrEqualTo(1));
+      for (int N = 1; N <= t.layerCount; ++N) {
+        final current0 = N - 1;
+        expect(t.layerZ[current0],
+            closeTo(expectedZ[current0], 0.001),
+            reason:
+                'Auryn displayed Layer $N (internal $current0): '
+                'Dart layerZ=${t.layerZ[current0]} vs '
+                'gcode ;Z:=${expectedZ[current0]}');
+      }
+    }, timeout: timeout);
+
+    test(
+        'Auryn: EVERY slider position: only moves with layer_id ≤ N-1 are drawn',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      final totalMoves = t.moveCount;
+      // Fast version — pre-compute a per-record layer_id view
+      // once, then the inner loop is pure int comparison, no
+      // `getUint16` call per iteration. On 2.1 M records the
+      // double loop would otherwise be O(N²) ≈ 4·10¹².
+      final bd = ByteData.sublistView(t.data);
+      final lids = Uint16List(totalMoves);
+      for (int i = 0; i < totalMoves; ++i) {
+        lids[i] = bd.getUint16(i * hsptRecordSize + 4, Endian.little);
+      }
+      // Monotonic max up to each cutoff; monotonic min from
+      // each cutoff onward. Build both as sweep arrays, then
+      // the per-layer check is O(1).
+      final prefixMax = Uint16List(totalMoves);
+      int running = 0;
+      for (int i = 0; i < totalMoves; ++i) {
+        if (lids[i] > running) running = lids[i];
+        prefixMax[i] = running;
+      }
+      final suffixMin = Uint16List(totalMoves);
+      int runMin = 65535;
+      for (int i = totalMoves - 1; i >= 0; --i) {
+        if (lids[i] < runMin) runMin = lids[i];
+        suffixMin[i] = runMin;
+      }
+      for (int N = 1; N <= t.layerCount; ++N) {
+        final current0 = N - 1;
+        final endOfCurrent = t.layerEnd(current0);
+        expect(prefixMax[endOfCurrent - 1], lessThanOrEqualTo(current0),
+            reason: 'Auryn Layer $N: a drawn record carries '
+                'layer_id > $current0');
+        if (endOfCurrent < totalMoves) {
+          expect(suffixMin[endOfCurrent], greaterThan(current0),
+              reason: 'Auryn Layer $N: a record above the cutoff '
+                  'carries layer_id ≤ $current0');
+        }
+      }
+    }, timeout: timeout);
+
+    test(
+        'Auryn: layerStarts strictly monotonic — slider ± 1 lands on a distinct layer',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      for (int i = 1; i < t.layerCount; ++i) {
+        expect(t.layerStart(i), greaterThan(t.layerStart(i - 1)),
+            reason: 'Auryn layerStart[$i] must be strictly '
+                'greater than layerStart[${i - 1}]');
+      }
+    }, timeout: timeout);
   });
 }
