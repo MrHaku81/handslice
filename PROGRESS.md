@@ -18,6 +18,69 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 17:41 UTC – Pflicht 7d (follow-up 6): drop silhouette, pin removeAll invariants
+
+Klaus' decision after the d2bb034 device test: "Sichtbar ist
+nur, was bis zur gewählten Schicht gedruckt ist – darüber
+nichts, kein Schatten, kein Rahmen." Three threads delivered:
+
+- **Silhouette feature removed in full.** Dropped:
+    - `ToolpathLayerView._silhouetteVisible` state and
+      `_addModelSilhouette` method.
+    - The "Model outline" legend row.
+    - `ToolpathLayerViewLabels.modelOutline` + the ARB
+      entries `layerModelOutline` (en/de).
+    - `Toolpaths.objMinX..objMaxZ` + `_isObjectRole` helper
+      — they had no other consumer. The layerZ filter the
+      old helper enforced is now the exact Orca one
+      (`roleCode != custom`, per
+      `OrcaSlicer/src/libvgcode/src/Layers.cpp:26`).
+  The 7e-backlog line "alpha-translucent model mesh above
+  the slider" is **abandoned** — same reason the wireframe
+  iterations failed: on a 393-dp phone the shell competes
+  with the printed layers for attention. Marked in
+  `docs/layer-view.md` with the full argument.
+- **Regression guards against scene-node accumulation.**
+  Two new tests live in `scene_lifecycle_test.dart`:
+    - `no .root.children.clear( in lib — must use .root
+      .removeAll() instead` — a grep across `app/lib/` that
+      fails CI if the forbidden pattern reappears. The
+      pattern comment inside the test is stripped first so
+      the mention-not-call stays legal.
+    - `buildRoleSegments is idempotent across the Klaus-
+      named slider sequence` — walks the exact sequence
+      100 → 1 → 52 → 100 → 52 Klaus named, asserts the
+      Float32List returned at the final Layer 52 is
+      byte-identical to a cold build at Layer 52. Proves
+      the data path has no accumulation. (The runtime
+      "scene.root.children.length matches cold at Layer 52"
+      check needs Impeller, which flutter_test does not
+      ship; the grep + idempotence combo is the strongest
+      CI-level guard we can mount.)
+- **The 1.65 M dropped "internal-only" moves on Auryn,
+  explained.** Orca's
+  `GCodeProcessor::calculate_time` inserts a parallel
+  "actual speed" clone next to every real move at
+  `OrcaSlicer/src/libslic3r/GCode/GCodeProcessor.cpp:5962-
+  5984` (the clone sets `new_move.internal_only = true` at
+  :5983). It carries the same role / layer_id / position as
+  the real move but with `actual_feedrate` set to the
+  acceleration-adjusted speed, so Orca's `ActualSpeed` view
+  can paint the two speeds side by side. We do not
+  implement `ActualSpeed`, so each clone would be a
+  duplicate vertex: summed `delta_extruder` would triple;
+  the viewer would see overlapping segments.
+  `handslice-cli.cpp:552-564` drops them at HSPT write
+  time. Orca itself also hides them from the Line-Type
+  legend statistics
+  (`OrcaSlicer/src/slic3r/GUI/GCodeViewer.cpp:1318-1320`
+  early-outs on `move.internal_only` before updating
+  `m_move_type_counts/_times/_distances`). Full write-up
+  in `docs/layer-view.md` under "Internal-only move filter".
+
+Test headline: 179 of 179 pass (added 3). CLIs rebuilt at
+d2bb034+1 and the APK installed on the Poco. Nothing pushed.
+
 ## 2026-11-01 16:56 UTC – Pflicht 7d (follow-up 5): fix scene accumulation (children.clear ≠ unmount)
 
 Klaus (b23e962 device run) saw the whole cube — notch,

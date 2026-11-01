@@ -669,7 +669,6 @@ class _PlateViewCardState extends State<_PlateViewCard> {
           totalEstimation: l.layerTotalEstimation,
           totalFilament: l.layerTotalFilament,
           totalPrintTime: l.layerTotalPrintTime,
-          modelOutline: l.layerModelOutline,
         ),
       );
     }

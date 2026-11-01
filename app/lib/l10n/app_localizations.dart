@@ -668,12 +668,6 @@ abstract class AppLocalizations {
   /// **'Total time'**
   String get layerTotalPrintTime;
 
-  /// No description provided for @layerModelOutline.
-  ///
-  /// In en, this message translates to:
-  /// **'Model outline'**
-  String get layerModelOutline;
-
   /// No description provided for @projectPlateLabelTextured.
   ///
   /// In en, this message translates to:

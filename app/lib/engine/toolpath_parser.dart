@@ -90,19 +90,6 @@ const int hsptRecordSize = 32;
 /// On-wire header size (bytes).
 const int hsptHeaderSize = 24;
 
-/// Roles that count as the "model" for the silhouette / camera
-/// framing — skirt, brim, wipe tower and custom gcode paint
-/// outside the printed object and otherwise balloon the AABB
-/// (brim can be 10 mm wider than the model on each side, and
-/// the purge line sits off the bed entirely).
-bool _isObjectRole(int roleCode) {
-  if (roleCode == GcodeRole.skirt.index) return false;
-  if (roleCode == GcodeRole.brim.index) return false;
-  if (roleCode == GcodeRole.wipeTower.index) return false;
-  if (roleCode == GcodeRole.custom.index) return false;
-  return true;
-}
-
 /// Compact result from the HSPT parser. The byte stream is
 /// stored unmodified; accessors into the per-move fields read
 /// them lazily.
@@ -119,12 +106,6 @@ class Toolpaths {
     required this.maxY,
     required this.minZ,
     required this.maxZ,
-    required this.objMinX,
-    required this.objMaxX,
-    required this.objMinY,
-    required this.objMaxY,
-    required this.objMinZ,
-    required this.objMaxZ,
     required this.extrudedMm,
     required this.extrudedByRole,
     required this.lengthByRole,
@@ -147,14 +128,6 @@ class Toolpaths {
   /// Whole-print AABB over extrude moves (incl. skirt/brim/
   /// purge/wipe-tower). Used for render-level camera framing.
   final double minX, maxX, minY, maxY, minZ, maxZ;
-
-  /// Object-only AABB over extrude moves — excludes skirt,
-  /// brim, wipe tower and custom g-code so the "rest-of-the-
-  /// model" silhouette drawn above the slider matches what Orca
-  /// shows (purge line is to the side of the bed, brim is 10 mm
-  /// wider than the model; both would otherwise balloon the
-  /// box).
-  final double objMinX, objMaxX, objMinY, objMaxY, objMinZ, objMaxZ;
 
   /// Sum of per-move `delta_extruder`, filtered to
   /// `MoveType.extrude` and positive deltas. Matches Orca's
@@ -317,8 +290,6 @@ Toolpaths _parseInline(Uint8List bytes) {
   int lastLayerId = -1;
   double minX = double.infinity, minY = double.infinity, minZ = double.infinity;
   double maxX = -double.infinity, maxY = -double.infinity, maxZ = -double.infinity;
-  double objMinX = double.infinity, objMinY = double.infinity, objMinZ = double.infinity;
-  double objMaxX = -double.infinity, objMaxY = -double.infinity, objMaxZ = -double.infinity;
   double extruded = 0;
   final extrudedByRole = Float64List(GcodeRole.values.length);
   final lengthByRole   = Float64List(GcodeRole.values.length);
@@ -374,19 +345,17 @@ Toolpaths _parseInline(Uint8List bytes) {
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-      if (_isObjectRole(roleCode)) {
-        if (x < objMinX) objMinX = x; if (x > objMaxX) objMaxX = x;
-        if (y < objMinY) objMinY = y; if (y > objMaxY) objMaxY = y;
-        if (z < objMinZ) objMinZ = z; if (z > objMaxZ) objMaxZ = z;
-        if (roleCode != GcodeRole.custom.index && layerStarts.isNotEmpty) {
-          // Track the layer's reference Z against the latest
-          // object-extrude. Needed because Orca's g-code emits
-          // `;LAYER_CHANGE` BEFORE the preceding retract, so
-          // the first record in a bin is a retract still at the
-          // previous layer's z (e.g. 10.2 mm instead of 10.4
-          // for layer 52).
-          layerZ[layerZ.length - 1] = z;
-        }
+      // Track the layer's reference Z against the latest
+      // non-custom extrude. Mirrors
+      // `OrcaSlicer/src/libvgcode/src/Layers.cpp:26` which
+      // writes `item.z = vertex.position[2]` only when `type
+      // == EMoveType::Extrude && role != EGCodeExtrusionRole
+      // ::Custom`. Needed because Orca emits `;LAYER_CHANGE`
+      // BEFORE the preceding retract, so the first record in
+      // a bin is a retract still at the previous layer's z
+      // (e.g. 10.2 mm instead of 10.4 for layer 52).
+      if (roleCode != GcodeRole.custom.index && layerStarts.isNotEmpty) {
+        layerZ[layerZ.length - 1] = z;
       }
       if (de > 0) {
         extruded += de;
@@ -408,11 +377,6 @@ Toolpaths _parseInline(Uint8List bytes) {
   if (minX == double.infinity) { minX = 0; maxX = 0; }
   if (minY == double.infinity) { minY = 0; maxY = 0; }
   if (minZ == double.infinity) { minZ = 0; maxZ = 0; }
-  if (objMinX == double.infinity) {
-    objMinX = minX; objMaxX = maxX;
-    objMinY = minY; objMaxY = maxY;
-    objMinZ = minZ; objMaxZ = maxZ;
-  }
   return Toolpaths(
     data: data,
     moveCount: n,
@@ -422,9 +386,6 @@ Toolpaths _parseInline(Uint8List bytes) {
     minX: minX, maxX: maxX,
     minY: minY, maxY: maxY,
     minZ: minZ, maxZ: maxZ,
-    objMinX: objMinX, objMaxX: objMaxX,
-    objMinY: objMinY, objMaxY: objMaxY,
-    objMinZ: objMinZ, objMaxZ: objMaxZ,
     extrudedMm: extruded,
     extrudedByRole: extrudedByRole,
     lengthByRole: lengthByRole,

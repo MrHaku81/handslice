@@ -74,26 +74,50 @@ label — on the thumbnail cube, bin 51 reads z=10.40 mm and the
 UI displays "Layer 52 of 100 · Z = 10.40 mm", same as the
 reference screenshot in `local-test/orca-referenz-schicht52.png`.
 
-### Object-only AABB
+### Print bounding box
 
-The parser tracks two bounding boxes:
+`minX..maxZ` is computed over every extrude move (incl. skirt,
+brim, wipe tower, custom g-code). It drives the orbit camera's
+framing so the viewport does not clip the brim or the start-
+g-code purge line.
 
-- `minX..maxZ` over every extrude move (used for the orbit
-  camera's framing — the hull-with-bed call still needs the
-  outermost geometry so the camera does not clip the brim).
-- `objMinX..objMaxZ` over extrude moves excluding `skirt`,
-  `brim`, `wipeTower` and `custom` roles. The silhouette drawn
-  above the current layer uses this one; otherwise the box
-  balloons by ~10 mm for brim and off the bed for the purge
-  line.
+The 7d-era object-only AABB (`objMinX..objMaxZ`) was only ever
+used by the model-outline wireframe; both the wireframe and
+the AABB were removed in 7d follow-up 6 (see "What's above the
+slider" below).
 
 ### Internal-only move filter
 
-`GCodeProcessor` inserts a parallel "actual speed" vertex for
-each real move (with `internal_only = true`). The CLI writer
-drops those; otherwise the record stream triples in size and
-the summed `delta_extruder` triples too. Mirrors how
-`libvgcode` filters internal-only moves on load.
+Orca's `GCodeProcessor::calculate_time` inserts a parallel
+"actual speed" clone next to every real move. The clone
+carries the same role / layer_id / position as the real move
+but with `internal_only = true` and `actual_feedrate` set to
+the per-block acceleration-adjusted speed; it exists so
+Orca's `ActualSpeed` colour mode can show the two speeds side
+by side. Reference:
+`OrcaSlicer/src/libslic3r/GCode/GCodeProcessor.cpp:5962-5984`
+(the `insert actual speed moves into the move list` block
+with `new_move.internal_only = true` at :5983).
+
+We do not implement `ActualSpeed`, so each clone would be a
+duplicate vertex at the same position with cloned
+`delta_extruder` — summing them would triple the extrusion
+total and crowd the viewer with overlapping segments.
+`handslice-cli.cpp:552-564` drops them at HSPT write time.
+
+Orca itself also hides them from the statistics it shows in
+the Line-Type legend: `OrcaSlicer/src/slic3r/GUI/GCodeViewer
+.cpp:1318-1320` early-outs on `move.internal_only` before
+updating `m_move_type_counts/_times/_distances`. The
+`libvgcode` renderer does include them in the vertex buffer
+(no explicit filter in `LibVGCodeWrapper.cpp:191-260`) so the
+`ActualSpeed` view can colour them differently; for the
+Line-Type legend they are invisible on both sides.
+
+The Auryn example: 3 763 559 total moves → 2 113 471 drawn,
+1 650 088 (~44 %) dropped as internal-only. Ratio
+depends on how much acceleration-shaped motion the slice
+contains.
 
 ### Self-check against the g-code footer
 
@@ -139,27 +163,45 @@ radiance and gamma-corrects the sRGB palette constants a second
 time, which pushed orange walls into peach on the first on-
 device run (Klaus, 2026-11-01).
 
-Layers below the slider are drawn at their full Orca palette
-value — no stacked dimming. We **do not** render anything
-above the slider by default any more. Klaus (409e425+1
-device run) found the dense AABB-wireframe shell "unruhig"
-on the Poco; it now hides behind a `Model outline` option
-in the legend's option block and defaults to off. When the
-user toggles it on, we draw the 12 edges of the object-only
-AABB (`t.objMin*/objMax*`) at 0.1-mm line width in light
-cool-grey `(0.78, 0.80, 0.82)` sRGB.
+### What's above the slider: nothing
 
-Orca's shell is a real alpha-blended STL mesh:
-`GCodeViewer.cpp:240` sets `m_model.set_color({1.0f, 1.0f,
-1.0f, 0.5f})` and `GLCanvas3D.hpp:1017` /
-`GCodeViewer.hpp:266` cap the final alpha at 0.2 / 0.15
-respectively, so it reads as a faint white glass shell.
-`flutter_scene`'s `UnlitMaterial` has no public blend-mode
-hook, so we cannot fire a 20 %-alpha fill today. Porting
-the real mesh is tracked under "pipe-ribbon shader" in the
-7e backlog, since both items need a custom shader anyway.
+Layers below the slider draw at their full Orca palette value
+— no stacked dimming. Above the slider we draw **nothing** —
+no shadow, no outline, no wireframe. "What has been printed
+so far" is the entire question the preview answers; users
+who want to see the finished model drag the slider to the
+top.
 
-### Scene reset — use `removeAll()`, never `children.clear()`
+This is a Klaus decision after three iterations tried to
+land a hint above the slider:
+
+- **7d follow-up 1** drew a dark-cyan AABB wireframe
+  default-on. Opaque enough to swallow the top of the
+  current layer; Klaus rejected it ("fast undurchsichtig und
+  dunkel-türkis").
+- **7d follow-up 2** switched to a light-grey wireframe
+  default-off behind a "Model outline" option. The dozens
+  of visible edges still read as "unruhig" on a 393-dp Poco
+  screen even when the user actively turned them on.
+- **7d follow-up 6** (this one) removes the feature entirely:
+  code, l10n, tests. The parser's object-only AABB
+  (`objMinX..objMaxZ` + `_isObjectRole`) go away with it
+  since they had no other consumer.
+
+The 7e-backlog item "**alpha-translucent model mesh above the
+slider**" is **abandoned** on the same grounds. Orca's shell
+is a real alpha-blended STL mesh (`GCodeViewer.cpp:240`
+`m_model.set_color({1,1,1,0.5})`, final alpha 0.2 via
+`GLCanvas3D.hpp:1017`); on a desktop with a 2× bigger
+viewport it reads as a faint white glass hint. On a 393-dp
+phone the same mesh would occupy the dominant part of the
+viewport and compete with the printed layers for attention
+— the same problem the wireframe iterations had. Not worth
+the custom-shader cost
+(`flutter_scene`'s `UnlitMaterial` does not expose a public
+blend-mode hook).
+
+### Scene reset — use `removeAll()`, never `.clear()` on the list
 
 flutter_scene's `Node.children` is a plain `List<Node>`.
 Mutating it directly (`.clear()`, `.removeAt(i)`) does **not**
@@ -185,20 +227,32 @@ four of our scene-owning widgets:
 - `screens/plate_bench_screen.dart` → the plate-view
   benchmark.
 
-A scene-level test
-(`scene emit: positions handed to the renderer at Layer
-1/52/100 obey the slider`) pins the exact `Float32List`
-positions `_emitRole` hands to `LineSegmentsGeometry` at
-three slider positions. For every role it enforces:
+Three guards keep the regression from coming back:
 
-- `maxZ(seg) ≤ layerZ[current0] + 0.01` — nothing above the
-  slider is in the vertex stream.
-- At Layer 52 the `topSolidInfill` role (`0xFFF04040`,
-  bright red) emits **zero** segments, because the HSPT
-  places no top-surface moves in bins ≤ 51.
+- `scene emit: positions handed to the renderer at Layer
+  1/52/100 obey the slider` in `toolpath_parser_test.dart`
+  — pins the exact `Float32List` `_emitRole` hands to
+  `LineSegmentsGeometry` for each role. For every role it
+  enforces `maxZ(seg) ≤ layerZ[current0] + 0.01` and, at
+  Layer 52, that `topSolidInfill` (`0xFFF04040`) emits zero
+  segments.
+- `no .root.children.clear( in lib — must use .root
+  .removeAll() instead` in `scene_lifecycle_test.dart` — a
+  grep guard against the pattern coming back. The runtime
+  "nodes-in-scene after 100 → 1 → 52 → 100 → 52 equals a
+  cold build at 52" check needs Impeller, which flutter_test
+  does not ship; the grep is the strongest CI-level guard
+  we can mount.
+- `buildRoleSegments is idempotent across the Klaus-named
+  slider sequence` in `scene_lifecycle_test.dart` — walks
+  Klaus' 100 → 1 → 52 → 100 → 52 order and asserts the
+  Float32List returned at the final Layer 52 is
+  byte-identical to a cold build at Layer 52. Proves the
+  data path (`_emitRole`'s source of truth) has no
+  accumulation.
 
-The view's `_emitRole` is now a thin shim around the pure
-helper `buildRoleSegments(Toolpaths, roleCode, from, to)` in
+The view's `_emitRole` is a thin shim around the pure helper
+`buildRoleSegments(Toolpaths, roleCode, from, to)` in
 `toolpath_parser.dart`, so the test exercises the exact code
 path the renderer uses — not a reimplementation that could
 drift.

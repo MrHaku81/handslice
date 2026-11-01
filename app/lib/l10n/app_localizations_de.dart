@@ -309,9 +309,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get layerTotalPrintTime => 'Druckzeit gesamt';
 
   @override
-  String get layerModelOutline => 'Modellumriss';
-
-  @override
   String get projectPlateLabelTextured => 'A · Strukturiert — 256×256×256 mm³';
 
   @override

@@ -59,7 +59,6 @@ class ToolpathLayerViewLabels {
     required this.totalEstimation,
     required this.totalFilament,
     required this.totalPrintTime,
-    required this.modelOutline,
   });
   final String layer;
   final String of;
@@ -89,9 +88,6 @@ class ToolpathLayerViewLabels {
   final String totalEstimation;
   final String totalFilament;
   final String totalPrintTime;
-  /// Legend-options row label, Orca would call this
-  /// "Model outline" — Pflicht 7d-follow-up (409e425+1).
-  final String modelOutline;
 }
 
 enum _RendererMode { three, twoDTopDown }
@@ -120,15 +116,6 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
 
   final Set<GcodeRole> _visibleRoles = Set.of(OrcaDefaults.visibleRoles);
   final Set<MoveType>  _visibleMoves = Set.of(OrcaDefaults.visibleMoveOptions);
-  // The AABB-wireframe "model outline" we draw above the slider
-  // is a cheap stand-in for Orca's translucent shell. Klaus
-  // (409e425 device run) called the default-on wireframe
-  // "unruhig" on the phone, so it's off by default now and
-  // lives behind the "Model outline" option in the legend. The
-  // real alpha mesh is 7e scope (needs a blend-capable custom
-  // shader; `UnlitMaterial` in flutter_scene does not expose
-  // one).
-  bool _silhouetteVisible = false;
 
   vm.Vector3 _orbitCentre = vm.Vector3.zero();
   double _orbitRadius = 100.0;
@@ -264,13 +251,12 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           widthMm: 0.2,
           from: 0, to: endOfCurrent);
     }
-    // Model-outline wireframe above the current layer. Default
-    // off: Klaus (409e425 device test) found the many edges
-    // noisy on a 393-dp screen. User can turn it back on via the
-    // legend's "Model outline" option.
-    if (_silhouetteVisible && maxLayer < t.layerCount - 1) {
-      _addModelSilhouette(scene, t);
-    }
+    // Nothing above the slider gets rendered. The AABB wireframe
+    // we tried in 7d (follow-up 2) read as "noisy" on the Poco
+    // and the translucent-mesh variant (abandoned 7d follow-up
+    // 6) is not reachable with flutter_scene's current blend
+    // model. The slider is now the only "how far have I come"
+    // signal.
   }
 
   void _emitRole(fscene.Scene scene, Toolpaths t, {
@@ -344,69 +330,6 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           colorBright.r, colorBright.g, colorBright.b, 1);
     scene.add(fscene.Node(
         name: 'move$moveCode',
-        mesh: fscene.Mesh(geom, mat)));
-  }
-
-  // Orca's "translucent-above-the-slider" model shell is a
-  // real alpha-blended mesh of the sliced object, tinted with
-  // the filament colour at ~20 % alpha. Reference:
-  //   OrcaSlicer/src/slic3r/GUI/GCodeViewer.cpp:240
-  //     m_model.set_color({ 1.0f, 1.0f, 1.0f, 0.5f });
-  //   OrcaSlicer/src/slic3r/GUI/GCodeViewer.hpp:266
-  //     void set_shell_transparency(float alpha = 0.15f);
-  //   OrcaSlicer/src/slic3r/GUI/GLCanvas3D.hpp:1017
-  //     void set_shell_transparence(float alpha = 0.2f);
-  //
-  // flutter_scene's `UnlitMaterial` does not expose a blend
-  // mode, so a real 20 %-alpha mesh is out of reach today
-  // (would need a custom shader or a sorted translucent
-  // pipeline). We approximate the shell with a light-grey
-  // AABB wireframe over the OBJECT-only bbox (skirt / brim /
-  // wipe tower / custom excluded) at 0.1-mm line width — thin
-  // enough to read as a hint, not a solid box. The reference
-  // image compares against `local-test/orca-referenz-
-  // schicht52.png`.
-  void _addModelSilhouette(fscene.Scene scene, Toolpaths t) {
-    final maxLayer = _currentLayer.clamp(0, t.layerCount - 1);
-    // Top-of-current-layer Z. Use the current layer's recorded
-    // z (last extrude z of that bin) so the silhouette sits on
-    // top of the printed segments, not inside them.
-    final currentTopZ = maxLayer < t.layerZ.length
-        ? t.layerZ[maxLayer]
-        : t.maxZ;
-    final topZ = t.objMaxZ;
-    if (currentTopZ >= topZ) return;
-    final x0 = t.objMinX, x1 = t.objMaxX;
-    final y0 = t.objMinY, y1 = t.objMaxY;
-    final z0 = currentTopZ, z1 = topZ;
-    if (x1 <= x0 || y1 <= y0) return;
-    final corners = <vm.Vector3>[
-      vm.Vector3(x0, y0, z0), vm.Vector3(x1, y0, z0),
-      vm.Vector3(x1, y1, z0), vm.Vector3(x0, y1, z0),
-      vm.Vector3(x0, y0, z1), vm.Vector3(x1, y0, z1),
-      vm.Vector3(x1, y1, z1), vm.Vector3(x0, y1, z1),
-    ];
-    final edges = <List<int>>[
-      [0, 1], [1, 2], [2, 3], [3, 0],      // bottom
-      [4, 5], [5, 6], [6, 7], [7, 4],      // top
-      [0, 4], [1, 5], [2, 6], [3, 7],      // vertical
-    ];
-    final out = Float32List(edges.length * 6);
-    for (int i = 0; i < edges.length; ++i) {
-      final a = corners[edges[i][0]], b = corners[edges[i][1]];
-      final o = i * 6;
-      out[o    ] = a.x; out[o + 1] = a.y; out[o + 2] = a.z;
-      out[o + 3] = b.x; out[o + 4] = b.y; out[o + 5] = b.z;
-    }
-    final data = fscene.LineSegmentData(positions: out);
-    final geom = fscene.LineSegmentsGeometry(data, width: 0.1);
-    final mat = fscene.UnlitMaterial()
-      ..displayReferred = true
-      // Light cool-grey (sRGB 0.78) ≈ `(1, 1, 1)` × α 0.22
-      // against the near-black viewport. Lets the wireframe
-      // read as "faded hint" rather than a solid box.
-      ..baseColorFactor = vm.Vector4(0.78, 0.80, 0.82, 1);
-    scene.add(fscene.Node(name: 'silhouette',
         mesh: fscene.Mesh(geom, mat)));
   }
 
@@ -797,22 +720,6 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
                   _rebuildScene();
                 },
               ),
-            // Model-outline toggle. No time / %, no palette
-            // swatch — the colour cell is a neutral grey chip
-            // so it reads as a hint, not an extrusion colour.
-            _LegendRowData(
-              name: l.modelOutline,
-              color: const Color(0xFFC6CBD1),
-              timeSec: 0,
-              percent: 0,
-              lengthMetres: 0,
-              weightG: null,
-              visible: _silhouetteVisible,
-              onToggle: (v) {
-                setState(() { _silhouetteVisible = v; });
-                _rebuildScene();
-              },
-            ),
           ],
         ),
         const SizedBox(height: 10),

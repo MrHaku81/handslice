@@ -98,7 +98,6 @@
   "layerTotalEstimation": "Gesamtabschätzung",
   "layerTotalFilament": "Filament gesamt",
   "layerTotalPrintTime": "Druckzeit gesamt",
-  "layerModelOutline": "Modellumriss",
   "projectPlateLabelTextured": "A · Strukturiert — 256×256×256 mm³",
   "projectPlateLabelSmooth": "B · Glatt — 256×256×256 mm³",
   "projectZOffset": "Z-Offset pro Seite (wird beim Slicen angewendet)",

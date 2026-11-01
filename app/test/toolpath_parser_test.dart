@@ -3,8 +3,8 @@
 // Three groups:
 //   - A hand-rolled HSPT v2 buffer that pins the field layout and
 //     the role / move-type byte codes.
-//   - Checks on the derived summaries (object-only AABB, time
-//     per role, grams from density × diameter).
+//   - Checks on the derived summaries (time per role, grams
+//     from density × diameter).
 //   - A sanity run against a freshly produced HSPT from
 //     `handslice-cli --input-gcode --export-toolpaths` on the
 //     thumbnail cube (local-only; the artefact is not in the
@@ -114,10 +114,6 @@ void main() {
       expect(t.maxX, 20);
       expect(t.minY, 10);
       expect(t.maxY, 20);
-      // Object-only AABB == whole AABB here (both roles are
-      // walls, not skirt/brim/wipe).
-      expect(t.objMinX, 20);
-      expect(t.objMaxY, 20);
       // Time: 0 + 0.5 + 1.2 + 1.3 = 3.0 s. timeByRole is
       // extrude-only (travels have their own bucket), so the
       // 0.5 s travel does NOT show up in `timeByRole[none]`;
@@ -151,31 +147,6 @@ void main() {
           1.25 * 1e-3;
       expect(t.gramsFromExtrudedMm(t.extrudedMm),
           closeTo(expectedG, 1e-6));
-    });
-
-    test('skirt and brim do not inflate the object AABB', () {
-      final bytes = _hspt(moves: [
-        // Skirt lap at (0, -2) – outside the model.
-        {
-          'role': GcodeRole.skirt.index, 'extruder': 0,
-          'moveType': MoveType.extrude.index,
-          'layer': 0, 'width100': 40, 'height100': 20, 'feedrate': 60,
-          'x': 0, 'y': -2, 'z': 0.2, 'e': 0.5, 'time': 0.4,
-        },
-        // Model wall at (10, 10).
-        {
-          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
-          'moveType': MoveType.extrude.index,
-          'layer': 0, 'width100': 42, 'height100': 20, 'feedrate': 60,
-          'x': 10, 'y': 10, 'z': 0.2, 'e': 0.5, 'time': 0.6,
-        },
-      ]);
-      final t = parseToolpathsInline(bytes);
-      // Whole-print AABB includes the skirt move.
-      expect(t.minY, -2);
-      // Object-only AABB excludes it.
-      expect(t.objMinY, 10);
-      expect(t.objMinX, 10);
     });
 
     test(
@@ -334,17 +305,6 @@ void main() {
       // should carry the z of the 52nd printed layer.
       expect(t.layerCount, greaterThanOrEqualTo(100));
       expect(t.layerZ[51], closeTo(10.40, 0.01));
-    });
-
-    test('cube HSPT object-only AABB excludes purge/skirt',
-        () async {
-      if (!hspt.existsSync()) return;
-      final t = await loadToolpaths(hspt.path);
-      // Model centres on (128, 128) with 20 mm side → object
-      // AABB roughly 118..138 in X and Y. The purge line sits at
-      // y=-1.2 so the whole-print AABB has minY ≤ 0.
-      expect(t.objMinY, greaterThan(100));
-      expect(t.objMaxY, lessThan(150));
     });
 
     test('cube HSPT density/diameter and totalTimeSec are populated',
