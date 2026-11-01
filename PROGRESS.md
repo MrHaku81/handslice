@@ -18,6 +18,107 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 20:53 UTC – arm64/x86 Divergenz: Thread-Probe am Poco
+
+Vor den Röhren hat Klaus die arm64/x86-Divergenz als Blocker eingeordnet
+und einen Ein-Kern-Test angesetzt. Ergebnisse unten, alle Zahlen vom
+Poco X3 Pro mit CLI `f958b1b` (arm64) und AMR5-Host (x86).
+
+### Vorarbeit: `--threads N`
+
+CLI hat bereits ein `--threads N`-Flag (`engine/cli/handslice-cli.cpp
+:230-237` parsed; `:876-883` wrappt den Slice mit
+`tbb::global_control(tbb::global_control::max_allowed_parallelism, N)`).
+Default = unbegrenzt (= physische Core-Zahl). Verwendet TBB 2021.x (Orca-
+Submodule-Pin).
+
+### Experiment-1: hängt `--threads 1-7` noch?
+
+Erwartung aus `docs/engine-integration.md:729-741`: `--threads 1` hing
+beim Erst-Experiment. Jetzt am f958b1b-Build nachgeprüft, 90 s Timeout:
+
+| `--threads N` | Ausgang (Würfel) |
+|--------------|------------------|
+| 1            | TIMEOUT (3/3)    |
+| 2            | TIMEOUT          |
+| 3            | TIMEOUT          |
+| 4            | TIMEOUT          |
+| 5            | TIMEOUT          |
+| 6            | TIMEOUT (90 s)   |
+| 7            | TIMEOUT (90 s)   |
+| **8**        | **Fertig in ~0.8 s** |
+
+Snapdragon 860 hat genau 8 physische Cores (4 Little + 3 Big + 1 Prime).
+Jedes `max_allowed_parallelism < 8` hängt in Orcas `parallel_pipeline` —
+ein Filter wartet auf einen Worker, der nie kommt. Der Ein-Thread-Weg
+ist mit dieser Orca-Version **nicht gangbar**, ohne Orca selbst zu
+patchen.
+
+### Experiment-2: 10× Default + 10× `--threads 8` + 10× `taskset f0`
+
+Erfolgsmetrik: sha256 des EXECUTABLE_BLOCK. Zielwert = Orca-GUI-
+Referenz `92951c26…` (x86 trifft die immer).
+
+| Modus | Variante A (sha a30ffec3…, 8479 Z) | Variante B (sha 7c88f484…, 8321 Z) | Zeit |
+|-------|-----------------------------------|-----------------------------------|------|
+| Default | **8/10** | 2/10 | 0.78 – 0.87 s |
+| `--threads 8` | 6/10 | 4/10 | 0.78 – 0.87 s |
+| `taskset f0` (nur Big Cores: cpu4-7) | 8/10 | 2/10 | 0.70 – 0.74 s |
+| `taskset 80` (nur Prime: cpu7) | — | — | <0.1 s / Fehlerexit (wie `--threads 1`) |
+
+Keine der getesteten Varianten erreicht die GUI-Referenz-sha
+`92951c26…`. **arm64 bleibt bimodal zwischen den zwei stabilen Varianten
+A und B** (Verhältnis 6:4 bis 8:2 je Run-Serie), die bereits in
+`docs/engine-integration.md:755-761` dokumentiert sind. Beide Varianten
+sind funktional korrekt (Zeilen-, Material- und Zeit-Stats identisch
+innerhalb der Phase-C-relaxierten ±-Toleranzen).
+
+### Experiment-3: Auryn (asymmetrisch, 2.4 M Druckbefehle)
+
+| Modus | Wall-Clock | `total_filament_used_mm` |
+|-------|-----------|--------------------------|
+| x86 default | **22 s** | 39 223.579 mm |
+| arm64 default | **73 s** (3.3× x86) | 38 906.853 mm |
+| arm64 `--threads 1` | hängt (nicht gelaufen) | — |
+
+Diff der reinen Druckbefehle (Kommentare raus) nach sortierter
+Intersection:
+
+- x86: 2 464 570 Zeilen
+- arm64: 2 408 014 Zeilen (56 556 weniger)
+- Zeilen in beiden Dateien (textgleich, Position egal): **2 078 508 (84 %)**
+- Nur in x86: 386 062 (15.7 %)
+- Nur in arm64: 329 506 (13.7 %)
+
+Auf dem asymmetrischen Modell ist die Divergenz **größer** als am Würfel
+(dort 92.4 % textgleich) — die Symmetrie-Hypothese aus
+`engine-integration.md:716-721` erweitert sich: auch die zufällige
+Scheduling-Auswahl zwischen zwei Lokal-Optima trifft an jeder Perimeter-
+Ecke wieder zu, nicht nur an der x=y-Diagonale.
+
+Filament-Divergenz: 316.7 mm (0.8 %) auf Auryn vs. 0.0005 mm auf dem
+Würfel. Auf dem Würfel sind die beiden Varianten geometrisch gleich-
+wertig (Spiegelung, selbe Weglänge); auf Auryn sind die beiden
+TBB-Pfade sichtbar unterschiedlich lang.
+
+### Was heißt das für den Byte-Gleichheits-Weg?
+
+- `--threads 1` ist auf diesem Orca-Pin blockiert (parallel_pipeline wait-
+  for-worker). Erforderte Orca-Patch, nicht autonom machbar.
+- `taskset`-Beschränkung ändert nur die OS-Core-Auswahl, nicht die TBB-
+  Scheduling-Reihenfolge → gleiche Bimodalität.
+- Max-Thread-Reduktion auf `n_physical_cores` ohne Patch hilft nicht.
+- Byte-Gleichheit bleibt wie in `engine-integration.md:620-625`
+  **Fernziel** mit Orca-Patch (eindeutige Tie-Break-Regel in den
+  betroffenen Perimeter-Sort-Keys).
+
+Phase C bleibt funktional (±-Metriken erfüllt, 2 Varianten dokumentiert).
+Keine App-Änderungen gemacht; nur gemessen und berichtet. Keine Tests
+gefährdet (`flutter test` nicht gelaufen — nichts in app/ geändert).
+
+Punkte 2 (flutter_scene-Belege + Würfel-Pipes-Probe) und 3 (LOD-
+Zuweisung) warten auf Klaus' Entscheid.
+
 ## 2026-11-01 19:17 UTC – Pflicht 7d (follow-up 8) + Pflicht 7e plan
 
 Two small polish items on the card / legend, then a plan-only
