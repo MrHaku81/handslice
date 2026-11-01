@@ -1,25 +1,40 @@
-# Layer preview — Pflicht 7b / 7c
+# Layer preview — Pflicht 7b / 7c / 7d
 
 Pflicht 7c (2026-11-01): the authoritative data path is now the
 CLI's HSPT binary produced by `handslice-cli --export-toolpaths`.
 The Dart g-code parser documented below stays as a fallback for
 files that do not come with an HSPT sidecar.
 
-## HSPT — handslice toolpaths binary
+Pflicht 7d (2026-11-01): the HSPT format bumps to v2 to carry
+per-move time (needed for the legend's time column and the
+"Total estimation" footer) and the per-filament density /
+diameter in the header (needed to turn extruded millimetres
+into grams). The Dart parser rejects v1 files with a clear
+error so a stale sidecar from before the bump surfaces
+immediately rather than silently reading garbage.
+
+## HSPT — handslice toolpaths binary (v2)
 
 Dumped by `handslice-cli --export-toolpaths <path>` either as a
 byproduct of slicing or in `--input-gcode <path>` mode (which
 runs `GCodeProcessor::process_file()` on an existing .gcode and
-exits without slicing).
+exits without slicing). The density / diameter come from
+`GCodeProcessorResult::filament_densities[0]` and
+`.filament_diameters[0]`, which `process_file` populates from
+the g-code's config block (`filament_density`,
+`filament_diameter`), so a sidecar written by `--input-gcode`
+matches a slice-time sidecar.
 
 ```
-Header (16 B, little-endian):
-  magic     "HSPT"               4 B
-  version   u32 = 1               4 B
-  flags     u32 = 0 (reserved)    4 B
-  n_moves   u32                   4 B
+Header (24 B, little-endian):
+  magic           "HSPT"                 4 B
+  version         u32 = 2                4 B
+  flags           u32 = 0 (reserved)     4 B
+  n_moves         u32                    4 B
+  density_g_cm3   f32 (filament 0)       4 B
+  diameter_mm     f32 (filament 0)       4 B
 
-Per-move record (28 B each, little-endian):
+Per-move record (32 B each, little-endian):
   u8  role            libslic3r::ExtrusionRole code (0..19)
   u8  extruder        0..255
   u8  move_type       libslic3r::EMoveType code    (0..10)
@@ -30,18 +45,47 @@ Per-move record (28 B each, little-endian):
   u16 feedrate_mm_s   0..65535
   f32 x, y, z         mm
   f32 delta_extruder  mm, signed (per-move E delta)
+  f32 time_s          MoveVertex::time[Normal] in seconds;
+                      sum across moves == Orca's "Total time"
 ```
 
-The record size is 28 B so a Pflicht-6-sized print (~2.4 M
-moves on `auryn-x86.gcode`) weighs ≈ 67 MB on disk — about the
-same as the source g-code, and the Dart side can mmap-style
-read it as one Float32/Uint8 view without parsing text.
+At 32 B/move an `auryn-x86`-sized print (~2.4 M moves) weighs
+≈ 77 MB on disk — ~15 % larger than the v1 artefact and still
+roughly the size of the source g-code. The Dart side reads it
+as one Uint8/Float32 view without parsing text.
 
 Fields we deliberately drop today: `fan_speed`, `temperature`,
 `pressure_advance`, `acceleration`, `jerk`, `layer_duration`,
 `actual_feedrate`, `mm3_per_mm`, `gcode_id`. None of them are
 consumed by the Dart viewer yet; adding one is a header-flag
 + record-size bump.
+
+### Layer Z and the per-bin reference height
+
+Orca emits `;LAYER_CHANGE` BEFORE the preceding layer's final
+retract, so the first record in each HSPT bin is a retract or
+travel still sitting at the previous layer's Z — e.g. z=10.2 mm
+for bin 51 whose extrude moves live at z=10.4 mm. The parser
+mirrors `libvgcode::Layers::update`: it initialises each bin's
+`layerZ` to the first move's z and then overwrites it with
+every non-custom, non-skirt/brim/wipe-tower extrude's z. That
+way the slider's "Z = X.XX mm" label matches Orca's layer
+label — on the thumbnail cube, bin 51 reads z=10.40 mm and the
+UI displays "Layer 52 of 100 · Z = 10.40 mm", same as the
+reference screenshot in `local-test/orca-referenz-schicht52.png`.
+
+### Object-only AABB
+
+The parser tracks two bounding boxes:
+
+- `minX..maxZ` over every extrude move (used for the orbit
+  camera's framing — the hull-with-bed call still needs the
+  outermost geometry so the camera does not clip the brim).
+- `objMinX..objMaxZ` over extrude moves excluding `skirt`,
+  `brim`, `wipeTower` and `custom` roles. The silhouette drawn
+  above the current layer uses this one; otherwise the box
+  balloons by ~10 mm for brim and off the bed for the purge
+  line.
 
 ### Internal-only move filter
 
@@ -97,9 +141,10 @@ device run (Klaus, 2026-11-01).
 
 Layers below the slider are drawn at their full Orca palette
 value — no stacked dimming. Above the slider the viewport
-renders a 12-edge AABB wireframe in a cyan tint to mark the
-"model still to come". Matches `GCodeViewer`'s translucent
-preview.
+renders a 12-edge AABB wireframe in a dim cyan to mark the
+"model still to come". 7d uses the OBJECT-only AABB
+(`t.objMin*/objMax*`), not the raw whole-print one, so the box
+does not swallow the purge line / brim.
 
 ### 2D top-down fit
 
@@ -110,13 +155,43 @@ corner. Pinch-zoom and single-finger pan both live on a
 `Listener` so the outer `ListView` scroll never steals the
 gesture.
 
+### Plate label overlay
+
+Both the Model and Layer view wrap their viewport in a tiny
+"A · Textured — 256×256×256 mm³" chip in the top-left corner.
+The chip is rendered as an `IgnorePointer` so it never eats
+touch events. Pflicht 7d: Klaus asked for the label in both
+tabs after the device test on 04684c0 showed it was only in
+the Layer tab.
+
+### Bed grid
+
+`addBedToScene` (shared between PlateView and
+ToolpathLayerView) now draws two sets of unlit lines at
+z ≈ 0.03 mm above the quad: minor lines every 10 mm in a cool
+grey, major lines every 50 mm (0, 50, …, 250) in a brighter
+grey. Line width is 0.08 mm, enough to show but thin enough
+not to fight the extrusions.
+
 ### Legend table
 
-Columns: toggle (eye icon), swatch, name, length (m), %. Only
-roles with ≥ 0.5 mm of recorded path appear so a plain cube does
-not drag the full 20-row palette into view. Length comes from
-`Toolpaths.lengthByRole` (Euclidean), percent is role length ÷
-total length. Weight and time columns are 7d scope.
+Columns: toggle (eye icon), swatch, name, time, length (m),
+weight (g), %. Only roles with ≥ 0.5 mm of recorded path
+appear so a plain cube does not drag the full 20-row palette
+into view. Length is `Toolpaths.lengthByRole` (Euclidean),
+time is `Toolpaths.timeByRole` (sum of HSPT per-move
+`time_s`), weight is derived in Dart from
+`extrudedByRole × π·(d/2)² × density × 1e-3`. Percent is
+role length ÷ total length. For the five visible move types
+(travel / wipe / retract / unretract / seam) only the time
+column is populated — lengths and weights are not meaningful
+there.
+
+Below the role table a "Total estimation" box carries two
+rows: total filament (metres + grams) and total print time
+(`Toolpaths.totalTimeSec`, formatted as `9m25s` /
+`1h12m` / `35s`). The reference screenshot's `Total 1.17 m ·
+3.52 g · 9m25s` is the target.
 
 ---
 

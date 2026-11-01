@@ -592,6 +592,9 @@ class _PlateViewCardState extends State<_PlateViewCard> {
       labelZoomOut: l.plateViewZoomOut,
       labelEmpty: l.projectPlateViewEmpty,
       labelBuilding: l.projectPlateViewBuilding,
+      plateLabel: projectState.bedType == BedType.texturedA
+          ? l.projectPlateLabelTextured
+          : l.projectPlateLabelSmooth,
     );
   }
 
@@ -651,6 +654,8 @@ class _PlateViewCardState extends State<_PlateViewCard> {
           lineTypeLegendHeader: l.layerLineTypeHeader,
           lineTypeNameHeader: l.layerLineTypeName,
           lineTypeLengthHeader: l.layerLineTypeLength,
+          lineTypeTimeHeader: l.layerLineTypeTime,
+          lineTypeWeightHeader: l.layerLineTypeWeight,
           lineTypePercentHeader: l.layerLineTypePercent,
           renderer3d: l.layerViewRenderer3d,
           renderer2d: l.layerViewRenderer2d,
@@ -661,6 +666,9 @@ class _PlateViewCardState extends State<_PlateViewCard> {
               : l.projectPlateLabelSmooth,
           roleLabel: (r) => _localizedRole(l, r),
           moveLabel: (m) => _localizedMove(l, m),
+          totalEstimation: l.layerTotalEstimation,
+          totalFilament: l.layerTotalFilament,
+          totalPrintTime: l.layerTotalPrintTime,
         ),
       );
     }

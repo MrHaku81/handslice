@@ -139,6 +139,7 @@ class PlateView extends StatefulWidget {
     this.labelZoomOut = 'Zoom out',
     this.labelEmpty = 'Open a model to see the plate view.',
     this.labelBuilding = 'Building preview mesh…',
+    this.plateLabel,
   });
 
   final String? hspmPath;
@@ -158,6 +159,11 @@ class PlateView extends StatefulWidget {
   final String labelZoomOut;
   final String labelEmpty;
   final String labelBuilding;
+  /// Optional "A · Textured — 256×256×256 mm³"-style overlay in
+  /// the top-left of the viewport. Pflicht 7d: Klaus asked for
+  /// the bed to be labelled in the Model view too, not only in
+  /// the Layer preview.
+  final String? plateLabel;
 
   @override
   State<PlateView> createState() => _PlateViewState();
@@ -463,11 +469,41 @@ class _PlateViewState extends State<PlateView> {
           aspectRatio: 4 / 3,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
-            child: _viewport(),
+            child: _wrapPlateLabel(_viewport()),
           ),
         ),
         const SizedBox(height: 8),
         _viewButtonsRow(),
+      ],
+    );
+  }
+
+  Widget _wrapPlateLabel(Widget child) {
+    final label = widget.plateLabel;
+    if (label == null || label.isEmpty) return child;
+    return Stack(
+      children: [
+        Positioned.fill(child: child),
+        Positioned(
+          top: 6,
+          left: 8,
+          child: IgnorePointer(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                label,
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 11,
+                    fontFamily: 'monospace'),
+              ),
+            ),
+          ),
+        ),
       ],
     );
   }

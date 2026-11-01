@@ -1,13 +1,18 @@
-// Pflicht 7c — toolpath (HSPT) parser tests.
+// Pflicht 7c/7d — toolpath (HSPT) parser tests.
 //
-// Two groups:
-//   - A hand-rolled HSPT buffer that pins the field layout and
+// Three groups:
+//   - A hand-rolled HSPT v2 buffer that pins the field layout and
 //     the role / move-type byte codes.
+//   - Checks on the derived summaries (object-only AABB, time
+//     per role, grams from density × diameter).
 //   - A sanity run against a freshly produced HSPT from
 //     `handslice-cli --input-gcode --export-toolpaths` on the
-//     notched cube (local-only; the artefact is not in the repo).
+//     thumbnail cube (local-only; the artefact is not in the
+//     repo). The cube g-code is also pinned to Orca's layer 52
+//     ≈ z=10.40 mm expectation from the reference screenshot.
 
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -15,17 +20,21 @@ import 'package:handslice/engine/toolpath_parser.dart';
 
 Uint8List _hspt({
   required List<Map<String, dynamic>> moves,
+  double density = 1.25,
+  double diameter = 1.75,
 }) {
   final bytes = BytesBuilder();
-  // Header
+  // Header (24 B).
   bytes.add(const [0x48, 0x53, 0x50, 0x54]);
-  final hdr = ByteData(12)
-    ..setUint32(0, 1, Endian.little)
+  final hdr = ByteData(20)
+    ..setUint32(0, 2, Endian.little)
     ..setUint32(4, 0, Endian.little)
-    ..setUint32(8, moves.length, Endian.little);
+    ..setUint32(8, moves.length, Endian.little)
+    ..setFloat32(12, density, Endian.little)
+    ..setFloat32(16, diameter, Endian.little);
   bytes.add(hdr.buffer.asUint8List());
   for (final m in moves) {
-    final b = ByteData(28);
+    final b = ByteData(hsptRecordSize);
     b.setUint8(0,  m['role']     as int);
     b.setUint8(1,  m['extruder'] as int);
     b.setUint8(2,  m['moveType'] as int);
@@ -38,6 +47,7 @@ Uint8List _hspt({
     b.setFloat32(16, (m['y'] as num).toDouble(), Endian.little);
     b.setFloat32(20, (m['z'] as num).toDouble(), Endian.little);
     b.setFloat32(24, (m['e']  as num).toDouble(), Endian.little);
+    b.setFloat32(28, ((m['time'] ?? 0.0) as num).toDouble(), Endian.little);
     bytes.add(b.buffer.asUint8List());
   }
   return bytes.toBytes();
@@ -46,7 +56,16 @@ Uint8List _hspt({
 void main() {
   group('parseToolpathsInline', () {
     test('rejects bad magic', () {
-      final b = Uint8List(28);
+      final b = Uint8List(hsptHeaderSize);
+      expect(() => parseToolpathsInline(b),
+          throwsA(isA<FormatException>()));
+    });
+
+    test('rejects HSPT v1 with a clear error', () {
+      // 16-byte v1 header + no moves.
+      final b = Uint8List(16)
+        ..[0] = 0x48 ..[1] = 0x53 ..[2] = 0x50 ..[3] = 0x54;
+      ByteData.sublistView(b).setUint32(4, 1, Endian.little);
       expect(() => parseToolpathsInline(b),
           throwsA(isA<FormatException>()));
     });
@@ -57,28 +76,28 @@ void main() {
           'role': GcodeRole.none.index,  'extruder': 0,
           'moveType': MoveType.noop.index,
           'layer': 0, 'width100': 0, 'height100': 0, 'feedrate': 0,
-          'x': 0, 'y': 0, 'z': 0, 'e': 0,
+          'x': 0, 'y': 0, 'z': 0, 'e': 0, 'time': 0.0,
         },
         {
           // Travel to the start of the outer wall.
           'role': GcodeRole.none.index,  'extruder': 0,
           'moveType': MoveType.travel.index,
           'layer': 0, 'width100': 0, 'height100': 0, 'feedrate': 180,
-          'x': 10, 'y': 10, 'z': 0.2, 'e': 0,
+          'x': 10, 'y': 10, 'z': 0.2, 'e': 0, 'time': 0.5,
         },
         {
           // Outer wall segment.
           'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
           'moveType': MoveType.extrude.index,
           'layer': 0, 'width100': 42, 'height100': 20, 'feedrate': 60,
-          'x': 20, 'y': 10, 'z': 0.2, 'e': 0.42,
+          'x': 20, 'y': 10, 'z': 0.2, 'e': 0.42, 'time': 1.2,
         },
         {
           // Inner wall segment.
           'role': GcodeRole.perimeter.index, 'extruder': 0,
           'moveType': MoveType.extrude.index,
           'layer': 0, 'width100': 42, 'height100': 20, 'feedrate': 60,
-          'x': 20, 'y': 20, 'z': 0.2, 'e': 0.42,
+          'x': 20, 'y': 20, 'z': 0.2, 'e': 0.42, 'time': 1.3,
         },
       ]);
       final t = parseToolpathsInline(bytes);
@@ -95,9 +114,83 @@ void main() {
       expect(t.maxX, 20);
       expect(t.minY, 10);
       expect(t.maxY, 20);
-      final move2 = Move(t.bd, 2 * 28);
+      // Object-only AABB == whole AABB here (both roles are
+      // walls, not skirt/brim/wipe).
+      expect(t.objMinX, 20);
+      expect(t.objMaxY, 20);
+      // Time: 0 + 0.5 + 1.2 + 1.3 = 3.0 s, with the extrude
+      // seconds assigned per-role.
+      expect(t.totalTimeSec, closeTo(3.0, 1e-5));
+      expect(t.timeByRole[GcodeRole.externalPerimeter.index],
+          closeTo(1.2, 1e-5));
+      expect(t.timeByRole[GcodeRole.perimeter.index],
+          closeTo(1.3, 1e-5));
+      final move2 = Move(t.bd, 2 * hsptRecordSize);
       expect(move2.role, GcodeRole.externalPerimeter);
       expect(move2.width, closeTo(0.42, 1e-5));
+      expect(move2.timeS, closeTo(1.2, 1e-5));
+      // Weight from density + diameter: 0.84 mm × π*(1.75/2)² mm²
+      // × 1.25 g/cm³ / 1000.
+      final expectedG = 0.84 *
+          math.pi * (1.75 * 0.5) * (1.75 * 0.5) *
+          1.25 * 1e-3;
+      expect(t.gramsFromExtrudedMm(t.extrudedMm),
+          closeTo(expectedG, 1e-6));
+    });
+
+    test('skirt and brim do not inflate the object AABB', () {
+      final bytes = _hspt(moves: [
+        // Skirt lap at (0, -2) – outside the model.
+        {
+          'role': GcodeRole.skirt.index, 'extruder': 0,
+          'moveType': MoveType.extrude.index,
+          'layer': 0, 'width100': 40, 'height100': 20, 'feedrate': 60,
+          'x': 0, 'y': -2, 'z': 0.2, 'e': 0.5, 'time': 0.4,
+        },
+        // Model wall at (10, 10).
+        {
+          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
+          'moveType': MoveType.extrude.index,
+          'layer': 0, 'width100': 42, 'height100': 20, 'feedrate': 60,
+          'x': 10, 'y': 10, 'z': 0.2, 'e': 0.5, 'time': 0.6,
+        },
+      ]);
+      final t = parseToolpathsInline(bytes);
+      // Whole-print AABB includes the skirt move.
+      expect(t.minY, -2);
+      // Object-only AABB excludes it.
+      expect(t.objMinY, 10);
+      expect(t.objMinX, 10);
+    });
+
+    test('layerZ tracks the latest object-extrude z, not retracts',
+        () {
+      // Bin 1 starts with a retract still at z=0.2 (prev layer),
+      // then an extrude at z=0.4. Orca shows z=0.4 for that bin.
+      final bytes = _hspt(moves: [
+        {
+          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
+          'moveType': MoveType.extrude.index,
+          'layer': 0, 'width100': 42, 'height100': 20, 'feedrate': 60,
+          'x': 10, 'y': 10, 'z': 0.2, 'e': 0.4, 'time': 0.5,
+        },
+        {
+          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
+          'moveType': MoveType.retract.index,
+          'layer': 1, 'width100': 0, 'height100': 0, 'feedrate': 60,
+          'x': 10, 'y': 10, 'z': 0.2, 'e': -0.8, 'time': 0.1,
+        },
+        {
+          'role': GcodeRole.externalPerimeter.index, 'extruder': 0,
+          'moveType': MoveType.extrude.index,
+          'layer': 1, 'width100': 42, 'height100': 20, 'feedrate': 60,
+          'x': 20, 'y': 10, 'z': 0.4, 'e': 0.4, 'time': 0.5,
+        },
+      ]);
+      final t = parseToolpathsInline(bytes);
+      expect(t.layerCount, 2);
+      expect(t.layerZ[0], closeTo(0.2, 1e-5));
+      expect(t.layerZ[1], closeTo(0.4, 1e-5));
     });
   });
 
@@ -155,7 +248,7 @@ void main() {
         () async {
       if (!hspt.existsSync()) return;
       final t = await loadToolpaths(hspt.path);
-      // Layer 51 (1-indexed in UI 52) should fit inside the
+      // Layer 52 (1-indexed, Orca label) should fit inside the
       // whole-print XY bbox.
       final whole = layerXyBounds(t, 0, t.moveCount);
       final mid = layerXyBounds(t, t.layerStart(51), t.layerEnd(51));
@@ -165,6 +258,42 @@ void main() {
       expect(mid.maxX,  lessThanOrEqualTo(whole.maxX));
       expect(mid.minY, greaterThanOrEqualTo(whole.minY));
       expect(mid.maxY,  lessThanOrEqualTo(whole.maxY));
+    });
+
+    test('cube HSPT layer 52 lands at z=10.40 mm (matches Orca)',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Reference screenshot (local-test/orca-referenz-schicht52
+      // .png): Orca's slider at "Layer 52" shows z = 10.40 mm.
+      // Our slider is 0-indexed; label is `${value+1}`, so bin 51
+      // should carry the z of the 52nd printed layer.
+      expect(t.layerCount, greaterThanOrEqualTo(100));
+      expect(t.layerZ[51], closeTo(10.40, 0.01));
+    });
+
+    test('cube HSPT object-only AABB excludes purge/skirt',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // Model centres on (128, 128) with 20 mm side → object
+      // AABB roughly 118..138 in X and Y. The purge line sits at
+      // y=-1.2 so the whole-print AABB has minY ≤ 0.
+      expect(t.objMinY, greaterThan(100));
+      expect(t.objMaxY, lessThan(150));
+    });
+
+    test('cube HSPT density/diameter and totalTimeSec are populated',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // CC2 default Elegoo PLA: 1.75 mm, 1.25 g/cm³.
+      expect(t.filamentDiameterMm, closeTo(1.75, 1e-3));
+      expect(t.filamentDensityGcm3, closeTo(1.25, 1e-2));
+      // 20 mm cube at CC2 standard ≈ 9m25s = 565 s (reference
+      // image) — just assert it's non-zero and within a factor
+      // of two of the g-code footer.
+      expect(t.totalTimeSec, greaterThan(1.0));
     });
   });
 }

@@ -626,17 +626,47 @@ abstract class AppLocalizations {
   /// **'Type'**
   String get layerLineTypeName;
 
+  /// No description provided for @layerLineTypeTime.
+  ///
+  /// In en, this message translates to:
+  /// **'Time'**
+  String get layerLineTypeTime;
+
   /// No description provided for @layerLineTypeLength.
   ///
   /// In en, this message translates to:
   /// **'Length'**
   String get layerLineTypeLength;
 
+  /// No description provided for @layerLineTypeWeight.
+  ///
+  /// In en, this message translates to:
+  /// **'Weight'**
+  String get layerLineTypeWeight;
+
   /// No description provided for @layerLineTypePercent.
   ///
   /// In en, this message translates to:
   /// **'%'**
   String get layerLineTypePercent;
+
+  /// No description provided for @layerTotalEstimation.
+  ///
+  /// In en, this message translates to:
+  /// **'Total estimation'**
+  String get layerTotalEstimation;
+
+  /// No description provided for @layerTotalFilament.
+  ///
+  /// In en, this message translates to:
+  /// **'Total Filament'**
+  String get layerTotalFilament;
+
+  /// No description provided for @layerTotalPrintTime.
+  ///
+  /// In en, this message translates to:
+  /// **'Total time'**
+  String get layerTotalPrintTime;
 
   /// No description provided for @projectPlateLabelTextured.
   ///

@@ -285,10 +285,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get layerLineTypeName => 'Type';
 
   @override
+  String get layerLineTypeTime => 'Time';
+
+  @override
   String get layerLineTypeLength => 'Length';
 
   @override
+  String get layerLineTypeWeight => 'Weight';
+
+  @override
   String get layerLineTypePercent => '%';
+
+  @override
+  String get layerTotalEstimation => 'Total estimation';
+
+  @override
+  String get layerTotalFilament => 'Total Filament';
+
+  @override
+  String get layerTotalPrintTime => 'Total time';
 
   @override
   String get projectPlateLabelTextured => 'A · Textured — 256×256×256 mm³';

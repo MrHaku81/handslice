@@ -495,16 +495,18 @@ Vec3d compute_bed_center(const DynamicPrintConfig& cfg) {
     return Vec3d(0.5 * (lo.x() + hi.x()), 0.5 * (lo.y() + hi.y()), 0.0);
 }
 
-// Pflicht 7c — write a GCodeProcessorResult as the packed HSPT
-// (Handslice ToolPaths) binary. Format:
+// Pflicht 7c/7d — write a GCodeProcessorResult as the packed HSPT
+// (Handslice ToolPaths) binary. Format v2:
 //
-//   Header (16 B, LE):
-//     magic   = "HSPT"           (4 B)
-//     version = u32 1            (4 B)
-//     flags   = u32 0            (4 B, reserved)
-//     n_moves = u32               (4 B)
+//   Header (24 B, LE):
+//     magic         = "HSPT"            (4 B)
+//     version       = u32 2             (4 B)
+//     flags         = u32 0             (4 B, reserved)
+//     n_moves       = u32               (4 B)
+//     density_g_cm3 = f32  (filament 0) (4 B)
+//     diameter_mm   = f32  (filament 0) (4 B)
 //
-//   Per-move record (28 B each, LE):
+//   Per-move record (32 B each, LE):
 //     u8  role            Orca ExtrusionRole (erNone=0 … erCount)
 //     u8  extruder        0..255
 //     u8  move_type       Orca EMoveType     (Noop=0 … Extrude=10)
@@ -514,15 +516,17 @@ Vec3d compute_bed_center(const DynamicPrintConfig& cfg) {
 //     u16 height_x100     extrusion height in 0.01-mm units
 //     u16 feedrate_mm_s   clamp to 65535
 //     f32 x, y, z         mm
-//     f32 delta_extruder  mm (per-move E delta; sums to filament-
-//                         used total)
+//     f32 delta_extruder  mm  (per-move E delta; sums to filament-
+//                              used total)
+//     f32 time_s          MoveVertex::time[Normal] in seconds
+//                         (post-TimeProcessor; equals Orca's
+//                         "Total estimated time" when summed)
 //
-// 28 bytes per move keeps the artefact roughly the size of the
-// g-code it was built from (2.4 M moves on auryn-x86 ≈ 67 MB).
-// Fields outside the viewer's hot path (temperature, fan,
-// pressure advance, …) are intentionally dropped for now; the
-// Dart viewer does not consume them yet, and adding them later
-// is a header-flag + record-size bump.
+// 32 bytes per move keeps the artefact ~1.1× the size of the g-code
+// it was built from (2.4 M moves on auryn-x86 ≈ 77 MB). Fields
+// outside the viewer's hot path (fan, pressure advance, …) are
+// still dropped; adding them later is a header-flag + record-size
+// bump.
 void write_toolpaths_hspt(const std::string& out_path,
                           const GCodeProcessorResult& gcr,
                           bool quiet) {
@@ -551,10 +555,18 @@ void write_toolpaths_hspt(const std::string& out_path,
     for (const auto& m : all_moves) {
         if (!m.internal_only) ++n_out;
     }
+    const float density  = gcr.filament_densities.empty()
+        ? 0.0f : gcr.filament_densities.front();
+    const float diameter = gcr.filament_diameters.empty()
+        ? 0.0f : gcr.filament_diameters.front();
     f.write("HSPT", 4);
-    w32(1u);
+    w32(2u);
     w32(0u);
     w32(n_out);
+    wf(density);
+    wf(diameter);
+    using ETM = PrintEstimatedStatistics::ETimeMode;
+    const auto normal = static_cast<size_t>(ETM::Normal);
     auto clamp16 = [](float v) -> uint16_t {
         if (v <= 0.0f) return 0;
         if (v >= 65535.0f) return 65535;
@@ -575,6 +587,7 @@ void write_toolpaths_hspt(const std::string& out_path,
         wf(m.position.y());
         wf(m.position.z());
         wf(m.delta_extruder);
+        wf(normal < m.time.size() ? m.time[normal] : 0.0f);
     }
     if (!quiet)
         std::cerr << "handslice-cli: wrote " << n_out

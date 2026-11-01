@@ -1,4 +1,4 @@
-// Pflicht 7c — layer preview backed by the CLI's HSPT binary.
+// Pflicht 7c/7d — layer preview backed by the CLI's HSPT binary.
 //
 // Mirrors `LayerView` (same gestures, same bed quad, same
 // focus-navigable button layout) but consumes a `Toolpaths`
@@ -14,6 +14,10 @@
 // inner" in the default CC2 process. Per-move ribbons that
 // change thickness mid-path are a shader feature we leave for a
 // follow-up.
+//
+// 7d adds: object-only silhouette (no purge line in the box),
+// time + weight columns in the legend, a "Total estimation"
+// footer, and a bed grid (via `addBedToScene`).
 
 // ignore_for_file: depend_on_referenced_packages
 
@@ -41,6 +45,8 @@ class ToolpathLayerViewLabels {
     required this.pathTypes,
     required this.lineTypeLegendHeader,
     required this.lineTypeLengthHeader,
+    required this.lineTypeTimeHeader,
+    required this.lineTypeWeightHeader,
     required this.lineTypePercentHeader,
     required this.lineTypeNameHeader,
     required this.renderer3d,
@@ -50,6 +56,9 @@ class ToolpathLayerViewLabels {
     required this.plateLabel,
     required this.roleLabel,
     required this.moveLabel,
+    required this.totalEstimation,
+    required this.totalFilament,
+    required this.totalPrintTime,
   });
   final String layer;
   final String of;
@@ -64,6 +73,8 @@ class ToolpathLayerViewLabels {
   final String pathTypes;
   final String lineTypeLegendHeader;
   final String lineTypeLengthHeader;
+  final String lineTypeTimeHeader;
+  final String lineTypeWeightHeader;
   final String lineTypePercentHeader;
   final String lineTypeNameHeader;
   final String renderer3d;
@@ -74,6 +85,9 @@ class ToolpathLayerViewLabels {
   final String plateLabel;
   final String Function(GcodeRole) roleLabel;
   final String Function(MoveType) moveLabel;
+  final String totalEstimation;
+  final String totalFilament;
+  final String totalPrintTime;
 }
 
 enum _RendererMode { three, twoDTopDown }
@@ -139,7 +153,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     final out = <int, double>{};
     final bd = ByteData.sublistView(t.data);
     for (int i = 0; i < t.moveCount; ++i) {
-      final o = i * 28;
+      final o = i * hsptRecordSize;
       final moveCode = bd.getUint8(o + 2);
       if (moveCode != MoveType.extrude.index) continue;
       final roleCode = bd.getUint8(o);
@@ -228,12 +242,15 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           widthMm: 0.2,
           from: 0, to: endOfCurrent);
     }
-    // Translucent model silhouette above the current layer — a
-    // simple AABB wireframe in Orca's cyan. Lets the user see at
-    // a glance how much print is still coming above the slider
-    // without rendering those extrusions.
+    // Translucent model silhouette above the current layer —
+    // approximated by the 12 edges of the OBJECT-ONLY AABB in
+    // Orca's cyan. "Object-only" means skirt / brim / purge /
+    // wipe tower are excluded, because the raw whole-print bbox
+    // extends ~10 mm past the model (brim) and off-bed (purge
+    // line), which balloons the box well beyond the printed
+    // part. Called out by Klaus on the first 7d device test.
     if (maxLayer < t.layerCount - 1) {
-      _addModelSilhouette(scene, t, endOfCurrent);
+      _addModelSilhouette(scene, t);
     }
   }
 
@@ -250,7 +267,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     double px = 0, py = 0, pz = 0;
     bool hasPrev = false;
     for (int i = (from > 0 ? from - 1 : from); i < to; ++i) {
-      final o = i * 28;
+      final o = i * hsptRecordSize;
       final mc = bd.getUint8(o + 2);
       final rc = bd.getUint8(o);
       if (i >= from && hasPrev && mc == MoveType.extrude.index && rc == roleCode) {
@@ -266,7 +283,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     int oIdx = 0;
     hasPrev = false;
     for (int i = (from > 0 ? from - 1 : from); i < to; ++i) {
-      final o = i * 28;
+      final o = i * hsptRecordSize;
       final mc = bd.getUint8(o + 2);
       final rc = bd.getUint8(o);
       final x = bd.getFloat32(o + 12, Endian.little);
@@ -307,7 +324,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     final bd = ByteData.sublistView(t.data);
     int count = 0;
     for (int i = from; i < to; ++i) {
-      if (bd.getUint8(i * 28 + 2) == moveCode) count++;
+      if (bd.getUint8(i * hsptRecordSize + 2) == moveCode) count++;
     }
     if (count == 0) return;
     final out = Float32List(count * 6);
@@ -315,7 +332,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     double px = 0, py = 0, pz = 0;
     bool hasPrev = false;
     for (int i = (from > 0 ? from - 1 : from); i < to; ++i) {
-      final o = i * 28;
+      final o = i * hsptRecordSize;
       final mc = bd.getUint8(o + 2);
       final x = bd.getFloat32(o + 12, Endian.little);
       final y = bd.getFloat32(o + 16, Endian.little);
@@ -340,31 +357,34 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
   }
 
   // Orca's "translucent-above-the-slider" model silhouette.
-  // We approximate it with the 12 edges of the model's AABB in
-  // cyan at ~30 % intensity (`displayReferred` + a tint factor;
-  // flutter_scene's UnlitMaterial does not expose a full alpha
-  // blend, so we settle for a near-black-background multiply by
-  // keeping the colour dim). Good enough to show where the rest
-  // of the model will land, which is what Klaus asked for.
-  void _addModelSilhouette(fscene.Scene scene, Toolpaths t, int endOfCurrent) {
-    // Current slider's Z: top of the current layer's segments.
-    // The silhouette sits above it so it does not overlap the
-    // bright extrusion we just drew.
+  // We approximate it with the 12 edges of the OBJECT-only AABB
+  // (`t.objMin*` / `t.objMax*`), which excludes skirt / brim /
+  // wipe tower / custom g-code — the raw whole-print bbox
+  // includes the purge line at (127, -1.2) and the brim 10 mm
+  // outside the model, which balloons the box. Colour and alpha
+  // are kept dim because flutter_scene's UnlitMaterial does not
+  // expose a full alpha blend; a dark cyan reads as "faded"
+  // against the near-black viewport background.
+  void _addModelSilhouette(fscene.Scene scene, Toolpaths t) {
     final maxLayer = _currentLayer.clamp(0, t.layerCount - 1);
-    final currentTopZ = maxLayer + 1 < t.layerZ.length
-        ? t.layerZ[maxLayer + 1]
+    // Top-of-current-layer Z. Use the current layer's recorded
+    // z (last extrude z of that bin) so the silhouette sits on
+    // top of the printed segments, not inside them.
+    final currentTopZ = maxLayer < t.layerZ.length
+        ? t.layerZ[maxLayer]
         : t.maxZ;
-    if (currentTopZ >= t.maxZ) return;
-    final x0 = t.minX, x1 = t.maxX;
-    final y0 = t.minY, y1 = t.maxY;
-    final z0 = currentTopZ, z1 = t.maxZ;
+    final topZ = t.objMaxZ;
+    if (currentTopZ >= topZ) return;
+    final x0 = t.objMinX, x1 = t.objMaxX;
+    final y0 = t.objMinY, y1 = t.objMaxY;
+    final z0 = currentTopZ, z1 = topZ;
+    if (x1 <= x0 || y1 <= y0) return;
     final corners = <vm.Vector3>[
       vm.Vector3(x0, y0, z0), vm.Vector3(x1, y0, z0),
       vm.Vector3(x1, y1, z0), vm.Vector3(x0, y1, z0),
       vm.Vector3(x0, y0, z1), vm.Vector3(x1, y0, z1),
       vm.Vector3(x1, y1, z1), vm.Vector3(x0, y1, z1),
     ];
-    // 12 edges of the box.
     final edges = <List<int>>[
       [0, 1], [1, 2], [2, 3], [3, 0],      // bottom
       [4, 5], [5, 6], [6, 7], [7, 4],      // top
@@ -378,10 +398,10 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
       out[o + 3] = b.x; out[o + 4] = b.y; out[o + 5] = b.z;
     }
     final data = fscene.LineSegmentData(positions: out);
-    final geom = fscene.LineSegmentsGeometry(data, width: 0.4);
+    final geom = fscene.LineSegmentsGeometry(data, width: 0.3);
     final mat = fscene.UnlitMaterial()
       ..displayReferred = true
-      ..baseColorFactor = vm.Vector4(0.33, 0.60, 0.58, 1);
+      ..baseColorFactor = vm.Vector4(0.22, 0.42, 0.42, 1);
     scene.add(fscene.Node(name: 'silhouette',
         mesh: fscene.Mesh(geom, mat)));
   }
@@ -676,6 +696,20 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
         label: Text(label, overflow: TextOverflow.ellipsis),
       );
 
+  // Format helpers for the legend. "9m25s" / "35s" / "1h12m" —
+  // Orca drops the hours bucket when zero, and the seconds
+  // bucket when hours are present.
+  String _fmtDuration(double seconds) {
+    if (!seconds.isFinite || seconds <= 0.5) return '—';
+    final total = seconds.round();
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+    if (h > 0) return '${h}h${m}m';
+    if (m > 0) return '${m}m${s}s';
+    return '${s}s';
+  }
+
   Widget _legend(ToolpathLayerViewLabels l) {
     final theme = Theme.of(context);
     final t = widget.toolpaths;
@@ -689,6 +723,7 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
       MoveType.retract, MoveType.unretract, MoveType.seam,
     ];
     final totalLen = t.lengthByRole.fold<double>(0, (a, b) => a + b);
+    final totalWeightG = t.gramsFromExtrudedMm(t.extrudedMm);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -704,10 +739,16 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
               children: [
                 const SizedBox(width: 20 + 20),   // eye + swatch
                 Expanded(flex: 4, child: Text(l.lineTypeNameHeader)),
-                SizedBox(width: 72,
+                SizedBox(width: 64,
+                    child: Text(l.lineTypeTimeHeader,
+                        textAlign: TextAlign.right)),
+                SizedBox(width: 68,
                     child: Text(l.lineTypeLengthHeader,
                         textAlign: TextAlign.right)),
-                SizedBox(width: 52,
+                SizedBox(width: 56,
+                    child: Text(l.lineTypeWeightHeader,
+                        textAlign: TextAlign.right)),
+                SizedBox(width: 44,
                     child: Text(l.lineTypePercentHeader,
                         textAlign: TextAlign.right)),
               ],
@@ -718,7 +759,9 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           _legendRow(
             name: l.roleLabel(r),
             color: Color(OrcaPalette.roleColor[r]!),
+            timeSec: t.timeByRole[r.index],
             lengthMm: t.lengthByRole[r.index],
+            weightG: t.gramsForRole(r.index),
             percent: totalLen > 0
                 ? t.lengthByRole[r.index] / totalLen * 100
                 : 0,
@@ -739,7 +782,12 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
           _legendRow(
             name: l.moveLabel(m),
             color: Color(OrcaPalette.moveColor[m]!),
-            lengthMm: null,   // move-type lengths are not tracked here
+            // Move-type lengths / weights are not tracked; time
+            // is (travels and retracts carry real wall-clock
+            // cost, which Orca counts).
+            timeSec: _timeForMove(t, m),
+            lengthMm: null,
+            weightG: null,
             percent: null,
             visible: _visibleMoves.contains(m),
             onToggle: (v) {
@@ -753,14 +801,77 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
               _rebuildScene();
             },
           ),
+        const SizedBox(height: 10),
+        _totalEstimation(l, totalLengthMm: totalLen,
+            totalWeightG: totalWeightG, totalTimeSec: t.totalTimeSec),
       ],
+    );
+  }
+
+  // Sum per-move time filtered to a specific move-type. The
+  // parser already sums per-role (which covers extrudes), but
+  // travels / retracts / wipes are not role-coded, so their
+  // time still lives on the move-type dimension of each record.
+  double _timeForMove(Toolpaths t, MoveType m) {
+    final bd = ByteData.sublistView(t.data);
+    double sum = 0;
+    for (int i = 0; i < t.moveCount; ++i) {
+      final o = i * hsptRecordSize;
+      if (bd.getUint8(o + 2) != m.index) continue;
+      sum += bd.getFloat32(o + 28, Endian.little);
+    }
+    return sum;
+  }
+
+  // Orca's "Total estimation" box in the lower right. We follow
+  // the same layout — total filament metres + grams on one line,
+  // total time on the next.
+  Widget _totalEstimation(ToolpathLayerViewLabels l,
+      {required double totalLengthMm,
+       required double totalWeightG,
+       required double totalTimeSec}) {
+    final theme = Theme.of(context);
+    final filamentLine = '${(totalLengthMm / 1000).toStringAsFixed(2)} m '
+        '· ${totalWeightG.toStringAsFixed(2)} g';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(l.totalEstimation, style: theme.textTheme.titleSmall),
+          const SizedBox(height: 4),
+          _totalEstimationRow(l.totalFilament, filamentLine),
+          _totalEstimationRow(l.totalPrintTime, _fmtDuration(totalTimeSec)),
+        ],
+      ),
+    );
+  }
+
+  Widget _totalEstimationRow(String label, String value) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 1),
+      child: Row(
+        children: [
+          Expanded(child: Text(label, style: theme.textTheme.bodySmall)),
+          Text(value,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(fontFamily: 'monospace')),
+        ],
+      ),
     );
   }
 
   Widget _legendRow({
     required String name,
     required Color color,
+    required double? timeSec,
     required double? lengthMm,
+    required double? weightG,
     required double? percent,
     required bool visible,
     required ValueChanged<bool> onToggle,
@@ -785,7 +896,16 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
                   color: visible ? null : Colors.white38),
                 overflow: TextOverflow.ellipsis),
             ),
-            SizedBox(width: 72,
+            SizedBox(width: 64,
+              child: Text(
+                timeSec == null ? '—' : _fmtDuration(timeSec),
+                textAlign: TextAlign.right,
+                style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    color: visible ? null : Colors.white38),
+              ),
+            ),
+            SizedBox(width: 68,
               child: Text(
                 lengthMm == null
                     ? '—'
@@ -796,7 +916,18 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
                     color: visible ? null : Colors.white38),
               ),
             ),
-            SizedBox(width: 52,
+            SizedBox(width: 56,
+              child: Text(
+                weightG == null
+                    ? '—'
+                    : '${weightG.toStringAsFixed(2)} g',
+                textAlign: TextAlign.right,
+                style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    color: visible ? null : Colors.white38),
+              ),
+            ),
+            SizedBox(width: 44,
               child: Text(
                 percent == null ? '—' : '${percent.toStringAsFixed(1)} %',
                 textAlign: TextAlign.right,
@@ -974,7 +1105,7 @@ class _ToolpathTopDownPainter extends CustomPainter {
     double px = 0, py = 0;
     bool hasPrev = false;
     for (int i = (from > 0 ? from - 1 : from); i < to; ++i) {
-      final o = i * 28;
+      final o = i * hsptRecordSize;
       final mc = bd.getUint8(o + 2);
       final rc = bd.getUint8(o);
       final x = bd.getFloat32(o + 12, Endian.little);

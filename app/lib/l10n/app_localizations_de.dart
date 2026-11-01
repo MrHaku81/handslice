@@ -288,10 +288,25 @@ class AppLocalizationsDe extends AppLocalizations {
   String get layerLineTypeName => 'Typ';
 
   @override
+  String get layerLineTypeTime => 'Zeit';
+
+  @override
   String get layerLineTypeLength => 'Länge';
 
   @override
+  String get layerLineTypeWeight => 'Gewicht';
+
+  @override
   String get layerLineTypePercent => '%';
+
+  @override
+  String get layerTotalEstimation => 'Gesamtabschätzung';
+
+  @override
+  String get layerTotalFilament => 'Filament gesamt';
+
+  @override
+  String get layerTotalPrintTime => 'Druckzeit gesamt';
 
   @override
   String get projectPlateLabelTextured => 'A · Strukturiert — 256×256×256 mm³';

@@ -1,16 +1,18 @@
-// Pflicht 7c — parser for the HSPT (handslice toolpaths)
+// Pflicht 7c/7d — parser for the HSPT (handslice toolpaths)
 // binary that `handslice-cli --export-toolpaths` writes next
 // to the g-code (or standalone via `--input-gcode`).
 //
-// Format (little-endian throughout):
+// Format v2 (little-endian throughout):
 //
-//   Header (16 B):
-//     magic   = "HSPT"           (4 B)
-//     version = u32 1            (4 B)
-//     flags   = u32 0            (4 B, reserved)
-//     n_moves = u32              (4 B)
+//   Header (24 B):
+//     magic         = "HSPT"            (4 B)
+//     version       = u32 2             (4 B)
+//     flags         = u32 0             (4 B, reserved)
+//     n_moves       = u32               (4 B)
+//     density_g_cm3 = f32  (filament 0) (4 B)
+//     diameter_mm   = f32  (filament 0) (4 B)
 //
-//   Per-move record (28 B each):
+//   Per-move record (32 B each):
 //     u8  role            libslic3r ExtrusionRole (see [GcodeRole])
 //     u8  extruder        0..255
 //     u8  move_type       libslic3r EMoveType     (see [MoveType])
@@ -21,6 +23,9 @@
 //     u16 feedrate_mm_s   0..65535
 //     f32 x, y, z         mm
 //     f32 delta_extruder  mm, signed
+//     f32 time_s          Normal-mode time per move (post
+//                         TimeProcessor); sum == Orca's
+//                         "Total estimated time"
 //
 // The Dart g-code parser (`gcode_parser.dart`) stays as the
 // fallback for files that come without a sidecar HSPT.
@@ -78,9 +83,27 @@ enum MoveType {
   extrude,         // 10
 }
 
-const int _hspSize = 28;
+/// On-wire record size (bytes). Public so viewer code can stride
+/// into the raw buffer without duplicating the magic number.
+const int hsptRecordSize = 32;
 
-/// Compact result from the HSPT parser. The byte streams are
+/// On-wire header size (bytes).
+const int hsptHeaderSize = 24;
+
+/// Roles that count as the "model" for the silhouette / camera
+/// framing — skirt, brim, wipe tower and custom gcode paint
+/// outside the printed object and otherwise balloon the AABB
+/// (brim can be 10 mm wider than the model on each side, and
+/// the purge line sits off the bed entirely).
+bool _isObjectRole(int roleCode) {
+  if (roleCode == GcodeRole.skirt.index) return false;
+  if (roleCode == GcodeRole.brim.index) return false;
+  if (roleCode == GcodeRole.wipeTower.index) return false;
+  if (roleCode == GcodeRole.custom.index) return false;
+  return true;
+}
+
+/// Compact result from the HSPT parser. The byte stream is
 /// stored unmodified; accessors into the per-move fields read
 /// them lazily.
 class Toolpaths {
@@ -96,19 +119,40 @@ class Toolpaths {
     required this.maxY,
     required this.minZ,
     required this.maxZ,
+    required this.objMinX,
+    required this.objMaxX,
+    required this.objMinY,
+    required this.objMaxY,
+    required this.objMinZ,
+    required this.objMaxZ,
     required this.extrudedMm,
     required this.extrudedByRole,
     required this.lengthByRole,
+    required this.timeByRole,
+    required this.totalTimeSec,
+    required this.filamentDensityGcm3,
+    required this.filamentDiameterMm,
   });
 
-  /// Raw record stream. Length == `moveCount * 28`.
+  /// Raw record stream. Length == `moveCount * hsptRecordSize`.
   final Uint8List data;
   final int moveCount;
   final int layerCount;
   /// First record index for each layer, length == `layerCount`.
   final Uint32List layerStarts;
 
+  /// Whole-print AABB over extrude moves (incl. skirt/brim/
+  /// purge/wipe-tower). Used for render-level camera framing.
   final double minX, maxX, minY, maxY, minZ, maxZ;
+
+  /// Object-only AABB over extrude moves — excludes skirt,
+  /// brim, wipe tower and custom g-code so the "rest-of-the-
+  /// model" silhouette drawn above the slider matches what Orca
+  /// shows (purge line is to the side of the bed, brim is 10 mm
+  /// wider than the model; both would otherwise balloon the
+  /// box).
+  final double objMinX, objMaxX, objMinY, objMaxY, objMinZ, objMaxZ;
+
   /// Sum of per-move `delta_extruder`, filtered to
   /// `MoveType.extrude` and positive deltas. Matches Orca's
   /// `; filament used [mm]` footer within 0.01 % on the thumbnail
@@ -120,15 +164,65 @@ class Toolpaths {
   /// Per-role sum of Euclidean segment lengths (mm). What Orca
   /// shows as "Length" in the Line-Type legend.
   final Float64List lengthByRole;
+  /// Per-role sum of per-move `time_s` (Normal mode, seconds).
+  /// Not filtered to `MoveType.extrude` — travels count. Sum
+  /// across all roles plus the move-type bucket equals the
+  /// print's "Total estimated time".
+  final Float64List timeByRole;
+  /// Total print time (seconds), sum of per-move Normal-mode
+  /// time including all move types. Matches Orca's
+  /// "Total time" footer.
+  final double totalTimeSec;
+  /// Filament density (g/cm³) for extruder 0; comes from the
+  /// g-code's config block via `filament_density`.
+  final double filamentDensityGcm3;
+  /// Filament diameter (mm) for extruder 0; comes from
+  /// `filament_diameter`.
+  final double filamentDiameterMm;
+
   /// Z-height at the start of each layer, parallel to
-  /// `layerStarts`.
+  /// `layerStarts`. Set from the LAST non-custom extrude move of
+  /// each bin (mirrors Orca's `libvgcode::Layers::update`), so a
+  /// retract that still sits at the previous layer's z does not
+  /// mislabel the slider.
   final Float32List layerZ;
 
   int layerStart(int layer) => layerStarts[layer];
   int layerEnd(int layer) =>
       (layer + 1 < layerStarts.length) ? layerStarts[layer + 1] : moveCount;
 
-  // Accessors into the record stream. `_bd` is a `ByteData` view
+  /// Total filament length (mm) across all roles, which equals
+  /// Orca's "Total Filament" footer in metres.
+  double get totalLengthMm {
+    double s = 0;
+    for (final v in lengthByRole) {
+      s += v;
+    }
+    return s;
+  }
+
+  /// Volume per mm of extruded filament, derived from the
+  /// filament diameter (mm³/mm). Zero when the diameter was not
+  /// present in the HSPT header.
+  double get filamentMm3PerMm {
+    final r = filamentDiameterMm * 0.5;
+    return math.pi * r * r;
+  }
+
+  /// Convert an extruded length (mm of filament extruded) into
+  /// grams, using the HSPT's density/diameter. Zero when either
+  /// is missing.
+  double gramsFromExtrudedMm(double extrudedMm) {
+    final volMm3 = extrudedMm * filamentMm3PerMm;
+    // mm³ → cm³ then × g/cm³ = g.
+    return volMm3 * filamentDensityGcm3 * 1e-3;
+  }
+
+  /// Per-role weight in grams, derived from `extrudedByRole`.
+  double gramsForRole(int roleCode) =>
+      gramsFromExtrudedMm(extrudedByRole[roleCode]);
+
+  // Accessors into the record stream. `bd` is a `ByteData` view
   // created once per call site to keep the hot inner loop
   // branch-free.
   ByteData get bd => ByteData.sublistView(data);
@@ -152,6 +246,7 @@ class Move {
   double get y         => _bd.getFloat32(_offset + 16, Endian.little);
   double get z         => _bd.getFloat32(_offset + 20, Endian.little);
   double get deltaE    => _bd.getFloat32(_offset + 24, Endian.little);
+  double get timeS     => _bd.getFloat32(_offset + 28, Endian.little);
 
   GcodeRole get role => roleCode < GcodeRole.values.length
       ? GcodeRole.values[roleCode]
@@ -165,39 +260,54 @@ class Move {
 }
 
 Toolpaths _parseInline(Uint8List bytes) {
-  if (bytes.length < 16 ||
+  if (bytes.length < 8 ||
       bytes[0] != 0x48 || bytes[1] != 0x53 ||
       bytes[2] != 0x50 || bytes[3] != 0x54) {
     throw const FormatException('not an HSPT file');
   }
   final bd = ByteData.sublistView(bytes);
   final version = bd.getUint32(4, Endian.little);
-  if (version != 1) {
-    throw FormatException('unsupported HSPT version $version');
+  if (version != 2) {
+    throw FormatException(
+        'unsupported HSPT version $version (expected 2); re-slice to '
+        'regenerate the HSPT');
+  }
+  if (bytes.length < hsptHeaderSize) {
+    throw FormatException(
+        'HSPT truncated: have ${bytes.length}, expected at least '
+        '$hsptHeaderSize for the header');
   }
   final n = bd.getUint32(12, Endian.little);
-  final expected = 16 + n * _hspSize;
+  final density  = bd.getFloat32(16, Endian.little);
+  final diameter = bd.getFloat32(20, Endian.little);
+  final expected = hsptHeaderSize + n * hsptRecordSize;
   if (bytes.length != expected) {
     throw FormatException(
       'HSPT truncated: have ${bytes.length}, expected $expected');
   }
   // Pull the records out as its own view so a caller can keep
   // the Toolpaths after dropping the original bytes if they want.
-  final data = Uint8List.view(bytes.buffer, bytes.offsetInBytes + 16, n * _hspSize);
-  // Per-record pass: layers + bbox + extruded totals.
+  final data = Uint8List.view(
+      bytes.buffer, bytes.offsetInBytes + hsptHeaderSize,
+      n * hsptRecordSize);
+  // Per-record pass: layers + bbox + extruded totals + time.
   final rbd = ByteData.sublistView(data);
   final layerStarts = <int>[];
   final layerZ = <double>[];
   int lastLayerId = -1;
   double minX = double.infinity, minY = double.infinity, minZ = double.infinity;
   double maxX = -double.infinity, maxY = -double.infinity, maxZ = -double.infinity;
+  double objMinX = double.infinity, objMinY = double.infinity, objMinZ = double.infinity;
+  double objMaxX = -double.infinity, objMaxY = -double.infinity, objMaxZ = -double.infinity;
   double extruded = 0;
   final extrudedByRole = Float64List(GcodeRole.values.length);
   final lengthByRole   = Float64List(GcodeRole.values.length);
+  final timeByRole     = Float64List(GcodeRole.values.length);
+  double totalTime = 0;
   double px = 0, py = 0, pz = 0;
   bool hasPrev = false;
   for (int i = 0; i < n; ++i) {
-    final o = i * _hspSize;
+    final o = i * hsptRecordSize;
     final roleCode = rbd.getUint8(o);
     final moveCode = rbd.getUint8(o + 2);
     final layerId  = rbd.getUint16(o + 4, Endian.little);
@@ -205,9 +315,21 @@ Toolpaths _parseInline(Uint8List bytes) {
     final y = rbd.getFloat32(o + 16, Endian.little);
     final z = rbd.getFloat32(o + 20, Endian.little);
     final de = rbd.getFloat32(o + 24, Endian.little);
+    final tSec = rbd.getFloat32(o + 28, Endian.little);
+    totalTime += tSec;
+    final rc = roleCode < extrudedByRole.length
+        ? roleCode
+        : GcodeRole.none.index;
+    timeByRole[rc] += tSec;
     if (layerId != lastLayerId) {
       if (layerStarts.isEmpty || layerId > lastLayerId) {
         layerStarts.add(i);
+        // Placeholder; the FIRST extrude move of this bin will
+        // overwrite it below. Matches Orca's
+        // `libvgcode::Layers::update`: non-custom extrude moves
+        // own the layer's `z`; retracts and travels drag over
+        // from the previous layer's height and would mislabel
+        // the slider.
         layerZ.add(z);
         lastLayerId = layerId;
       }
@@ -216,11 +338,22 @@ Toolpaths _parseInline(Uint8List bytes) {
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+      if (_isObjectRole(roleCode)) {
+        if (x < objMinX) objMinX = x; if (x > objMaxX) objMaxX = x;
+        if (y < objMinY) objMinY = y; if (y > objMaxY) objMaxY = y;
+        if (z < objMinZ) objMinZ = z; if (z > objMaxZ) objMaxZ = z;
+        if (roleCode != GcodeRole.custom.index && layerStarts.isNotEmpty) {
+          // Track the layer's reference Z against the latest
+          // object-extrude. Needed because Orca's g-code emits
+          // `;LAYER_CHANGE` BEFORE the preceding retract, so
+          // the first record in a bin is a retract still at the
+          // previous layer's z (e.g. 10.2 mm instead of 10.4
+          // for layer 52).
+          layerZ[layerZ.length - 1] = z;
+        }
+      }
       if (de > 0) {
         extruded += de;
-        final rc = roleCode < extrudedByRole.length
-            ? roleCode
-            : GcodeRole.none.index;
         extrudedByRole[rc] += de;
         if (hasPrev) {
           final dx = x - px, dy = y - py, dz = z - pz;
@@ -235,6 +368,11 @@ Toolpaths _parseInline(Uint8List bytes) {
   if (minX == double.infinity) { minX = 0; maxX = 0; }
   if (minY == double.infinity) { minY = 0; maxY = 0; }
   if (minZ == double.infinity) { minZ = 0; maxZ = 0; }
+  if (objMinX == double.infinity) {
+    objMinX = minX; objMaxX = maxX;
+    objMinY = minY; objMaxY = maxY;
+    objMinZ = minZ; objMaxZ = maxZ;
+  }
   return Toolpaths(
     data: data,
     moveCount: n,
@@ -244,9 +382,16 @@ Toolpaths _parseInline(Uint8List bytes) {
     minX: minX, maxX: maxX,
     minY: minY, maxY: maxY,
     minZ: minZ, maxZ: maxZ,
+    objMinX: objMinX, objMaxX: objMaxX,
+    objMinY: objMinY, objMaxY: objMaxY,
+    objMinZ: objMinZ, objMaxZ: objMaxZ,
     extrudedMm: extruded,
     extrudedByRole: extrudedByRole,
     lengthByRole: lengthByRole,
+    timeByRole: timeByRole,
+    totalTimeSec: totalTime,
+    filamentDensityGcm3: density,
+    filamentDiameterMm: diameter,
   );
 }
 
@@ -372,7 +517,7 @@ layerXyBounds(Toolpaths t, int fromIdx, int toIdx) {
   double maxX = -double.infinity, maxY = -double.infinity;
   bool any = false;
   for (int i = fromIdx; i < toIdx; ++i) {
-    final o = i * _hspSize;
+    final o = i * hsptRecordSize;
     if (bd.getUint8(o + 2) != MoveType.extrude.index) continue;
     final x = bd.getFloat32(o + 12, Endian.little);
     final y = bd.getFloat32(o + 16, Endian.little);
@@ -392,7 +537,7 @@ Float64List extrusionLengthByRole(Toolpaths t) {
   double px = 0, py = 0, pz = 0;
   int lastMoveCode = -1;
   for (int i = 0; i < t.moveCount; ++i) {
-    final o = i * _hspSize;
+    final o = i * hsptRecordSize;
     final roleCode = bd.getUint8(o);
     final moveCode = bd.getUint8(o + 2);
     final x = bd.getFloat32(o + 12, Endian.little);

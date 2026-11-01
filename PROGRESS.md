@@ -18,6 +18,65 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 15:03 UTC – Pflicht 7d: silhouette, numbering, grid, legend totals
+
+Follow-up to the 04684c0 device test. Five fixes land here;
+the pipe-ribbon shader, in-layer slider and 67 MB stress test
+move to the next slot.
+
+- **Silhouette now uses the object AABB, not the whole-print
+  bbox.** The teal "model-still-to-come" box over the current
+  layer was sized by `t.minX..maxZ`, which includes the purge
+  line at (127, -1.2) and the 10 mm brim — so the box dwarfed
+  the model. New fields on `Toolpaths`: `objMinX..objMaxZ`,
+  computed only over extrude moves whose role is NOT skirt,
+  brim, wipe tower or custom. The silhouette is also dimmer
+  (0.22, 0.42, 0.42, 1) and thinner (0.3 mm) to read as faded,
+  since `flutter_scene`'s UnlitMaterial has no real alpha
+  channel to lean on.
+- **Layer numbering now matches Orca.** Our slider showed 53
+  at z = 10.40 mm; Orca's reference screenshot
+  (`local-test/orca-referenz-schicht52.png`) shows 52. Root
+  cause: HSPT bins 0..99 for a 100-layer cube, but each bin's
+  `layerZ` was set to the FIRST move's z — which is a retract
+  still at the previous layer's z (Orca emits `;LAYER_CHANGE`
+  before the trailing retract). So bin 52 was labelled z=10.4
+  when the extrudes actually land at 10.6. Parser now mirrors
+  `libvgcode::Layers::update` and uses the LAST non-custom
+  object-extrude's z. Pinned by a new test
+  (`layerZ tracks the latest object-extrude z, not retracts`)
+  and by a real-cube check that `layerZ[51] ≈ 10.40`.
+- **Plate label in Model view too.** `PlateView` grew a
+  `plateLabel` parameter and wraps the viewport in the same
+  "A · Textured — 256×256×256 mm³" overlay that `ToolpathLayer
+  View` already shows. Project screen passes the current bed
+  type.
+- **Bed grid.** `addBedToScene` now emits minor 10-mm and
+  major 50-mm grid lines (two `LineSegmentsGeometry`, unlit
+  `displayReferred` so the greys read as sRGB). Lives 0.03 mm
+  above the quad to beat depth-fighting. Both Model and Layer
+  views pick it up because they both call `addBedToScene`.
+- **Legend time + weight + totals.** HSPT bumped to **v2**
+  (header 24 B incl. filament density/diameter; per-record
+  32 B adding `f32 time_s`). CLI writes it from
+  `MoveVertex::time[Normal]` + `GCodeProcessorResult::
+  filament_densities[0]` / `filament_diameters[0]`. The Dart
+  parser rejects v1 with a clear error so a stale sidecar
+  surfaces instead of silently being misread. `Toolpaths`
+  grows `timeByRole`, `totalTimeSec`, `filamentDensityGcm3`,
+  `filamentDiameterMm` plus `gramsFromExtrudedMm()`. The
+  legend grows Time and Weight columns, and the role table is
+  followed by a Total-estimation box with "Total Filament
+  <m> m · <g> g" and "Total time <h/m/s>". The reference
+  screenshot's `1.17 m · 3.52 g · 9m25s` is the target; a new
+  test pins density/diameter populate on the thumbnail cube.
+
+Follow-ups queued for 7e:
+- Tubes with per-move width AND height (needs a custom
+  `LineSegmentsGeometry`-equivalent shader).
+- Range-within-layer slider + G-code excerpt.
+- 67 MB stress test on the Poco (parse time, RSS, FPS scrub).
+
 ## 2026-11-01 11:00 UTC – Pflicht 7c fixes: Orca-accurate colours + table legend
 
 Device test (`7b6ec2a`) said we were close but off on four
