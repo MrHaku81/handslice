@@ -17,7 +17,65 @@ Format pro Eintrag:
 
 ---
 
-(keine offenen Blocker)
+## #3 – Clang-Host-Build (Stufe 2b) scheitert an Toolchain-Mismatch  (2026-11-02, Phase C)
+
+**Symptom:** Ein x86_64-Linux-Host-Build von `libslic3r` + `handslice-cli`
+mit Clang (statt dem Default GCC 16) laesst sich mit den auf AMR5 vorhandenen
+Werkzeugen nicht sauber erzeugen. Zweck des Builds: Compiler-Hypothese zur
+arm64/x86-Byte-Divergenz pruefen (Klaus-Auftrag „Stufe 2b").
+
+**Probiert:**
+1. **System-Clang 23.1.4** (`/usr/bin/clang++`): bricht in
+   `src/libslic3r/AABBTreeLines.hpp:35` ab. Clang-23 ist strenger als GCC
+   bei der Template-Deduktion zwischen
+   `Eigen::CwiseUnaryOp<...>` und `Eigen::Matrix<...>` fuer
+   `distance_to_squared(point, a, b)`. Kein Patch an Orca-Upstream erlaubt
+   (CLAUDE.md Pkt. 2).
+2. **NDK clang-18** (`$HOME/android-sdk/ndk/27.3.13750724/.../clang++`,
+   Target per Default `x86_64-unknown-linux-gnu`, zieht aber die
+   System-libstdc++ von GCC 16): bricht in
+   `deps_src/admesh/stlinit.cpp` (bzw. im zugehoerigen Include-Pfad
+   `stl.h:222`) mit *"member access into incomplete type
+   `const __normal_iterator<...>`"* ab. Ursache ist eine bekannte
+   Inkompatibilitaet zwischen Clang<23 und GCC-16-libstdc++: in dem
+   trailing return type von `operator-(const __normal_iterator&, const
+   __normal_iterator&)` greift Clang auf `base()` zu, bevor
+   `__normal_iterator` als vollstaendig gilt. GCC compiliert das; Clang 18
+   nicht.
+
+**Beobachtet:**
+- System-Toolchains auf AMR5: nur **GCC 16.2.1** und **Clang 23.1.4**.
+  Weder gcc-14/15 noch clang-18/19/20 sind als Pakete installiert.
+- NDK clang-18 bringt eine **eigene libc++** mit
+  (`.../toolchains/llvm/prebuilt/linux-x86_64/lib/libc++.a`), die den
+  libstdc++-Bug umgehen wuerde. Aber: die Orca-x86-Deps
+  (`deps/build-x86/`) wurden mit GCC/libstdc++ gebaut; Mischung
+  libc++↔libstdc++ ergibt ABI-Mismatch an `std::string`/`std::vector` in
+  Boost-/TBB-Interfaces.
+- Keine Variante kommt bis an die eigentliche Divergenzfrage heran.
+
+**Vermutung:** Es gibt genau drei saubere Wege, Stufe 2b trotzdem zu
+klaeren:
+
+a) **Clang+libc++ ueberall**: Orca-Deps-Build zusaetzlich mit NDK-clang-18
+   +`-stdlib=libc++` nach `deps/build-x86-clang/` neu bauen (geschaetzt
+   30–60 min), dann libslic3r + CLI dagegen linken. Beantwortet Compiler
+   *und* Stdlib gemeinsam, nicht getrennt.
+b) **AUR/Container**: ein zweites gcc (z. B. gcc-14) oder clang (z. B.
+   clang-18) via AUR installieren bzw. in einem Toolbx-Container bauen.
+   Verletzt „Keine Aenderungen an System" (CLAUDE.md Pkt. 2), es sei denn
+   als Pacman-Paket genehmigt oder als Container.
+c) **Compiler-Experiment fallenlassen** und direkt auf Stufe 3+4 (Grep
+   nach `std::sort`/Pointer-Compare in libslic3r) ohne Clang-Vergleich
+   setzen.
+
+**Frage an Klaus:** Welchen der drei Wege darf Claude gehen? Default-Antwort
+„c) ueberspringen und Stufe 3 fortsetzen" ist bereits in Arbeit, so dass
+der Nachtlauf nicht leer bleibt.
+
+---
+
+(keine weiteren offenen Blocker)
 
 
 ---

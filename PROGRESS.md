@@ -18,6 +18,173 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 23:45 UTC – Divergenz Stufe 3: libslic3r-Kandidaten fuer solidInfill-Divergenz
+
+Aufgabe: in `src/libslic3r/` die Stellen finden, an denen (a) solidInfill-
+Inseln klassifiziert werden, (b) Flaechen-/Insel-Entscheidungen mit
+Float-Toleranzen fallen, (c) `std::sort`/Pointer-Compare mit
+Float-Gleichstand steht. **Nur Fund-Katalog**, nicht gefixt.
+
+### A. Narrow-vs-normal solidInfill-Klassifikation (direkteste Treffer)
+
+- **`src/libslic3r/Fill/Fill.cpp:597-630`** –
+  `split_solid_surface(size_t layer_id, const SurfaceFill &fill,
+  ExPolygons &normal_infill, ExPolygons &narrow_infill)`. Trennt
+  solidInfill-Flaechen in „schmal" (ipConcentricInternal) vs „normal"
+  (originaler Pattern) via Clipper-Morphologie:
+  `intersection(filled_area, opening(filled_area, scaled_spacing,
+  scaled_spacing))` (Z. 613). Entscheidung `if (inner_area.empty())` →
+  klassifiziert als „narrow" (Z. 615-618). **Hypothese:** 1 ULP
+  Unterschied in `scaled_spacing` (float→int-Cast) kippt
+  Opening-Ergebnis; dann sind auf arm64 andere Inseln „narrow" als auf
+  x86. Da Narrow mit `ipConcentricInternal` deutlich weniger und
+  kuerzere Segmente erzeugt als monotonic Rectilinear, wuerde das die
+  beobachteten −316 mm Filament auf der „niedrigen" Variante erklaeren
+  (nicht fehlendes Material, sondern Pattern-Switch mit kleinerem
+  Flaechen-Coverage).
+- **`src/libslic3r/Fill/Fill.cpp:1152-1186`** – Gate
+  `detect_narrow_internal_solid_infill`; ruft `split_solid_surface` auf
+  und reclassifiziert in `surface_fills[i].params.pattern =
+  ipConcentricInternal` bzw. splittet `surface_fills` in zwei
+  Eintraege.
+
+### B. SurfaceFillParams-Deduplication (set-Order-Flipper)
+
+- **`src/libslic3r/Fill/Fill.cpp:275-308`** – `SurfaceFillParams::operator<`
+  vergleicht 15 Float-Member: `bridge_angle`, `spacing`, `overlap`,
+  `angle`, `density`, `anchor_length`, `anchor_length_max`,
+  `flow.width()`, `flow.height()`, `flow.nozzle_diameter()`,
+  `role_speed`, `lateral_lattice_angle_1`, `lateral_lattice_angle_2`,
+  `infill_lock_depth`, `skin_infill_depth`, `infill_overhang_angle`.
+  Verwendet in `std::set<SurfaceFillParams> set_surface_params`
+  (Fill.cpp:833). **Hypothese:** 1 ULP-Unterschied in einem Member
+  macht aus zwei „identischen" Konfigs zwei getrennte Set-Eintraege →
+  mehr oder weniger `surface_fills`-Elemente auf arm64 vs x86. Jedes
+  zusaetzliche SurfaceFill emittiert einen eigenen Fill-Block mit
+  eigenem Pattern-Walk; Reihenfolge der Set-Iteration (Z. 1021) ist
+  die Reihenfolge, in der G-Code herauskommt.
+- **`src/libslic3r/Fill/Fill.cpp:1012-1016`** – Insertion: `auto
+  it_params = set_surface_params.find(params);` → bei FP-Tie wird
+  `params` als existierend betrachtet und nicht eingefuegt. Fliesst
+  dann in `region_to_surface_params[region_id][surface_idx] =
+  &(*it_params);` (Z. 1016) → **Pointer-Identitaet** haengt von der
+  set-Allocator-Reihenfolge ab, was spaetere Partition-Logik
+  beeinflussen koennte.
+
+### C. Sparse-infill-Anker / Bridge-over-infill-Sorting
+
+- **`src/libslic3r/PrintObject.cpp:3131`** – in
+  `PrintObject::bridge_over_infill()` (ab Z. 2468):
+  `std::sort(surfaces_by_layer[lidx].begin(),
+  surfaces_by_layer[lidx].end(), [](...) { return a.min.x() <
+  b.min.x(); });` sortiert Bruecken-Kandidaten nach BBox-Minimum. Fuer
+  symmetrische Modelle (z. B. Wuerfel) sind die BBox-Minimums
+  **identisch** → `std::sort` ist unstable, Reihenfolge ist
+  allocator-abhaengig.
+- **`src/libslic3r/PrintObject.cpp:3143`** – unmittelbar danach
+  `std::stable_sort` nach `(origin - a.min.cast<double>())
+  .squaredNorm()`. `squaredNorm()` ist `x*x + y*y`, prime FMA-Kandidat.
+  arm64 kann FMA, x86-GCC default auf `-ffp-contract=fast` auch — aber
+  die Reihenfolge der FMAs unterscheidet sich: arm64 ist eine Einzel-
+  Instruktion, x86 ist je nach Register-Allocation geplant. 1-ULP-Diff
+  im `squaredNorm` fuer zwei gleich-nah liegende Flaechen flippt die
+  Sortierung.
+
+### D. Perimeter-Order (Arachne, tie-aware, aber Fallback nicht idempotent)
+
+- **`src/libslic3r/Arachne/SkeletalTrapezoidation.cpp:1441-1467`** –
+  Sort von `std::vector<edge_t*>` mit expliziter Tie-Break-Logik auf
+  `distance_to_boundary` (coord_t, kein FP!). ABER: wenn der Fall
+  `// Ordering is not important` (Z. 1463) greift, faellt sie durch
+  und `std::sort` entscheidet implementation-defined. Fliesst in die
+  Perimeter-Reihenfolge → aendert extrusion-order, aber nicht
+  Material-Menge → wenig wahrscheinlich fuer solidInfill-316 mm, aber
+  moegliche Erklaerung fuer kleinere Byte-Diffs in Perimeter-Role.
+
+### E. Weitere Kandidaten (geringer prioritaet)
+
+- **`src/libslic3r/Fill/FillBase.cpp:2493`** und **2633** – `std::sort`
+  mit Pointer-Vergleich auf `l->cost > r->cost` (double). Ties fallen
+  implementation-defined aus.
+- **`src/libslic3r/Fill/FillRectilinear.cpp:2092-2093`** – `std::sort`
+  mit Lambda `[](const MapType &l, const MapType &r){ return l.first <
+  r.first; }` auf Pointer-Keys (`&segs[region.left.vline]
+  .intersections[region.left.low]`) → direkte Pointer-Sortierung,
+  haengt von Vektor-Allocation ab.
+
+### Hypothesen-Ranking fuer die arm64-„niedrige" Variante
+
+1. **A** (`split_solid_surface` + `opening`) ist der plausibelste
+   Treffer: erklaert mengenmaessig den −316 mm-Befund (Pattern-Switch
+   auf schmalere Fuellung), passt zur diffusen Streuung ueber 79 % der
+   Layer, und schlaegt zu bei JEDEM Lauf, nicht nur bei konkreten
+   Zellen.
+2. **B** (SurfaceFillParams-Set) ist wahrscheinlich fuer die
+   Reihenfolge-Abweichungen in anderen Rollen, aber alleine erklaert es
+   die solidInfill-Lueke nicht.
+3. **C** (bridge_over_infill-Sort) ist wahrscheinlich fuer
+   Bruecken-Role, nicht fuer solidInfill.
+
+### Naechste Entscheidung von Klaus
+
+Zwei Wege, Hypothese A zu testen (nicht hier umgesetzt):
+- **A1 Instrumentierung:** kurze Zaehler in `split_solid_surface`
+  nach Z. 615 (`inner_area.empty()`): Zahl der narrow- vs
+  normal-Klassifikationen pro Lauf vergleichen (arm64 1-thread
+  2 Laeufe + x86). Wenn arm64 bimodal, A ist bestaetigt.
+- **A2 Determinisierung:** `opening()` durch eine FP-tolerant
+  deterministische Variante ersetzen oder `scaled_spacing` auf
+  `coord_t`-Granularitaet runden, bevor `opening` aufgerufen wird.
+  Patch im Orca-Upstream nicht erlaubt → muss in CLI-Wrapper oder in
+  einem Shim passieren.
+
+Keine Umsetzung heute Nacht; wartet auf Klaus.
+
+---
+
+## 2026-11-01 23:25 UTC – Divergenz Stufe 2b: Clang-Host-Build geht nicht ohne Entscheidung (Blocker #3)
+
+Klaus hat Weg A (Allocator) verworfen und Stufe 2b beauftragt:
+„x86 mit Clang/libc++ bauen, Compiler-Hypothese isolieren". Mit den
+auf AMR5 installierten Toolchains laesst sich das nicht sauber bauen:
+
+1. **System-Clang 23.1.4**: scheitert an
+   `src/libslic3r/AABBTreeLines.hpp:35` (Eigen-Template-Deduktion
+   `CwiseUnaryOp` vs `Matrix` in `distance_to_squared`). Kein
+   Orca-Patch zulaessig.
+2. **NDK clang-18 + System-libstdc++16**: scheitert in
+   `deps_src/admesh/stlinit.cpp` → `stl.h:222` an einer bekannten
+   Inkompatibilitaet (`__normal_iterator<T>::operator-` trailing
+   return type, Clang<23 sieht die Klasse an der Stelle als
+   unvollstaendig).
+
+Verfuegbare Toolchains auf AMR5: nur GCC 16.2.1, Clang 23.1.4, NDK
+clang-18. Weder gcc-14/15 noch clang-18/19/20 als Pakete installiert.
+Die NDK-Clang hat zwar eine eigene libc++ dabei (deren Nutzung den
+libstdc++-Bug umgehen wuerde), aber die Orca-x86-Deps sind mit
+libstdc++ gebaut → ABI-Mismatch.
+
+**Konsequenz:** Nach CLAUDE.md Pkt. 3 (Drei-Versuche-Regel: 2
+substantiell verschiedene Toolchain-Versuche gescheitert) kein
+dritter blinder Versuch, sondern **Eintrag in `docs/blockers.md` #3**
+und Rueckfrage an Klaus. Drei Wege zur Auswahl:
+a) Clang+libc++ ueberall → Deps-Rebuild (~30–60 min),
+b) gcc-14/clang-18 ueber AUR oder Toolbx (System-Aenderung),
+c) Compiler-Experiment ueberspringen, direkt Stufe 3+4.
+
+Default waehrend Klaus schlaeft: **Weg c** — Stufe 3 (Grep in
+libslic3r nach solidInfill-Entscheidungen) laeuft weiter, damit der
+Nachtlauf nicht leer bleibt.
+
+**Belegstellen Fehler:**
+- Clang-23: `AABBTreeLines.hpp:35` → `no matching function for call
+  to 'distance_to_squared'` (6 Error-Instantiations im Build-Log).
+- NDK clang-18: `stl_iterator.h:1337` → `member access into
+  incomplete type` via `vector<Eigen::Matrix<...>>` in
+  `deps_src/admesh/stl.h:222`.
+
+---
+
 ## 2026-11-01 23:09 UTC – Divergenz Stufe 4 (nur Skizze): zwei Wege
 
 Klaus hat Stufe 4 explizit als "NICHT umsetzen, nur skizzieren"
