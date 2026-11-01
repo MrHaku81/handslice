@@ -221,7 +221,16 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
   void _rebuildScene() {
     final scene = _scene;
     if (scene == null || !_sceneReady) return;
-    scene.root.children.clear();
+    // IMPORTANT: `scene.root.children.clear()` only mutates the
+    // List<Node>; it does not run `Node.remove`'s unmount path,
+    // so the previous frame's `_renderItems` stay registered
+    // in `renderScene` and keep drawing. The slider then
+    // accumulates layers instead of replacing them — Klaus
+    // (b23e962 device run) saw the full cube + topSolidInfill
+    // at Layer 52 because of this. Use `removeAll()`, which
+    // calls `remove()` for each child and takes it out of the
+    // render scene.
+    scene.root.removeAll();
     addBedToScene(scene);
     final t = widget.toolpaths;
     if (t.moveCount == 0 || t.layerCount == 0) return;
@@ -270,43 +279,15 @@ class _ToolpathLayerViewState extends State<ToolpathLayerView> {
     required double widthMm,
     required int from, required int to,
   }) {
-    if (to <= from) return;
-    final bd = ByteData.sublistView(t.data);
-    // First pass: count matching segments.
-    int count = 0;
-    double px = 0, py = 0, pz = 0;
-    bool hasPrev = false;
-    for (int i = (from > 0 ? from - 1 : from); i < to; ++i) {
-      final o = i * hsptRecordSize;
-      final mc = bd.getUint8(o + 2);
-      final rc = bd.getUint8(o);
-      if (i >= from && hasPrev && mc == MoveType.extrude.index && rc == roleCode) {
-        count++;
-      }
-      hasPrev = true;
-      px = bd.getFloat32(o + 12, Endian.little);
-      py = bd.getFloat32(o + 16, Endian.little);
-      pz = bd.getFloat32(o + 20, Endian.little);
-    }
-    if (count == 0) return;
-    final out = Float32List(count * 6);
-    int oIdx = 0;
-    hasPrev = false;
-    for (int i = (from > 0 ? from - 1 : from); i < to; ++i) {
-      final o = i * hsptRecordSize;
-      final mc = bd.getUint8(o + 2);
-      final rc = bd.getUint8(o);
-      final x = bd.getFloat32(o + 12, Endian.little);
-      final y = bd.getFloat32(o + 16, Endian.little);
-      final z = bd.getFloat32(o + 20, Endian.little);
-      if (i >= from && hasPrev && mc == MoveType.extrude.index && rc == roleCode) {
-        out[oIdx    ] = px; out[oIdx + 1] = py; out[oIdx + 2] = pz;
-        out[oIdx + 3] = x;  out[oIdx + 4] = y;  out[oIdx + 5] = z;
-        oIdx += 6;
-      }
-      px = x; py = y; pz = z;
-      hasPrev = true;
-    }
+    // `buildRoleSegments` is the pure-Dart equivalent of what we
+    // used to inline here. Keeping the two in sync via a single
+    // helper lets `toolpath_parser_test.dart` pin the exact
+    // position stream fed to the renderer for any slider
+    // position, so bugs like the b23e962 scene-accumulation
+    // regression surface in CI rather than on the device.
+    final out = buildRoleSegments(t,
+        roleCode: roleCode, fromIdx: from, toIdx: to);
+    if (out.isEmpty) return;
     final data = fscene.LineSegmentData(positions: out);
     final geom = fscene.LineSegmentsGeometry(data, width: widthMm);
     // `displayReferred = true` treats `baseColorFactor` as the

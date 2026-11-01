@@ -592,6 +592,60 @@ void main() {
     });
 
     test(
+        'scene emit: positions handed to the renderer at Layer 1/52/100 obey the slider',
+        () async {
+      if (!hspt.existsSync()) return;
+      final t = await loadToolpaths(hspt.path);
+      // We check Layer 1 (first), 52 (reference screenshot),
+      // and 100 (last). For each: iterate every role, compute
+      // the exact Float32List of positions `_emitRole` builds,
+      // and verify (a) role 6 topSolidInfill is empty before
+      // Layer 100 — Klaus' b23e962 bug saw a bright-red top
+      // surface at Layer 52 — and (b) the max Z across every
+      // role never exceeds `layerZ[current0]`, which is the Z
+      // of the current slider position.
+      Future<void> check(int displayedLayer) async {
+        final current0 = displayedLayer - 1;
+        final endOfCurrent = t.layerEnd(current0);
+        final zLimit = t.layerZ[current0];
+        int totalSegments = 0;
+        for (final r in GcodeRole.values) {
+          final seg = buildRoleSegments(t,
+              roleCode: r.index, fromIdx: 0, toIdx: endOfCurrent);
+          totalSegments += seg.length ~/ 6;
+          if (seg.isEmpty) continue;
+          final maxZ = maxZOfSegments(seg);
+          // Allow a 0.01-mm cushion for the ancestor-segment
+          // anchor (the "one record before `from`" trick in
+          // `_emitRole`) and float noise.
+          expect(maxZ, lessThanOrEqualTo(zLimit + 0.01),
+              reason:
+                  'Layer $displayedLayer: segments for role '
+                  '${r.name} land at maxZ=$maxZ, slider says '
+                  'z<=$zLimit — scene is drawing above the '
+                  'slider');
+          // Role-6 (topSolidInfill, bright red 0xFFF04040) is
+          // the smoking gun from the device test: it only
+          // appears near the top of the cube, so it must be
+          // empty when `endOfCurrent` cuts off before layer 100.
+          if (r == GcodeRole.topSolidInfill && displayedLayer < 100) {
+            expect(seg.length, 0,
+                reason:
+                    'Layer $displayedLayer: topSolidInfill '
+                    'segments must not render below the top of '
+                    'the cube');
+          }
+        }
+        // Smoke-check so an all-zero return does not pass.
+        expect(totalSegments, greaterThan(0),
+            reason: 'Layer $displayedLayer should emit segments');
+      }
+      await check(1);
+      await check(52);
+      await check(100);
+    });
+
+    test(
         'at Layer 52 the dominant drawn role is internalInfill (red)',
         () async {
       if (!hspt.existsSync()) return;

@@ -290,7 +290,9 @@ class _PlateViewState extends State<PlateView> {
     final scene = _scene;
     if (scene == null) return;   // Flutter GPU not available on this host
     final mesh = _mesh;
-    scene.root.children.clear();
+    // `children.clear()` does not unmount — see ToolpathLayer
+    // View._rebuildScene for why.
+    scene.root.removeAll();
     _addPlate(scene);
     if (mesh == null) return;
     final tintR = widget.filamentColor.r;

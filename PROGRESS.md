@@ -18,6 +18,55 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 16:56 UTC – Pflicht 7d (follow-up 5): fix scene accumulation (children.clear ≠ unmount)
+
+Klaus (b23e962 device run) saw the whole cube — notch,
+`topSolidInfill` surface and all — at slider Layer 52, even
+though parser-side invariants swore nothing with
+`layer_id > 51` was being emitted. Root-caused as a
+flutter_scene API misuse.
+
+- **Root cause.** `scene.root.children.clear()` is a plain
+  `List<Node>.clear()`; it does **not** run `Node.remove`'s
+  unmount path. The old `_renderItems` stay registered in
+  `renderScene` and keep drawing. Every slider change
+  therefore STACKED the new layer on top of the previous
+  one. Since `initState` sets `_currentLayer = layerCount -
+  1` (= Layer 100), the very first frame registered the full
+  print; subsequent drags added more segments without
+  taking the Layer 100 ones out. Reference in flutter_scene
+  0.24.3: `src/node.dart:1341-1352` (`remove(child)` calls
+  `child._unmount()`), `:1355-1358` (`removeAll()` iterates
+  `remove`), vs. `:1286` (`children` is just a `List<Node>`
+  with no behavior).
+- **Fix.** `scene.root.removeAll()` in all four scene-owning
+  callsites:
+    - `widgets/toolpath_layer_view.dart:_rebuildScene`
+    - `widgets/layer_view.dart:_rebuildScene`
+    - `widgets/plate_view.dart:_rebuildScene`
+    - `screens/plate_bench_screen.dart:_rebuildSceneUnsafe`
+- **Scene-level pin.** Extracted the per-role segment-build
+  into a pure helper `buildRoleSegments(t, roleCode, from,
+  to)` in `toolpath_parser.dart`. `_emitRole` now calls it —
+  one path, so the test exercises what the renderer sees.
+  New test `scene emit: positions handed to the renderer at
+  Layer 1/52/100 obey the slider` iterates every role, pins:
+    - `maxZ(positions) ≤ layerZ[current0] + 0.01` for every
+      role at every tested slider position.
+    - `topSolidInfill` (bright red `0xFFF04040`) emits
+      **zero** segments at Layer 52 — the smoking gun from
+      the device test.
+- **Device gegenprobe.** Pre-fix `adb exec-out screencap`
+  captured Klaus' chat app foreground (not Handslice), so no
+  usable before/after was gathered on this run. The fix
+  landed anyway because the parser-level + scene-level
+  invariants both pin it.
+- **No API change.** Only internal `_emitRole` signature was
+  thinned; `buildRoleSegments` is additive and tested.
+
+Test headline: 178 of 178 pass (added 1). CLIs rebuilt at
+b23e962+1 and the APK installed on the Poco. Nothing pushed.
+
 ## 2026-11-01 16:30 UTC – Pflicht 7d (follow-up 4): confirm no layer cap, sweep Auryn (1045 layers)
 
 Klaus asked whether the layer-view has a hard upper limit and

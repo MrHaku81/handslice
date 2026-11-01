@@ -159,6 +159,50 @@ hook, so we cannot fire a 20 %-alpha fill today. Porting
 the real mesh is tracked under "pipe-ribbon shader" in the
 7e backlog, since both items need a custom shader anyway.
 
+### Scene reset — use `removeAll()`, never `children.clear()`
+
+flutter_scene's `Node.children` is a plain `List<Node>`.
+Mutating it directly (`.clear()`, `.removeAt(i)`) does **not**
+run the unmount path: the node stays registered in
+`renderScene._renderItems` and the renderer keeps drawing it.
+On a slider change you then stack the new layer on top of
+the previous one — Klaus (b23e962 device run) saw the full
+cube plus the bright-red top-surface infill at Layer 52 for
+exactly this reason, even though
+`maxLayerIdIn(0, layerEnd(51)) ≤ 51` holds in the parser.
+
+The fix is to call `scene.root.removeAll()`, which in turn
+calls `remove(child)` on every child (`flutter_scene/.../
+src/node.dart:1355-1358`). `remove` is the API that unmounts
+the child from the renderer (`node.dart:1341-1352`:
+`child._unmount()`). We ban the direct `.clear()` call in all
+four of our scene-owning widgets:
+
+- `widgets/toolpath_layer_view.dart` → the HSPT-backed Layer
+  preview that regressed.
+- `widgets/layer_view.dart` → fallback Dart-g-code preview.
+- `widgets/plate_view.dart` → Project tab's Model view.
+- `screens/plate_bench_screen.dart` → the plate-view
+  benchmark.
+
+A scene-level test
+(`scene emit: positions handed to the renderer at Layer
+1/52/100 obey the slider`) pins the exact `Float32List`
+positions `_emitRole` hands to `LineSegmentsGeometry` at
+three slider positions. For every role it enforces:
+
+- `maxZ(seg) ≤ layerZ[current0] + 0.01` — nothing above the
+  slider is in the vertex stream.
+- At Layer 52 the `topSolidInfill` role (`0xFFF04040`,
+  bright red) emits **zero** segments, because the HSPT
+  places no top-surface moves in bins ≤ 51.
+
+The view's `_emitRole` is now a thin shim around the pure
+helper `buildRoleSegments(Toolpaths, roleCode, from, to)` in
+`toolpath_parser.dart`, so the test exercises the exact code
+path the renderer uses — not a reimplementation that could
+drift.
+
 ### What is drawn vs skipped at each slider position
 
 The `_rebuildScene` loop clamps records to

@@ -548,6 +548,69 @@ int colorForMove(int roleCode, int moveCode) {
   return OrcaPalette.moveColor[mt] ?? 0xFFCCCCCC;
 }
 
+/// Walk the record stream between `[fromIdx, toIdx)` and return
+/// the per-vertex position stream (6 floats per segment: p0.xyz,
+/// p1.xyz) for every pair of consecutive records whose SECOND
+/// record is an extrude with the requested role. The one record
+/// before `fromIdx` (if present) serves as the segment anchor so
+/// a role's first extrude in the window connects to the previous
+/// position rather than being dropped.
+///
+/// This is the exact filter the view's `_emitRole` uses to build
+/// a `LineSegmentsGeometry`. Exposed so tests can pin the vertex
+/// stream handed to the renderer without having to spin up
+/// Impeller.
+Float32List buildRoleSegments(Toolpaths t,
+    {required int roleCode, required int fromIdx, required int toIdx}) {
+  if (toIdx <= fromIdx) return Float32List(0);
+  final bd = ByteData.sublistView(t.data);
+  int count = 0;
+  bool hasPrev = false;
+  for (int i = (fromIdx > 0 ? fromIdx - 1 : fromIdx); i < toIdx; ++i) {
+    final o = i * hsptRecordSize;
+    final mc = bd.getUint8(o + 2);
+    final rc = bd.getUint8(o);
+    if (i >= fromIdx && hasPrev &&
+        mc == MoveType.extrude.index && rc == roleCode) {
+      count++;
+    }
+    hasPrev = true;
+  }
+  if (count == 0) return Float32List(0);
+  final out = Float32List(count * 6);
+  int oIdx = 0;
+  double px = 0, py = 0, pz = 0;
+  hasPrev = false;
+  for (int i = (fromIdx > 0 ? fromIdx - 1 : fromIdx); i < toIdx; ++i) {
+    final o = i * hsptRecordSize;
+    final mc = bd.getUint8(o + 2);
+    final rc = bd.getUint8(o);
+    final x = bd.getFloat32(o + 12, Endian.little);
+    final y = bd.getFloat32(o + 16, Endian.little);
+    final z = bd.getFloat32(o + 20, Endian.little);
+    if (i >= fromIdx && hasPrev &&
+        mc == MoveType.extrude.index && rc == roleCode) {
+      out[oIdx    ] = px; out[oIdx + 1] = py; out[oIdx + 2] = pz;
+      out[oIdx + 3] = x;  out[oIdx + 4] = y;  out[oIdx + 5] = z;
+      oIdx += 6;
+    }
+    px = x; py = y; pz = z;
+    hasPrev = true;
+  }
+  return out;
+}
+
+/// Max Z across every vertex in a position stream produced by
+/// [buildRoleSegments]. Returns `-infinity` for an empty stream.
+double maxZOfSegments(Float32List positions) {
+  double max = double.negativeInfinity;
+  for (int i = 2; i < positions.length; i += 3) {
+    final v = positions[i];
+    if (v > max) max = v;
+  }
+  return max;
+}
+
 /// Return the maximum `layer_id` of any record in the range
 /// `[fromIdx, toIdx)`. Used by tests to pin "the view at Layer
 /// N draws nothing with layer_id > N-1".

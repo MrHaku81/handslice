@@ -334,7 +334,10 @@ class _PlateBenchScreenState extends State<PlateBenchScreen> {
   }
 
   void _rebuildSceneUnsafe(HspmFile mesh) {
-    _scene.root.children.clear();
+    // `children.clear()` leaves nodes mounted in the render
+    // scene; `removeAll()` is the correct unmount path. See
+    // ToolpathLayerView._rebuildScene for the full story.
+    _scene.root.removeAll();
     if (_mode != RendererMode.flutterScene) return;
     // 1. The CC2 bed (256×256 at z=0). Only four vertices, so we
     //    keep using GeometryBuilder for brevity.

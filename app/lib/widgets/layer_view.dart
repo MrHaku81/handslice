@@ -190,7 +190,10 @@ class _LayerViewState extends State<LayerView> {
   void _rebuildScene() {
     final scene = _scene;
     if (scene == null || !_sceneReady) return;
-    scene.root.children.clear();
+    // `children.clear()` leaves nodes mounted in the render
+    // scene — see the long comment in ToolpathLayerView._rebuild
+    // Scene. `removeAll()` is the correct unmount path.
+    scene.root.removeAll();
     // CC2 bed — same shared quad PlateView uses.
     addBedToScene(scene);
     final g = widget.geometry;
