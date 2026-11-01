@@ -18,6 +18,80 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 23:03 UTC – Divergenz Stufe 2: Scudo-Allocator-Hypothese widerlegt
+
+**Scudo-Setup**: `/usr/lib/clang/23/lib/linux/libclang_rt.scudo_
+standalone-x86_64.so` via `LD_PRELOAD`. Scudo ist der Allocator, den
+Android ab API 30 standardmässig fuer Native-Code benutzt und mit
+Address-Randomisierung + Chunk-Shuffling arbeitet. Hypothese
+(Klaus): Scudo veraendert Pointer-Adressen zwischen Prozess-Starts,
+Orca entscheidet Gleichstaende an irgendeiner Stelle nach Zeiger-
+wert → arm64 wird non-deterministisch, waehrend glibc (AMR5) stabile
+Adressen vergibt.
+
+**Messungen** (x86 CLI unveraendert, nur `LD_PRELOAD`):
+
+Würfel 10×:
+- Alle 10 Laeufe → sha `92951c26…` (GUI-Referenz).
+- Zeit 0.77-0.79 s (= Default-Niveau).
+- 8479 Zeilen EXECUTABLE_BLOCK, 1177.151 mm Filament.
+
+Auryn 3× (Scudo):
+
+| Lauf | Zeit | Zeilen | Filament | sha |
+|------|------|--------|----------|-----|
+| 1 | 25 s | 2 826 766 | 39 223.579 mm | `adefd3a51a…` |
+| 2 | 24 s | 2 826 766 | 39 223.579 mm | `adefd3a51a…` |
+| 3 | 25 s | 2 826 766 | 39 223.579 mm | `adefd3a51a…` |
+
+Alle drei Laeufe byte-identisch zum x86-Default-Slice. **Scudo bricht
+die x86-Determinismus NICHT.** Hypothese "Scudo-Randomisierung
+verursacht die arm64-Divergenz" ist durch dieses Experiment **nicht
+gestuetzt**.
+
+Was das NICHT widerlegt:
+- Scudo laeuft hier als Preload auf einem glibc-Prozess; es gibt
+  weiterhin `malloc`-Pfade die durch glibc gehen (z. B.
+  `__libc_malloc`-Aufrufer die symbolisch an glibc gebunden sind).
+  Vollstaendige Scudo-only-Umgebung braeuchte einen statischen Build.
+- ASLR auf dem AMR5-Host koennte abgeschaltet sein (`cat /proc/sys/
+  kernel/randomize_va_space` nicht gecheckt).
+- Scudo randomisiert innerhalb seines Chunk-Managers, aber die mmap-
+  basierte grosse-Allocation-Logik koennte dennoch deterministisch
+  sein. Orcas 2.1 M Moves bestehen aus vielen grossen std::vector,
+  nicht aus vielen kleinen heap-Objekten.
+
+Trotz dieser Einschraenkungen: die eigentliche Hypothese
+"Allocator-Randomisierung reicht aus, um die arm64-Bimodalitaet zu
+reproduzieren" ist mit dem direkt verfuegbaren Mittel **nicht
+belegbar**.
+
+### Andere Kandidaten (unbewiesen)
+
+- **Clang vs. GCC Codegen bei equal-metric floats**: Clang und GCC
+  erzeugen bei `A < B`-Vergleichen und `std::sort` auf float-
+  Compare-Funktionen leicht unterschiedlichen Code. Bei
+  mathematisch gleichen Werten kann die Reihenfolge der Vergleiche
+  zu anderen Tie-Break-Entscheidungen fuehren.
+- **arm64-Memory-Ordering (weak memory model)**: TBB nutzt
+  Atomics; bei relaxed-Ordering koennen auf arm64 Reihenfolgen
+  entstehen, die auf x86 (TSO) nicht moeglich sind. Innerhalb
+  einer Single-Threaded-Arena (unser `--threads 1`-Fall) sollte
+  das aber nicht mehr greifen; dass arm64 trotzdem nicht
+  reproduzierbar ist, spricht gegen diesen Kandidaten.
+- **NDK libc++ `std::sort`-Instabilitaet**: NDK libc++ verwendet
+  die ChatGPT-weit bekannt instabile introsort-Variante. Bei
+  gleichen Keys ist das Ergebnis nicht spezifiziert und kann
+  compiler/laufzeit-abhaengig anders ausfallen als GCC's libstdc++
+  Intro-Sort. Das waere konsistent mit Runde 2's
+  `std::sort`-Vermutung aus `engine-integration.md:665-673`.
+
+Reference-Test nach dieser Stufe:
+`92951c26…` matches, 8479 Zeilen. Green.
+
+Keine Code- oder Build-Aenderung in dieser Stufe. Reines Mess-
+Experiment.
+
 ## 2026-11-01 22:57 UTC – Divergenz Stufe 1: Auswirkung je Wegtyp am Druckteil
 
 Nachtauftrag von Klaus, alles am AMR5. Stufe 1 vor Stufe 2.
