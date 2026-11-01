@@ -18,6 +18,109 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-01 22:57 UTC – Divergenz Stufe 1: Auswirkung je Wegtyp am Druckteil
+
+Nachtauftrag von Klaus, alles am AMR5. Stufe 1 vor Stufe 2.
+
+Reference-Test (`engine/test/run-reference-test.sh`) vorab:
+`92951c26…` matches, 8479 Zeilen. Green bevor und nach dieser Stufe.
+
+### Verfügbare G-Codes (keine neuen erzeugt, nur analysiert)
+
+Alle über `handslice-cli --input-gcode <gcode> --export-toolpaths <hspt>`
+auf HSPT umgewandelt, dann aggregiert.
+
+| Datei | Beschreibung | sha (prefix) | Filament footer |
+|-------|-------------|--------------|-----------------|
+| `/tmp/x86-def.gcode` + `/tmp/x86-t1/2/4.gcode` | x86 Default + --threads 1/2/4 | `92951c26…` | 1177.15 mm |
+| `/tmp/div-arm64/cube.gcode` | arm64 Würfel, Default-Variante A | `a30ffec3…` | 1177.15 mm |
+| `/tmp/div-x86/auryn.gcode` + `/tmp/auryn-x86-t1.gcode` | x86 Auryn (Default & --threads 1 identisch) | `adefd3a5…` | 39 223.58 mm |
+| `/tmp/div-arm64/auryn.gcode` | arm64 Auryn, "niedrige" Variante aus Runde 1 | `8a50e806…` | 38 906.85 mm |
+| `/tmp/div-arm64/auryn-repro.gcode` | arm64 Auryn, "hohe" Variante Runde 3 | `e4f28cab…` | 39 220.36 mm |
+| `/tmp/auryn-arm64-t1.gcode` | arm64 Auryn, --threads 1 Lauf 1 | `ab0704c7…` | 38 903.29 mm |
+
+**Nicht verfügbar** (kein Poco in der Nachtschicht): die zweite stabile
+Würfel-Variante B (`7c88f484…`, 8321 Z). Keine Ersatz-Datei erzeugt
+wie von Klaus angewiesen.
+
+### Ergebnis Würfel — reine Reihenfolge
+
+| Rolle | x86 Filament | arm64 A Filament | Δ |
+|-------|--------------|------------------|---|
+| perimeter (inner wall) | 239.607 mm (396 moves) | 239.607 mm (396) | 0.000 |
+| externalPerimeter (outer wall) | 233.772 mm (400) | 233.772 mm (400) | 0.000 |
+| internalInfill | 452.707 mm (1564) | 452.707 mm (1564) | 0.000 |
+| solidInfill | 137.138 mm (687) | 137.138 mm (687) | 0.000 |
+| topSolidInfill | 31.749 mm (70) | 31.749 mm (70) | 0.000 |
+| bottomSurface | 25.523 mm (105) | 25.523 mm (105) | 0.000 |
+| internalBridgeInfill | 35.856 mm (112) | 35.856 mm (112) | 0.000 |
+| custom (Purge) | 20.800 mm (2) | 20.800 mm (2) | 0.000 |
+| **TOTAL extrude** | **1177.151 mm (3336)** | **1177.152 mm (3336)** | **+0.001 mm** |
+
+Zeiten identisch auf 0.00 s. Alle 3336 Extrude-Moves gleich zahl-
+reich. **Am Würfel ist arm64-A inhaltsgleich zum x86-Slice; nur die
+*Reihenfolge* der G-Code-Zeilen unterscheidet sich** (Rotations-
+Spiegel wie seit `engine-integration.md:655-658` dokumentiert).
+Reproduzierte 27 B grössere Datei kommt aus 3 zusätzlichen
+Non-Extrude-Moves (Travel/Wipe), die den Druckteil nicht ändern.
+
+### Ergebnis Auryn — die zwei "arm64-Varianten" sind inhaltlich
+unterschiedlich
+
+Vergleich x86-Default (`adefd3a5…`) vs. drei arm64-Varianten:
+
+| Variante / Rolle | solidInfill mm | Δ zu x86 | solidInfill Moves | Δ Moves |
+|------------------|---------------|----------|-------------------|---------|
+| x86 Default | 6080.342 | — | 420 030 | — |
+| arm64 "hoch" `e4f28cab…` | 6077.205 | **−3.137** | 420 639 | +609 |
+| arm64 "niedrig-A" `8a50e806…` | 5763.702 | **−316.640** | 396 714 | **−23 316** |
+| arm64 "niedrig-B" `ab0704c7…` (--threads 1) | 5760.135 | **−320.206** | 396 335 | **−23 695** |
+
+Zusammen mit TOTAL-Extrude-Filament:
+
+| Variante | Total mm | Δ mm | Total moves | Δ moves |
+|----------|----------|------|-------------|---------|
+| x86 Default | 39 223.577 | — | 1 836 022 | — |
+| arm64 hoch | 39 220.354 | **−3.223** | 1 836 569 | +547 |
+| arm64 niedrig-A | 38 906.851 | **−316.726** | 1 812 645 | **−23 377** |
+| arm64 niedrig-B | 38 903.284 | **−320.292** | 1 812 266 | **−23 756** |
+
+Alle anderen Rollen (perimeter, externalPerimeter, overhangPerimeter,
+internalInfill, topSolidInfill, bridgeInfill, internalBridgeInfill,
+gapFill, brim, custom) weichen nur um ≤ 0.2 mm und ≤ 60 Moves
+voneinander ab — Rundung oder Reihenfolge.
+
+**Beobachtung**: Die "niedrige" arm64-Variante lässt **~23 000 Solid-
+Infill-Moves (≈5.5 % des Solid-Infill, ≈0.8 % des Gesamt-Filaments)
+weg.** Nicht nur andere Reihenfolge; echte fehlende Druckbefehle.
+Die "hohe" Variante liegt praktisch bei x86 (−3 mm = Reihenfolge).
+
+**Was heisst das für die Phase-C-Bewertung aus
+`engine-integration.md:601-619`**: Die Grob-Kriterien (±0.01 g
+Gewicht, ±5 s Zeit, Zeilenanzahl) sind für die "hohe" Variante
+weiter erfüllt, aber **für die "niedrige" Variante NICHT** — 316 mm
+= 1 g Material weniger, 154 s Zeit weniger, 23 000 Zeilen weniger
+als x86. Die Schlussfolgerung "arm64 ist funktional äquivalent"
+aus Runde 1/2 war unbelegt, und diese Zahlen zeigen jetzt: beim
+asymmetrischen Modell ist eine der zwei stabilen Varianten
+**ein unterspezifizierter Druck**, nicht nur andere Pfadführung.
+
+**Ausbreitung in `solidInfill`**: Das ist die 100 %-Füllung
+zwischen Walls und TopSurface in bestimmten Regionen. Fehlende
+~23 000 Moves bedeuten entweder, dass bestimmte Flächen gar
+nicht gefüllt werden oder dass die Füllung lückenhaft ist. Vor
+Ort gedruckt würde das als Hohlraum sichtbar werden; ob die
+restlichen 94.5 % des Solid-Infills die Fläche noch abdecken,
+kann nur eine 2D-Projection auf z. B. die 500-mm-Schicht
+beweisen — nicht in dieser Stufe.
+
+Dieser Befund verschiebt die Dringlichkeit: Byte-Gleichheit ist
+weiter Fernziel, aber die arm64-Bimodalität ist nicht mehr nur
+kosmetisch, sondern kann **ein Druckteil mit Lücken** produzieren.
+
+Reference-Test nach dieser Stufe erneut gelaufen:
+`92951c26…` matches, 8479 Zeilen. Green.
+
 ## 2026-11-01 22:02 UTC – arm64/x86 Divergenz Runde 3: task_arena-Fix, x86 jetzt byte-gleich zu Orca-GUI
 
 Klaus hatte recht: der Hang war KEIN struktureller Orca-Fehler. Unser
