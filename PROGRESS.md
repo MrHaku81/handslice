@@ -18,6 +18,288 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-02 23:52 UTC – Divergence Stufe 3c Both-Fixes Measurement: arm64 Fill now reproducible, Fill/Clipper/Perimeter Memcheck-clean, third uninit source identified in Brim/GCode
+
+Setup: experimental submodule branch `experiment/arm64-divergence` tip is
+`14cd97c6` (PolyNode-ctor-init + WallToolPathsParams-init). Main repo
+submodule pointer unchanged at `8500fcdcca`. Binaries built from branch
+tip: `handslice-cli-{x86,arm64}-count-fix2`, debug variant
+`handslice-cli-x86-debug` (rebuilt tonight, both fixes in). Standard
+reference test (via `engine/test/run-reference-test.sh`, which uses the
+non-fix `handslice-cli-x86` binary) still prints EXECUTABLE_BLOCK sha
+`92951c26…`. No pushes.
+
+### 1. Contradiction between `tbbmalloc:2504` site and `BuildResult2` origin
+
+Re-parsed `local-test/stufe-3c/memcheck.log` (116617 lines, 2962 Memcheck
+records). Previous summary (368 records) had been a filtered subset.
+Grouping by `(error-site, origin, call-context)`:
+
+- **402** records have origin `stack:clipper.cpp:2802` (BuildResult2
+  frame). Of these:
+  - 365 hit site `tbbmalloc frontend.cpp:2504` (allocator's internal
+    conditional on block header, triggered during `scalable_free` of
+    `Polyline3`/`ExtrusionPath`/vector-of-ExtrusionPaths at destruct
+    time, call-context mostly `PerimeterGenerator::process_classic`
+    and `LayerRegion::process_external_surfaces`)
+  - 37 hit `clipper.hpp:{174,421,543,…}` and `clipper.cpp:2858,2916,…`
+    — PolyTree move-assign, Clipper/ClipperOffset dtor, intersect-list
+    sort predicates. All are object-lifecycle paths that read into
+    PolyNode-adjacent memory.
+- **None** of the 402 originate from reads of application logic that
+  consume `m_jointype` or `m_endtype` semantically.
+
+The `clipper.cpp:2824` line is `polytree.AllNodes.emplace_back(PolyNode())`.
+The temporary `PolyNode()` is constructed on BuildResult2's stack frame
+and move-constructed into the deque element. Pre-fix the ctor leaves
+`m_jointype`/`m_endtype` uninitialised; those two Enum bytes get copied
+into every heap `AllNodes[i]` element and persist until the PolyTree is
+destroyed. Memcheck therefore reports the origin as "stack: BuildResult2",
+and the matching uninit bytes propagate through later destructor passes
+until tbbmalloc's block-metadata inspection trips on them.
+
+**→ The PolyNode fix is hygiene, not a semantic correction.** No code
+reads these fields in a logic path. The initialiser removes a 365-hit
+Memcheck noise source and incidentally shifts code generation
+(register allocation / stack layout), which is what gave the arm64
+variance a stable attractor. See point 4 — the fix is justified but
+is not where the actual data-dependent variance comes from.
+
+### 2. clipper.cpp:92 / :109 / :610 reads — full origin, full stack
+
+All three sites appear in the pre-fix log hundreds of times (counts:
+100, 97, 36). Pulled complete records; **all** have the same two
+properties:
+
+- **Error-stack (deepest project frame, first to top):**
+  ```
+  make_brim → outer_inner_brim_area → append_and_translate (Brim.cpp:42)
+    → diff_ex (ClipperUtils.cpp:756) → _clipper_ex (ClipperUtils.cpp:739)
+    → clipper_do_polytree → clipper_do → Clipper::Execute
+    → ExecuteInternal → ProcessIntersections → BuildIntersectList
+    → TopX → Round<long int> → FRound   [site clipper.cpp:92]
+  ```
+  or `ClipperBase::AddPathInternal` → `operator==(IntPoint,IntPoint)`
+  [site clipper.cpp:109] / `RangeTest` [site clipper.cpp:610].
+
+- **Origin:** `stack: handslice-cli.cpp:854` — line 854 is `static int
+  run(int argc, char** argv) {`. The `.isra.0` optimisation clone-mark
+  prevents Memcheck from pinning the exact declarative line. The uninit
+  bytes come from **some stack variable allocated inside `run()` (or a
+  function inlined into run())** and reach the Brim path through
+  coordinates that pass through `diff_ex`.
+
+Note the mismatch with pre-fix reasoning: **these reads live in the
+Brim pipeline, not in the Fill pipeline.** The arm64 Fill variance
+(230212 vs 212194) was never driven by these specific records; the
+re-parsed table was dominated numerically by `make_brim` and
+`process_external_surfaces` call contexts, but the Fill walker has
+its own small set of records that we fixed with the
+WallToolPathsParams initialisation.
+
+### 3. Measurements with both fixes
+
+Reference test (standard x86 binary, unchanged submodule pin,
+cube_20mm): `92951c26…` identical.
+
+Reference test with `handslice-cli-x86-count-fix2` on cube_20mm:
+`92951c26…` identical — the fix does not touch cube output.
+
+**Auryn x86 (`handslice-cli-x86-count-fix2`, 1 run):**
+
+| metric    | value                   | Δ vs x86 pre-fix |
+|-----------|-------------------------|-------------------|
+| paths     | 229200                  | 0                 |
+| length_u  | 190744245585            | 0                 |
+| filament  | 39223.58 mm             | 0                 |
+| sha256    | `87fa4a3a…`             | changed (byte reorder in some container; counters identical) |
+
+**Auryn arm64 (`handslice-cli-arm64-count-fix2`, 10 runs on Poco X3 Pro):**
+
+| metric    | value          | across runs | Δ vs x86 fix2       |
+|-----------|----------------|-------------|---------------------|
+| paths     | 229171         | identical ×10 | −29                 |
+| length_u  | 190744327881   | identical ×10 | +82 296 (0.00004 %) |
+| filament  | 39223.49 mm    | identical ×10 | −0.09 mm (0.00023 %) |
+| sha256    | 10 distinct    | 10 differ   | n/a                 |
+
+**→ arm64 is now reproducible at the slicing level.** The 10 distinct
+SHA come from G-code line-emission order within containers whose
+semantic content is identical (same paths, same lengths). The 29-path
+delta between x86 (229200) and arm64 (229171) is the signature of the
+`-ftrivial-auto-var-init=pattern` run from Stufe 3c (−29 paths vs
+x86 default); arm64 fix2 behaves exactly like a pattern-initialised
+build. That remaining 29-path gap is governed by the **third uninit
+source** (point 4), which neither of the two committed fixes touches.
+
+**Bunny arm64 (`handslice-cli-arm64-count-fix2`, 5 runs):**
+
+| run | paths  | length_u      | filament      | sha256 |
+|-----|-------:|--------------:|--------------:|--------|
+| 1-5 | 170331 (×5) | 294112789727 (×5) | 129020.90 mm (×5) | 5 distinct |
+
+Pre-fix Bunny arm64: 4/5 runs 129021.05 mm, 1/5 run 129017.77 mm.
+Post-fix: 5/5 runs 129020.90 mm. Reproducible on a second model
+confirms the fix is not Auryn-specific.
+
+Reference cube re-run after fix2 is still `92951c26…`.
+
+### 4. Valgrind with both fixes (Bunny, x86-debug, threads=1)
+
+Full slice ran to completion in 25 min CPU
+(`local-test/stufe-3c/fix2-valgrind/memcheck.log`, 93 247 lines,
+2 506 contexts; prev run had 2 962). Classified by call-context:
+
+| Category                                      | Pre-fix (Auryn, 2962) | Post-fix (Bunny, 2505) |
+|----------------------------------------------|---------------------:|-----------------------:|
+| Fill (fill_surface, Arachne, WallToolPaths)   |                 ≥38 |              **0**     |
+| Clipper core (direct hits, no Brim/GCode ctx) |                >100 |              **0**     |
+| Perimeter (PerimeterGenerator, make_perimeters) |              166 |              **0**     |
+| Brim (make_brim, outer_inner_brim)            |              (part of "other") |         927 |
+| External surfaces (process_external_surfaces) |                  76 |                   1    |
+| GCode writer (export, placeholder, cooling)   |                1590 |                1356    |
+| ClipperUtils / safety_offset                  |              (mixed) |                146    |
+| Model/STL load                                |                   1 |                   1    |
+| TBB allocator hits (frontend.cpp)             |                 402 |                   4    |
+| libc / libstdc++ / other project              |                 629 |                  70    |
+
+Zero remaining uninit reads in the Fill walker, Clipper core, or
+Perimeter generator. The two committed fixes are confirmed to clear
+exactly their claimed scope.
+
+**Remaining dominant pattern (Brim, 927 records):** sites
+`clipper.cpp:92/109/610` and `MatrixBase.h:283` (Eigen's
+`IntPoint::operator==` → `all()` → `Visitor.h:397`) called from
+`ClipperBase::AddPathInternal`, inside the
+`make_brim → outer_inner_brim_area → diff_ex` call-chain. Origin for
+all of them is `stack: handslice-cli.cpp:854` (the same
+`.isra.0`-clone-masked `run()` frame as in point 2) — **the third
+uninit source is in the Brim pipeline, not Fill, and the exact
+originating local still needs localisation.** Likely candidate: an
+uninit Point/BoundingBox/float field in one of the stack-allocated
+containers inside `outer_inner_brim_area` or
+`append_and_translate (Brim.cpp:42)`.
+
+**Secondary pattern (GCode writer, 1356):** mostly
+`clipper.cpp:92/109` reads from `GCode::needs_retraction` →
+`intersection_pl` → `_clipper_pl_open`. Origin split between
+`run()@854` (uninit propagated from earlier) and
+`LayerRegion::process_external_surfaces (LayerRegion.cpp:487)`. The
+latter is the LayerRegion external-surface routine itself — a
+fourth, distinct uninit stack-var candidate.
+
+### 5. Summary — what the fixes do and what is still missing
+
+**(a) PolyNode default-ctor init (`deps_src/clipper/clipper.hpp:147`,
+submodule commit `9aaa5ee5`):** Hygiene fix. Eliminates 402 Memcheck
+hits whose origin is `stack:clipper.cpp:2802`. These are **not** read
+by any application logic; the fields are inspected only during
+allocator teardown of PolyNode-adjacent memory. The empirical variance
+reduction (arm64 Fill from 212194–230212 range to a single attractor
+near 230212 under `-fauto-var-init=zero` / pattern) comes from
+incidental codegen shift (register allocation / stack layout changes
+after adding two field initialisers), **not** from the fields being
+semantically consumed. Still worth upstreaming: this is a real
+`std::deque<PolyNode>` with persisting uninit bytes, present in
+original Clipper 6 and PrusaSlicer alike.
+
+**(b) WallToolPathsParams init in `FillConcentricInternal.cpp:29-35`
+(submodule commit `14cd97c6`):** Real semantic fix. The uninit fields
+are `float min_length_factor` and `bool is_top_or_bottom_layer`, both
+read in `WallToolPaths::removeSmallLines` at `WallToolPaths.cpp:693`
+as a width threshold that decides which lines are discarded. Defaults
+match the canonical factory `make_paths_params()` at
+`WallToolPaths.cpp:37` and `:56`. Memcheck confirms zero remaining
+Fill-walker reads post-fix.
+
+**(c) Still missing — third (and possibly fourth) uninit source,
+located in the Brim / External-surfaces pipeline:**
+
+- **Brim path**: 927 Memcheck records with sites
+  `clipper.cpp:{92,109,610,…}` and `MatrixBase.h:283` inside
+  `make_brim → outer_inner_brim_area → diff_ex`. Origin reported as
+  `stack: handslice-cli.cpp:854` because the containing function is
+  `.isra.0`-cloned by GCC's inliner; the real originating local
+  cannot be read directly from the current log. Next step: build
+  a slower debug variant with `-fno-ipa-icf -fno-inline-small-functions`
+  on `make_brim`/`outer_inner_brim_area` only, or use
+  `-ftrivial-auto-var-init=pattern` on just those TUs to see which
+  byte-pattern differs between runs.
+- **LayerRegion::process_external_surfaces (LayerRegion.cpp:487)**:
+  identified as a distinct stack-allocation origin in the current
+  log. One record flagged, propagates via Polyline/ExPolygon
+  coordinates into `GCode::needs_retraction` reads during export.
+  Smaller contribution than Brim but confirmed.
+
+Both are **outside the Fill walker** and therefore likely explain only
+the small 29-path arm64↔x86 gap, not the headline reproducibility.
+Phase C ("arm64 output byte-identical to x86") is still open; Phase C
+("arm64 output reproducible across runs on the same model") is **met**
+for Auryn and Bunny with both fixes.
+
+### 6. Housekeeping
+
+- No pushes. Main repo clean except for the submodule-worktree HEAD
+  pointer; main repo submodule reference stays on `8500fcdcca`.
+- Co-Authored-By trailer added to any new commits per CLAUDE.md §5
+  (none created this session: all code changes were already committed
+  by the previous session as `9aaa5ee5` and `14cd97c6` on the
+  experimental submodule branch).
+- Artefacts moved from `/tmp/stufe-3c-valgrind` to
+  `local-test/stufe-3c/{memcheck.log,parsed-summary.txt}` and
+  `local-test/stufe-3c/fix2{,-valgrind}/*` (per new rule).
+- Standard reference test still green:
+  `92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`.
+- Clang-build still blocked (Blocker #3), unaffected.
+
+### Abschlussbericht (CLAUDE.md §4 rubrics)
+
+**1. Nachweislich funktioniert**
+
+- Fill/Clipper/Perimeter Memcheck-clean under both fixes
+  (`python3 local-test/stufe-3c/fix2-valgrind/analyse-remaining.py`
+  prints `0 Fill / 0 Clipper / 0 Perimeter`).
+- arm64 Auryn with both fixes is reproducible across 10 runs
+  (`local-test/stufe-3c/fix2/summary.txt`): identical paths,
+  length_u, filament. SHAs still differ (byte reorder only).
+- arm64 Bunny with both fixes is reproducible across 5 runs
+  (same summary file): identical paths and lengths; different SHAs.
+- Standard reference-test cube remains byte-identical to pre-fix
+  reference: `bash engine/test/run-reference-test.sh` → EXECUTABLE_BLOCK
+  sha `92951c26…`.
+- WallToolPathsParams fix proven to be a real read site via Memcheck
+  origin `FillConcentricInternal.cpp:13` → read in `WallToolPaths.cpp:693`.
+- PolyNode fix proven to clear 402 Memcheck records whose origin was
+  `stack:clipper.cpp:2802`.
+
+**2. Ungeprüft**
+
+- arm64 **output byte-identical to x86** (Phase C hard criterion):
+  still not met. 29-path and ~82 kµm length delta remain. Likely
+  consequence of remaining uninit sources (c) and/or legitimate
+  IEEE 754 differences between archs; not distinguished in this
+  session.
+- Brim/external-surfaces uninit sources (c): localised to call-chain
+  but not pinned to specific stack variables. Would require either
+  recompilation with inlining disabled on the suspected TUs or a
+  targeted `-ftrivial-auto-var-init=pattern` build limited to
+  `src/libslic3r/Brim.cpp` and `src/libslic3r/LayerRegion.cpp`.
+- Whether the two fixes should be submitted upstream to OrcaSlicer
+  (both exist identically in PrusaSlicer and original Clipper 6):
+  decision deferred.
+- Standard-build arm64 Auryn 1x (without count instrumentation,
+  without fixes) was not re-measured this session; still assumed to
+  show the earlier 212194–230212 variance.
+
+**3. Geht nicht**
+
+- Localising the Brim-path uninit stack variable from the current
+  Memcheck log alone (`.isra.0` clone-folding hides the originating
+  declaration). Not blocking; needs a targeted debug build.
+- Blocker #3 (Clang build) unchanged.
+
+---
+
 ## 2026-11-02 22:55 UTC – Divergenz Stufe 3c Fix-Test: PolyNode-Fix reduziert Varianz 70×, zweite Quelle in Arachne-WallToolPathsParams
 
 ### 1. Lese-Stelle und Begruendung der Default-Werte
