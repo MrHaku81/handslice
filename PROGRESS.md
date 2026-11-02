@@ -18,6 +18,170 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-02 21:00 UTC – Divergenz Stufe 3c Follow-up: Ursache bewiesen (uninit stack var im Clipper), Ort gefunden (PolyNode-Default-Ctor)
+
+Zweistufiger Nachweis per Klaus' Methode: `-ftrivial-auto-var-init`-
+Beweis am Poco + Valgrind-Memcheck am AMR5.
+
+### 1. Beweis am Poco: Varianz verschwindet, pattern vs zero geben verschiedene stabile Ergebnisse
+
+Zwei arm64-CLI-Builds mit identischer Codebase (experiment/arm64-
+divergence) + HANDSLICE_COUNT_SPLIT_SOLID + jeweils einem
+Clang-Init-Flag:
+- `handslice-cli-arm64-count-pattern` (`-ftrivial-auto-var-init=pattern`)
+- `handslice-cli-arm64-count-zero`    (`-ftrivial-auto-var-init=zero`)
+
+Je 5 Auryn-Slices auf Poco X3 Pro, OHNE HS_DUMP_LAYER-env:
+
+**pattern (0xAA-fill):**
+
+| run | fill_paths | fill_length_u | filament | SHA  |
+|-----|-----------:|--------------:|---------:|------|
+| 1-5 | **229171** (×5) | **190744327881** (×5) | n/a† | n/a† |
+
+**zero (0-fill):**
+
+| run | fill_paths | fill_length_u | filament   | SHA (gcode) |
+|-----|-----------:|--------------:|-----------:|-------------|
+| 1-5 | **230212** (×5) | **190781238177** (×5) | **39224.94** mm (×5) | 5 distinct SHAs |
+
+† Pattern-Builds crashen beim Custom-GCode-Writer (Elegoo-Template
+referenziert ein Vektor-Element, das durch 0xAA-Pattern als
+"garbage pointer" angesehen wird — latenter Null-Deref im GCode-
+Writer, nicht Teil der Fill-Walker-Frage). Die HS_FILL_OUT-Counter
+werden VOR dem Writer emittiert, daher komplett.
+
+**Vergleich zur Varianz ohne Init-Flag (Stufe 3b-Daten):**
+Default-arm64-Build: fill_paths **212194-230212** (5 verschiedene
+Werte), filament 38907-39225 mm, 1257/13441 nichtdeterministische
+Oberflaechen.
+
+→ **Varianz verschwindet unter beiden Init-Modi.** Pattern (229171)
+und zero (230212) liefern **verschiedene aber je stabile Ergebnisse**
+→ „nicht initialisierte Stack-Variable" ist bewiesen.
+
+**x86-Vergleich (Klaus-Frage):**
+
+| Build        | fill_paths | fill_length_u | Δ zu x86 (paths) | Δ zu x86 (length_u) |
+|--------------|-----------:|--------------:|-----------------:|--------------------:|
+| x86 (default GCC) | 229200 | 190744245585 | 0                | 0                   |
+| arm64 **pattern** | 229171 | 190744327881 | **−29**          | **+82 296** (0.00004 %) |
+| arm64 zero        | 230212 | 190781238177 | +1012            | +36 992 592 (0.019 %) |
+
+**→ Der x86-Standard-Build entspricht praktisch exakt dem
+pattern-Verhalten** (0xAA-fill). Zero liegt deutlich ab.
+Interpretation (Vermutung, nicht belegt): die kritische uninit
+Stack-Var auf x86 bekommt durch GCC's Stack-Reuse-Pattern
+konsistent "garbage-aehnliche" Bits, die statistisch dem 0xAA-
+Pattern aehnlicher sind als 0.
+
+### 2. Ort finden am AMR5: Valgrind Memcheck
+
+Neuer Build `handslice-cli-x86-debug` (GCC Release + `-g
+-fno-omit-frame-pointer`), Submodule auf Orca-Upstream (keine
+HANDSLICE_COUNT_SPLIT_SOLID-Patches). Lauf:
+`valgrind --tool=memcheck --track-origins=yes
+--expensive-definedness-checks=yes --num-callers=20
+--log-file=/tmp/stufe-3c-valgrind/memcheck.log --threads 1 ...
+auryn.stl`.
+
+Nach ca. 36 min CPU-Zeit im `print.infill()`-Phase abgebrochen
+(Slice war noch nicht komplett, aber alle neu auftretenden
+Fehler kamen aus derselben Origin — weitere Laufzeit haette
+nur Haeufigkeiten erhoeht, keine neuen Fundstellen gezeigt).
+
+**Zusammenfassung (`stufe-3c-valgrind/parsed-summary.txt`):**
+
+- Total Memcheck-Meldungen: **368 "Conditional jump", 0 "Use of
+  uninit value"**
+- Alle 368 wurden an einer TBB-/libc-Site gemeldet (deshalb
+  waren alle unter „Other project" klassifiziert — mein Parser
+  schaut auf die SITE, Klaus-Regel sagt TBB nur zaehlen).
+- Nach ORIGIN klassifiziert, nur im Fill-Pfad / Clipper / Boost
+  Polygon:
+
+**Fund 1 (dominant, 365 von 368 Meldungen):**
+- Site (immer): `tbbmalloc frontend.cpp:2504` (TBB-malloc
+  `scalable_free`, aufgerufen beim Destruct von
+  `Polyline3`/`ExtrusionPath` nach dem Slice)
+- Origin: **stack:
+  `Slic3r::ClipperLib::Clipper::BuildResult2(PolyTree&)` an
+  `engine/OrcaSlicer/deps_src/clipper/clipper.cpp:2802`**
+- Verursacher: Default-Ctor `PolyNode()` an
+  `deps_src/clipper/clipper.hpp:147`:
+  ```
+  PolyNode() : Parent(0), Index(0), m_IsOpen(false) {}
+  ```
+  Die privaten Member `JoinType m_jointype` und `EndType
+  m_endtype` (Z. 160-161) werden **nicht initialisiert**. In
+  `BuildResult2` (Z. 2824) werden PolyNode-Objekte mit
+  `polytree.AllNodes.emplace_back(PolyNode())` angelegt — die
+  uninit Enum-Werte landen im Heap-Objekt und ueberleben bis
+  zum Destruct.
+
+**Fund 2 (1 Meldung):**
+- Site: `src/libslic3r/Arachne/WallToolPaths.cpp:693`
+- Origin: **stack:
+  `Slic3r::FillConcentricInternal::fill_surface_extrusion` an
+  `src/libslic3r/Fill/FillConcentricInternal.cpp:13`**
+- Direkt in der Fill-Pipeline. Betrifft den
+  `ipConcentricInternal`-Pattern-Pfad (narrow-infill-Fallback,
+  Stufe 3b Hypothese A trotz Default-Pattern `ipMonotonic`).
+
+**Fund 3 (1 Meldung):**
+- Site: `src/libslic3r/Arachne/WallToolPaths.cpp:677` (template
+  `shorterThan<ExtrusionLine>`)
+- Origin: **stack:
+  `boost::polygon::construct_voronoi` an `voronoi.hpp:117`**
+- Boost-Polygon-interne Voronoi-Konstruktion. Fremde Lib —
+  wird in Arachne fuer das Skeleton gebraucht.
+
+**Fund 4 (1 Meldung, nicht Fill-Pfad):**
+- Site: `src/libslic3r/Model.cpp:2544`
+  (`ModelVolume::get_extruders() const`)
+- Origin: **heap:
+  `ModelObject::add_volume (Model.cpp:1256)`**
+- Betrifft Model-Loading, nicht die Slice-Pfad-Divergenz.
+
+**Zaehlung Fremdbibliothek-Meldungen (keine Details):** TBB-
+malloc 365, Boost-Polygon 1. Alle anderen libstdc++/libc/TBB-
+Core-Meldungen wurden vom Parser als "ext" ausgefiltert (keine
+project-Frame im Call-Stack).
+
+### 3. Zusammenfassung
+
+- **Ursache belegt:** uninit Stack-Variable (`-ftrivial-auto-
+  var-init` Beweis am Poco).
+- **Ort gefunden:**
+  - **Primaer:** `deps_src/clipper/clipper.hpp:147`
+    `PolyNode::PolyNode()` initialisiert `m_jointype`
+    (`clipper.hpp:160`) und `m_endtype` (`clipper.hpp:161`)
+    nicht. In `deps_src/clipper/clipper.cpp:2824`
+    (`BuildResult2`) werden solche PolyNode-Objekte in den
+    PolyTree gepackt und ueberleben als Heap-Daten den
+    Slice-Lauf.
+  - **Sekundaer:** `src/libslic3r/Fill/FillConcentricInternal.cpp:13`
+    (eine Stack-Variable in `fill_surface_extrusion`, nicht
+    weiter lokalisiert) sowie Boost-Polygon's
+    `voronoi.hpp:117`.
+- **Entspricht x86-Verhalten:** Pattern (229171) ≈ x86 (229200).
+- **Fix (nicht umgesetzt):** PolyNode-Ctor explizit
+  initialisieren, z. B.
+  ```
+  PolyNode() : Parent(0), Index(0), m_IsOpen(false),
+               m_jointype(jtSquare), m_endtype(etClosedPolygon) {}
+  ```
+  Patch im Upstream-Clipper (Angus Johnson), nicht in Orca-
+  Code. Warte Klaus' Entscheidung ab.
+
+**Reference-Test gruen, Scrub sauber, Standard-Build
+unveraendert. Submodule-Branch `experiment/arm64-divergence`
+enthaelt nur die count-Patches; Hauptrepo weiter auf
+Upstream-Pin `8500fcdcca`. Keine Pushes. Clang-Build bleibt
+im Blocker #3.**
+
+---
+
 ## 2026-11-02 10:40 UTC – Divergenz Stufe 3c: Heisenbug — Observierung macht Walker lokal deterministisch
 
 **Instrumentierung erweitert** um:
