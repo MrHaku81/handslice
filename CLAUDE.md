@@ -78,6 +78,12 @@ eines vierten Versuchs.
   Sprachumstellung. CLAUDE.md und die handgeschriebenen deutschen
   Doku-Teile bleiben deutsch, bis Klaus sie selbst umstellt.
   Jeder Commit baut.
+- **Co-Authored-By-Trailer:** Ab 2026-11-02 endet jede von Claude
+  erzeugte Commit-Message mit der Zeile
+  `Co-Authored-By: Claude <noreply@anthropic.com>`
+  (Trailer am Ende, leere Zeile davor). Gilt fuer alle neuen Commits
+  im Hauptrepo und im Submodul; bereits gepushte Commits werden
+  nicht veraendert.
 
 ## 6. Bei Unsicherheit
 

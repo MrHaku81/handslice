@@ -18,6 +18,210 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-02 22:55 UTC – Divergenz Stufe 3c Fix-Test: PolyNode-Fix reduziert Varianz 70×, zweite Quelle in Arachne-WallToolPathsParams
+
+### 1. Lese-Stelle und Begruendung der Default-Werte
+
+Alle Reads von `m_jointype` und `m_endtype` liegen in
+`deps_src/clipper/clipper.cpp:3445-3682` innerhalb von
+`ClipperOffset::DoOffset` auf `m_polyNodes.Childs[i]`. Diese
+`m_polyNodes` sind ClipperOffset-interne Child-Knoten, die ueber
+`ClipperOffset::AddPath()` angelegt werden (clipper.cpp:3376-3377
+`newNode->m_jointype = joinType; newNode->m_endtype = endType;`
+mit expliziten Argumenten). Jeder `co.AddPath()`-Aufruf in Orca
+(z. B. `ClipperUtils.cpp:283, 449, 470`) uebergibt beide
+Enum-Werte explizit.
+
+**Die PolyNodes aus `Clipper::BuildResult2` werden nie an
+`ClipperOffset` weitergereicht** — sie sind Ergebnis-Konturen aus
+Boolean-Operationen (Intersection/Union/Diff) und werden vom
+Caller nur ausgelesen (`Contour`-Punkte), nicht weiter offsettet.
+Die uninit m_jointype/m_endtype dieser PolyNodes werden also in
+normalen Code-Pfaden nie konsumiert; Valgrind sieht sie nur beim
+`tbbmalloc::scalable_free` zum Destruct-Zeitpunkt.
+
+**Daraus abgeleitete Default-Werte** (nicht gewaehlt um x86 zu
+treffen):
+- `m_endtype = etClosedPolygon`: BuildResult2 produziert
+  geschlossene Konturen; `etClosedPolygon` ist die einzige
+  Semantik, die zum Objekt passt. Enum-Index 0.
+- `m_jointype = jtSquare`: Konservativer Default (keine
+  Rundungen, keine Miter-Spitzen). Enum-Index 0.
+
+Beide happen to be Enum-Wert 0 — zufaellig entspricht das dem
+Verhalten von `-ftrivial-auto-var-init=zero`.
+
+### 2. Herkunft (git blame + Fremdvergleich)
+
+- `clipper.hpp:147` git blame: `fe4a72ec94` (Noisyfox, 2025-06-18,
+  „Upgrade clipper & improve multi-thread performance"). Dieser
+  Commit cherry-picked PrusaSlicer-Clipper-Optimierungen. Der
+  Ctor wurde dabei zu `: Parent(0), Index(0), m_IsOpen(false) {}`
+  kompaktiert (vorher stand `Childs()` extra im Init-Listen,
+  Entfernung hat keine Semantik geaendert). **Die fehlende
+  Initialisierung von m_jointype/m_endtype war schon in der
+  pre-image-Version drin** (`src/clipper/clipper.hpp` am
+  `1555904bef`, Lane Wei, 2022-07-15, initialer BBS/Orca-Import).
+- **PrusaSlicer master** (`prusa3d/PrusaSlicer`,
+  `bundled_deps/clipper/include/clipper/clipper.hpp`, seit
+  Commit `13f39e853f` 2025-03-25 „Move clipper to bundled deps"):
+  gleiche Ctor-Zeile `: Parent(0), Index(0), m_IsOpen(false) {}` —
+  **gleicher Bug**.
+- **Original Clipper 6 (Angus Johnson)** auf SourceForge
+  (`polyclipping/code/HEAD/trunk/cpp/clipper.cpp`): Impl
+  `PolyNode::PolyNode(): Parent(0), Index(0), m_IsOpen(false) {}` —
+  **gleicher Bug im Upstream**.
+
+→ Der Bug stammt aus dem Original-Clipper 6; weder Prusa noch
+Orca haben ihn eingefuehrt. Prusa und Orca schleppen ihn mit.
+Patches, die beide Felder initialisieren, muessten eigentlich
+nach Angus Johnson zurueckfliessen.
+
+### 3. Fix im Experimental-Build
+
+Patch auf `experiment/arm64-divergence`, Commit `9aaa5ee5ee`:
+```
+PolyNode() : Parent(0), Index(0), m_IsOpen(false),
+             m_jointype(jtSquare), m_endtype(etClosedPolygon) {}
+```
+
+Binaries: `handslice-cli-x86-count-fix`, `handslice-cli-arm64-count-fix`.
+Submodule bleibt im Hauptrepo auf Upstream-Pin
+`8500fcdcca` (Experiment-Branch nur im Submodul-Worktree).
+
+**Messungen Auryn (count-fix-Binaries):**
+
+| Variante                | fill_paths               | fill_length_u                    | filament_mm   | gcode_sha           |
+|-------------------------|--------------------------|----------------------------------|--------------:|---------------------|
+| x86 (vor Fix)           | 229200                   | 190744245585                     | 39223.58      | diverse (depends auf run) |
+| x86 (nach Fix, 1 Lauf)  | **229200** (unveraendert) | **190744245585** (unveraendert) | 39223.58      | 99121a82… (geaendert in Byte-Reihung) |
+| arm64 (vor Fix, 5 Laeufe) | 5 Werte 212194…230212   | 5 Werte                          | 38907…39225   | 5 distinct          |
+| arm64 (nach Fix, 10 Laeufe) | 6× **230212**, je 1× 230004/230000/229955/229954 | identisch pro paths | 39220.35…39224.94 | 10 distinct |
+
+- **Range vor Fix:** paths-Delta 18 018 → **nach Fix:** 258 (×70
+  schrumpf).
+- **Dominanter Wert nach Fix:** 230212 (6/10) — identisch zum
+  `-ftrivial-auto-var-init=zero`-Ergebnis vom Vortag (konsistent,
+  da unser Fix beide Felder auf Enum-Wert 0 setzt).
+- **x86 ↔ arm64 nach Fix: NICHT gleich.** x86 bleibt bei 229200
+  (fix aendert dort nichts, weil x86's Fill-walker die uninit
+  Felder sowieso nicht in einem relevanten Pfad liest). arm64
+  springt in 60 % der Laeufe auf 230212 und in 40 % auf etwas
+  anderes.
+- **Referenztest Wuerfel mit `handslice-cli-x86-count-fix`:**
+  EXECUTABLE_BLOCK SHA = `92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`
+  — **IDENTISCH** zur Referenz. Der Fix aendert den Cube-Slice
+  nicht (Memcheck-stille Enum-Werte in BuildResult2 wirken sich
+  bei dieser Geometrie nicht aus).
+
+**Delta alt→neu (Auryn, solidInfill):**
+- Pre-Fix „hoch" Variante (230212): ~239 solidInfill-paths pro
+  typischer Flaeche, wie zuvor berichtet.
+- Pre-Fix „niedrig" Variante (212194): ~18 000 fehlende Pfade,
+  Material-Delta −316 mm.
+- Post-Fix: 60 % der arm64-Laeufe hoch (230212, 0 Pfade Delta),
+  40 % mittlere Zwischenwerte (229954…230004, Delta −8…−258
+  Pfade). **Keine Low-Variante mehr beobachtet**; die 1 g
+  Material-Defizit ist verschwunden; Rest-Varianz ist 1 Pfad pro
+  mehreren Hundert.
+
+**Vorlaeufige Interpretation:** Der PolyNode-Fix beseitigt den
+primaeren Memcheck-Fund, aber die arm64-Fill-Varianz ist nicht
+komplett behoben → es existiert mindestens eine weitere
+uninit-Quelle. Kandidat: siehe Punkt 4.
+
+### 4. FillConcentricInternal.cpp:13 — Variable identifiziert
+
+`FillConcentricInternal::fill_surface_extrusion` (Zeile 12-13 ist
+die Funktionssignatur, Ctor-Default-Werte wirken ab Z. 14) legt
+auf Z. 29 ein lokales Objekt an:
+```
+Arachne::WallToolPathsParams input_params;
+```
+Z. 30-35 setzen 6 Felder:
+`min_bead_width, min_feature_size, wall_transition_length,
+wall_transition_angle, wall_transition_filter_deviation,
+wall_distribution_count`.
+
+**Nicht gesetzt:**
+- `float min_length_factor` (`WallToolPaths.hpp:28`) — gelesen in
+  `WallToolPaths.cpp:693`:
+  `shorterThan(line, m_params.is_top_or_bottom_layer ?
+    (min_width / 2) : (min_width * m_params.min_length_factor))`.
+  → direkt in einer Schwellenwert-Berechnung in
+  `removeSmallLines()`; aendert welche Linien entfernt werden.
+- `bool is_top_or_bottom_layer` (`WallToolPaths.hpp:33`) —
+  gelesen an gleicher Stelle als Branch-Flag.
+
+Die kanonische Fabrik `make_paths_params()` (`WallToolPaths.cpp:
+34-56`) setzt beide Felder korrekt. `FillConcentricInternal.cpp`
+umgeht sie und vergisst diese zwei. Das ist eine echte, direkte
+Fill-Pfad-uninit-Lese; Valgrind-Fund entsprechend (1 Hit pro
+Slice, Site `WallToolPaths.cpp:693` + ein weiterer Hit an
+`:677` mit Origin ebenfalls auf
+`FillConcentricInternal.cpp:13`).
+
+Dies ist die wahrscheinliche zweite Quelle. Nicht gefixt in
+dieser Session.
+
+### 5. Stanford Bunny – reproduzierbar mit Fremdmodell
+
+`Stanford_Bunny.drc` aus `resources/handy_models/` via Orca's
+`draco_decoder` nach OBJ gewandelt, dann via Python-STL-Writer
+auf 200 mm skaliert (Faktor 1.667) und XY-zentriert nach
+`local-test/bunny_200mm.stl` (52716 Dreiecke, 200×153×197 mm,
+nicht committet). Elegoo-CC2-Profil wie bei Auryn.
+
+**Standard-arm64-Build (`handslice-cli-arm64`, kein Fix, keine
+count-Instrumentierung) 5× Bunny:**
+
+| Lauf    | filament_mm | gcode_sha        |
+|---------|------------:|------------------|
+| arm64-1 | 129021.05   | b69acbaa…        |
+| arm64-2 | 129021.05   | 62a3b3b4…        |
+| arm64-3 | 129021.05   | ae908d37…        |
+| arm64-4 | **129017.77** | 77e4775e…      |
+| arm64-5 | 129021.05   | b6f87443…        |
+
+→ Varianz reproduziert: 4/5 gleiches Filament, 5 unterschiedliche
+G-Code-SHAs (Reorder); 1/5 leicht abweichendes Filament
+(−3.28 mm). Nicht Auryn-spezifisch.
+
+**Valgrind Memcheck auf x86-debug + Bunny** (`handslice-cli-x86-
+debug`, --threads 1, --track-origins=yes, --expensive-definedness-
+checks=yes, nach ~10 min CPU abgebrochen):
+- 221 „Conditional jump" errors.
+- **217/221 Origin: `BuildResult2 clipper.cpp:2802` stack**
+  (= gleiche Hauptquelle wie bei Auryn).
+- 1 Origin: ClipperLib_Z `BuildResult2` (Z-Koordinaten-Variante
+  des Clippers, gleicher Fehler mit anderem Namespace-Prefix).
+- 1 Origin: `FillConcentricInternal::fill_surface_extrusion
+  (FillConcentricInternal.cpp:13)` → Site `WallToolPaths.cpp:693`.
+- 1 Origin: wie oben → Site `WallToolPaths.cpp:677`.
+- 1 Origin: `ModelObject::add_volume (Model.cpp:1256)` heap,
+  Site `ModelVolume::get_extruders (Model.cpp:2544)` — nicht
+  Fill-Pfad.
+
+→ Bug ist **modellunabhaengig** reproduzierbar. Clipper-Fund
+dominant (97 % der Hits), gleiche sekundaere Fill-Pfad-Fund in
+Arachne.
+
+### 6. CLAUDE.md-Regel + Rebase
+
+CLAUDE.md Abschnitt 5 um Co-Authored-By-Trailer-Regel ergaenzt
+(ab 2026-11-02 Pflicht). Ungepushte Hauptrepo-Commits
+`origin/main..HEAD` werden mit
+`git rebase origin/main --exec '... --trailer ...'` nachtraeglich
+versehen (Autor + Inhalt unveraendert, keine Force-Pushes,
+gepushte Commits nicht angefasst). Submodule-Experiment-Commits
+sind untouched (Submodul-Branch ist privat).
+
+**Reference-Test gruen, Scrub sauber. Hauptrepo-Submodule-Ref
+weiter auf Upstream `8500fcdcca`. Keine Pushes. Clang-Build
+weiterhin im Blocker #3.**
+
+---
+
 ## 2026-11-02 21:00 UTC – Divergenz Stufe 3c Follow-up: Ursache bewiesen (uninit stack var im Clipper), Ort gefunden (PolyNode-Default-Ctor)
 
 Zweistufiger Nachweis per Klaus' Methode: `-ftrivial-auto-var-init`-
