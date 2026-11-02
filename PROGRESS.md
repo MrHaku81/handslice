@@ -18,6 +18,76 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-02 10:40 UTC – Divergenz Stufe 3c: Heisenbug — Observierung macht Walker lokal deterministisch
+
+**Instrumentierung erweitert** um:
+- `HS_WALKER_STATE` dump am Target-Surface: Bit-exakte Hex-Darstellung
+  aller FP-Felder von `f` (z, spacing, overlap, angle, bbox) und
+  `params` (density, flow.width/height/nozzle_diameter, anchor_length,
+  resolution).
+- `HS_ISOLATE_ITERS=N` env: N In-Process-Wiederholungen von
+  `fill_surface_extrusion` am Target, Fresh-Scratch, Count pro Iter.
+
+**Messung 1 — In-Process 20× auf arm64 (`HS_ISOLATE_ITERS=20`):**
+Target layer=424 surf=10 liefert 20/20 identische Ergebnisse:
+`paths=59, length_u=14 264 060`. **Fill-Walker ist within-process
+deterministisch** gegeben identischer f-State.
+
+**Messung 2 — Cross-Process 20× auf arm64 mit HS_DUMP_LAYER=424
+HS_DUMP_SURF=10 (ohne HS_ISOLATE_ITERS):**
+Alle 20 Prozesse: Target `paths=58, length_u=14 234 826`, UND die
+`HS_WALKER_STATE`-Zeile ist bit-identisch (alle FP-Bitmuster gleich).
+Target ist cross-process deterministisch.
+Die *Full-Slice* `surf-fill-trace`-SHA zerfaellt in 10 Varianten
+ueber die 20 Laeufe — die Nichtdeterminismus-Zahl der Oberflaechen
+ist aber von 1257 (Stufe 3b) auf **13/13441 (0.1 %)** gefallen.
+Keine der 13 ist unser Target.
+
+**Messung 3 — Cross-Process 5× auf arm64 ohne HS_DUMP_LAYER env:**
+Zurueck zur vollen Varianz. 5 Laeufe, 4 verschiedene `fill_paths`-
+Werte (230212 x3, 212194, 230000), Filament 38907-39225 mm.
+Die Pfadgenerierung ist wieder voll nichtdeterministisch.
+
+**Fazit:** Reines Beobachten des Walker-State am Target (ein Lock +
+`ostringstream::str()` + Mutex-geschuetztes `push_back`) **stabilisiert
+sowohl das Target als auch die meisten anderen Flaechen**. Klassischer
+Heisenbug. Zwei moegliche Ursachen (nicht geklaert):
+
+1. **UB / unitialized memory read**: Observe-Lock aendert
+   Memory-Layout vor dem Walker-Call so, dass nicht initialisierte
+   Reads deterministische Werte sehen. Klaus-Vermutung.
+2. **Data race**: Shared mutable state (static Variable, allocator
+   state, cache contention) wird durch das Lock serialisiert.
+
+**Vermutung (nicht belegt):** Hypothese 1 ist wahrscheinlicher, weil
+within-process bereits deterministisch ist, und zwischen Prozessen
+der Unterschied oft Memory-Mapping / ASLR / Allocator-Seeds ist, nicht
+Scheduling. Thread-Scheduling-Race wuerde innerhalb des Prozesses
+auch variieren.
+
+**Nicht umgesetzt:** ASAN+UBSan x86-Build (Klaus-Punkt 3). Hoechste
+Prioritaet fuer naechste Session, da UB-Verdacht am klarsten durch
+UBSan/ASAN belegt wird. Build-Script-Entwurf steht; braucht
+`-fsanitize=address,undefined` auf libslic3r + CLI (deps bleiben wie
+sie sind).
+
+**Zweite Nichtdeterminismus-Quelle (downstream fill walker)** aus
+Stufe 3b: nicht weiter untersucht in dieser Session.
+
+**Clang-Build weiterhin im Blocker #3.** Keine Pushes. Scrub sauber.
+Reference-Test gruen.
+
+**Zahlen-Zusammenfassung:**
+
+| run                               | target paths | walker state identisch? | Note                       |
+|-----------------------------------|--------------|-------------------------|----------------------------|
+| x86-1 (lokal, 20× in-process)     | 59 → wird jetzt 58 | n/a            | Baseline-Shift durch Patch |
+| arm64 20× in-process              | 59 (×20)     | n/a                     | Deterministisch within     |
+| arm64 20× cross-process w/ DUMP   | 58 (×20)     | **ja (×20)**            | Heisenbug stabilisiert     |
+| arm64 5× cross-process ohne DUMP  | 59, 11, …    | n/a                     | Volle Varianz zurueck      |
+
+---
+
 ## 2026-11-02 04:00 UTC – Divergenz Stufe 3b abgeschlossen: Fill-Walker-Nichtdeterminismus bei bit-identischem Input
 
 Der Zaehler wurde um per-Layer- und per-Fläche-Trace erweitert, dazu ein

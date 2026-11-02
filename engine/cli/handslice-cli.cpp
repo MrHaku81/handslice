@@ -73,6 +73,7 @@ namespace Slic3r {
     void hs_layer_trace_dump(std::ostream &os);
     void hs_surf_trace_dump(std::ostream &os);
     void hs_detail_dump(std::ostream &os);
+    void hs_isolate_dump(std::ostream &os);
 }
 #endif
 #include "libslic3r/libslic3r_version.h"
@@ -1214,6 +1215,14 @@ static int run(int argc, char** argv) {
             if (ofs3) {
                 Slic3r::hs_detail_dump(ofs3);
                 std::cerr << "HS_DETAIL_DUMP_PATH " << detail_path << "\n";
+            }
+        }
+        if (std::getenv("HS_ISOLATE_ITERS") || std::getenv("HS_DUMP_LAYER")) {
+            std::string iso_path = args.output_path + ".isolate.txt";
+            std::ofstream ofs4(iso_path);
+            if (ofs4) {
+                Slic3r::hs_isolate_dump(ofs4);
+                std::cerr << "HS_ISOLATE_PATH " << iso_path << "\n";
             }
         }
     }
