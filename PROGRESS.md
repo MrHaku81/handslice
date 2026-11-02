@@ -18,6 +18,85 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-02 04:00 UTC – Divergenz Stufe 3b abgeschlossen: Fill-Walker-Nichtdeterminismus bei bit-identischem Input
+
+Der Zaehler wurde um per-Layer- und per-Fläche-Trace erweitert, dazu ein
+gezielter Detail-Dump (Env `HS_DUMP_LAYER` / `HS_DUMP_SURF`) der Input-
+Polygon-Vertizes und der generierten Extrusions-Pfade pro Zielfläche.
+
+**Per-Layer-Diff hoch vs niedrig (arm64-1 39225 mm vs arm64-5 38908 mm):**
+- 657/1037 Layers divergent (63 %, konsistent mit Stufe-1 Beobachtung).
+- `surfs` (Zahl der SurfaceFills pro Layer) stimmt bei JEDEM Layer
+  ueberein — die Flaechen-Zaehlung ist stabil.
+- `paths` und `length_u` variieren. Niedrig produziert durchgehend
+  WENIGER Pfade.
+
+**Zwischenruns-Diff bei gleichem Filament (arm64-1 vs arm64-3, beide
+39224.94 mm): 0/1037 Layers divergent im Fill-Walker-Trace** — Fill-
+Walker produziert byte-identisch, aber die G-Code-SHAs sind trotzdem
+verschieden. Die zweite Nichtdeterminismus-Quelle liegt also
+nachweislich **downstream** der Pfadgenerierung.
+
+**Per-Fläche-Diff (13441 Flaechen, arm64 niedrig vs hoch):**
+- `expoly_v` + `bbox` fuer ALLE 13441 Oberflaechen byte-identisch
+  zwischen niedrig und hoch.
+- 1257 Flaechen (9.4 %) haben ungleichen Output (paths, length_u).
+
+**Top-Fund — Detail-Dump layer=424 surf=10:**
+- Input (`contour_v=249`, keine Loecher): die 249 Vertex-Koordinaten
+  sind byte-identisch zwischen hoch (arm64-dump-1, 39224.94 mm) und
+  niedrig (arm64-dump-2, 38907.92 mm). `diff` auf den
+  `HS_DETAIL_IN`-Zeilen liefert exit=0.
+- Output hoch: 59 Pfade, jeweils v=2 (Scan-Linie), Σ length_u = 14 264 062
+- Output niedrig: 11 Pfade, jeweils v=2, Σ length_u = 4 320 369 (≈30 %)
+- Niedrige Variante produziert *weniger und laengere* Scan-Linien
+  mit geringerer Gesamtlaenge → tatsaechlich weniger Fuellung,
+  nicht nur Umsortierung.
+
+**Fazit zur Pfadgenerierung:** Die FillMonotonic-/FillRectilinear-
+Pipeline (Default-Pattern des Elegoo-CC2-Profils ist `ipMonotonic`)
+produziert bei bit-identischem Input-Polygon unterschiedlichen Output
+auf arm64. Da der Input-Polygon identisch ist, muss die Nichtdeterminismus
+*innerhalb* `fill_surface_extrusion` entstehen — nach dem Punkt, wo wir
+den Polygon dumpen (surface_fill.surface.expolygon), aber vor dem Ende
+des Aufrufs. Kandidaten:
+- `polygons_rotate(filled_area, aligning_angle)` – rotiert Polygon
+  per sin/cos; FMA-abhaengig.
+- `AABBTreeLines::LinesDistancer<Line>` – AABB-Reihenfolge haengt von
+  Line-Eingangssortierung.
+- `std::sort(sil.intersections.begin(), sil.intersections.end())`
+  (FillRectilinear.cpp:852) – coord_t, keine FP-Ties, aber Eingabe
+  stammt aus FP-Rechnung.
+- Clipper-/`offset_ex`-Aufrufe mit `scaled_spacing * 0.3` /
+  `scaled_spacing * 0.5` – FP-abhaengige Verkleinerung.
+
+**Zweite Quelle (downstream fill-walker):** arm64-Laeufe mit
+*identischem* Fill-Walker-Output (gleiche Layer-/Flaechen-Spur)
+produzieren verschiedene G-Code-SHAs. Also exsitiert nicht-determinismus
+auch in: ExtrusionEntityCollection-Sortierung, chain_lines/
+chain_polylines, Seam-Placer, oder GCode-Writer-Interne Scheduling.
+
+**Belegstellen (alle auf `experiment/arm64-divergence` im Submodul):**
+- Fill.cpp:48-150 – Zaehler, Mutex-geschuetzte Traces, Env-Dump
+- Fill.cpp:~1407-1570 – Instrumentierung in `Layer::make_fills()`
+- `engine/cli/handslice-cli.cpp` – stderr-Dump + 3 Trace-Dateien
+  (layer-fill-trace, surf-fill-trace, detail-dump)
+
+**Mess-Serie (zweite Serie mit per-Fläche-Trace):**
+
+| run     | filament mm | fill_paths | Variante |
+|---------|-------------|------------|----------|
+| x86-1   | 39223.58    | 229200     | ref      |
+| arm64-1 | 38969.94    | 216129     | niedrig  |
+| arm64-2 | 39224.94    | 230212     | hoch     |
+| arm64-3 | 39220.99    | 230000     | nahe-hoch|
+| arm64-4 | 39224.94    | 230212     | hoch     |
+| arm64-5 | 39185.01    | 227895     | niedrig-ish |
+
+**Reference-Test gruen. Scrub sauber. Keine Pushes.**
+
+---
+
 ## 2026-11-02 02:55 UTC – Divergenz Stufe 3b: Pfadgenerierung ist der Fundort (Hypothese bestaetigt)
 
 Setup wie bisher. Branch-Hygiene nach Klaus-Vorgabe: die zwei bisherigen

@@ -70,6 +70,9 @@ namespace Slic3r {
     extern std::atomic<uint64_t> g_hs_fill_count_hash;
     extern std::atomic<uint64_t> g_hs_fill_length_hash;
     void hs_split_counters_reset();
+    void hs_layer_trace_dump(std::ostream &os);
+    void hs_surf_trace_dump(std::ostream &os);
+    void hs_detail_dump(std::ostream &os);
 }
 #endif
 #include "libslic3r/libslic3r_version.h"
@@ -1188,6 +1191,32 @@ static int run(int argc, char** argv) {
               << " count_hash=0x" << std::hex << Slic3r::g_hs_fill_count_hash.load() << std::dec
               << " length_hash=0x" << std::hex << Slic3r::g_hs_fill_length_hash.load() << std::dec
               << "\n";
+    // Dump per-layer trace to an auxiliary file next to --output. Does
+    // nothing if the caller didn't provide --output (unlikely in our setup).
+    if (!args.output_path.empty()) {
+        std::string trace_path = args.output_path + ".layer-fill-trace.txt";
+        std::ofstream ofs(trace_path);
+        if (ofs) {
+            Slic3r::hs_layer_trace_dump(ofs);
+            std::cerr << "HS_LAYER_TRACE_PATH " << trace_path << "\n";
+        }
+        std::string surf_trace_path = args.output_path + ".surf-fill-trace.txt";
+        std::ofstream ofs2(surf_trace_path);
+        if (ofs2) {
+            Slic3r::hs_surf_trace_dump(ofs2);
+            std::cerr << "HS_SURF_TRACE_PATH " << surf_trace_path << "\n";
+        }
+        // Detail dump only non-empty when env HS_DUMP_LAYER / HS_DUMP_SURF
+        // are set. Still create the file (possibly empty) for consistency.
+        if (std::getenv("HS_DUMP_LAYER") && std::getenv("HS_DUMP_SURF")) {
+            std::string detail_path = args.output_path + ".detail-dump.txt";
+            std::ofstream ofs3(detail_path);
+            if (ofs3) {
+                Slic3r::hs_detail_dump(ofs3);
+                std::cerr << "HS_DETAIL_DUMP_PATH " << detail_path << "\n";
+            }
+        }
+    }
 #endif
 
     // 6a. Preview-Mesh-Export (Pflicht 7 – plate-view benchmark).

@@ -90,6 +90,10 @@ for i in 1 2 3 4 5; do
     STDERR_LOCAL="${OUT_DIR}/arm64-${i}.stderr"
     STATS_LOCAL="${OUT_DIR}/arm64-${i}.stats.json"
     GCODE_LOCAL="${OUT_DIR}/arm64-${i}.gcode"
+    TRACE_REMOTE="${GCODE_REMOTE}.layer-fill-trace.txt"
+    TRACE_LOCAL="${OUT_DIR}/arm64-${i}.layer-fill-trace.txt"
+    SURF_REMOTE="${GCODE_REMOTE}.surf-fill-trace.txt"
+    SURF_LOCAL="${OUT_DIR}/arm64-${i}.surf-fill-trace.txt"
     t0=$(date +%s.%N)
     adb shell "cd ${REMOTE} && ./handslice-cli \
         --machine '${RMACHINE}' --process '${RPROCESS}' --filament '${RFILAMENT}' \
@@ -99,6 +103,8 @@ for i in 1 2 3 4 5; do
     rt=$(awk "BEGIN{printf \"%.1f\", ${t1} - ${t0}}")
     adb pull "${REMOTE}/stderr.txt" "${STDERR_LOCAL}" > /dev/null
     adb pull "${GCODE_REMOTE}" "${GCODE_LOCAL}" > /dev/null
+    adb pull "${TRACE_REMOTE}" "${TRACE_LOCAL}" > /dev/null 2>&1 || true
+    adb pull "${SURF_REMOTE}" "${SURF_LOCAL}" > /dev/null 2>&1 || true
     SHA=$(sha256sum "${GCODE_LOCAL}" | cut -d' ' -f1)
     CNT=$(run_counters_from_stderr "${STDERR_LOCAL}")
     echo -e "arm64-${i}\tarm64\t${rt}\t${SHA}\t${CNT}" | tee -a "${TALLY}"
