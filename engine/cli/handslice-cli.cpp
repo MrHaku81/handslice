@@ -63,6 +63,12 @@ namespace Slic3r {
     extern std::atomic<uint64_t> g_hs_mixed_normal_vcount;
     extern std::atomic<uint64_t> g_hs_mixed_narrow_vcount;
     extern std::atomic<uint64_t> g_hs_mixed_geom_hash;
+    extern std::atomic<uint64_t> g_hs_fill_surfaces;
+    extern std::atomic<uint64_t> g_hs_fill_entries;
+    extern std::atomic<uint64_t> g_hs_fill_paths;
+    extern std::atomic<uint64_t> g_hs_fill_length_u;
+    extern std::atomic<uint64_t> g_hs_fill_count_hash;
+    extern std::atomic<uint64_t> g_hs_fill_length_hash;
     void hs_split_counters_reset();
 }
 #endif
@@ -1173,6 +1179,14 @@ static int run(int argc, char** argv) {
               << " normal_vcount=" << Slic3r::g_hs_mixed_normal_vcount.load()
               << " narrow_vcount=" << Slic3r::g_hs_mixed_narrow_vcount.load()
               << " geom_hash=0x" << std::hex << Slic3r::g_hs_mixed_geom_hash.load() << std::dec
+              << "\n";
+    std::cerr << "HS_FILL_OUT"
+              << " surfaces=" << Slic3r::g_hs_fill_surfaces.load()
+              << " entries=" << Slic3r::g_hs_fill_entries.load()
+              << " paths=" << Slic3r::g_hs_fill_paths.load()
+              << " length_u=" << Slic3r::g_hs_fill_length_u.load()
+              << " count_hash=0x" << std::hex << Slic3r::g_hs_fill_count_hash.load() << std::dec
+              << " length_hash=0x" << std::hex << Slic3r::g_hs_fill_length_hash.load() << std::dec
               << "\n";
 #endif
 

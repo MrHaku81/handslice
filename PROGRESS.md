@@ -18,6 +18,78 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-02 02:55 UTC – Divergenz Stufe 3b: Pfadgenerierung ist der Fundort (Hypothese bestaetigt)
+
+Setup wie bisher. Branch-Hygiene nach Klaus-Vorgabe: die zwei bisherigen
+Submodule-Experiment-Commits auf `experiment/arm64-divergence` im Submodul
+gerettet, Hauptrepo-Submodul-Ref zurueck auf Orca-Upstream
+`8500fcdcca` (Commit `58744f7`). Fuer -count-Builds vor dem Lauf
+`git -C engine/OrcaSlicer checkout experiment/arm64-divergence`, vor
+Ref-Test `git checkout 8500fcdcca`.
+
+**Neuer Zaehler** direkt um die Pfadgenerierung
+(`Layer::make_fills()`, Fill.cpp:1467 `f->fill_surface_extrusion(...)`):
+Nur fuer internal solid non-bridge Surfaces. Pre/Post-Zaehlung der
+`fills.entities`:
+- `fill_surfaces` : Zahl der instrumentierten SurfaceFills
+- `fill_entries`  : Top-Level-Entities angehaengt
+- `fill_paths`    : Rekursiver Blatt-Count von ExtrusionPath
+- `fill_length_u` : Summe `e->length()` in scaled coord units
+- `count_hash`    : XOR (layer_id<<20) ^ fill_paths pro Surface
+- `length_hash`   : XOR (layer_id<<20) ^ (length_u * golden-ratio) pro Surface
+
+**Mess-Serie:**
+
+| run     | gcode sha  | filament mm | fill_surfs | fill_paths | fill_length_u | cnt_hash   | len_hash                |
+|---------|------------|-------------|------------|------------|---------------|------------|-------------------------|
+| x86-1   | cf92bc00…  | 39223.58    | 13445      | 229200     | 190744245585  | 0x5c800160 | 0x625886d09bdc4137      |
+| arm64-1 | 68eaf00a…  | 39224.93    | 13441      | **230208** | 190781166320  | 0x64c001a2 | 0xf24c0422ae07e68       |
+| arm64-2 | 6aebe2a1…  | 39224.94    | 13441      | **230212** | 190781238177  | 0x64c001a6 | 0x1eaadcc7a0d738f3      |
+| arm64-3 | b1f6a7b8…  | 39224.94    | 13441      | **230212** | 190781238177  | 0x64c001a6 | 0x1eaadcc7a0d738f3      |
+| arm64-4 | 4f0dc774…  | 39220.99    | 13441      | **230000** | 190660377715  | 0x64c00128 | 0x2dbe4a014fcb7c9f      |
+| arm64-5 | c683864f…  | 39220.45    | 13441      | **229959** | 190646387033  | 0x64c001d9 | 0x2a93491e4423b5cd      |
+
+**Zwei saubere Befunde:**
+
+1. **Primaerquelle: der Fill-Walker ist auf arm64 nichtdeterministisch.**
+   5 arm64-Laeufe haben identischen `fill_surfs=13441` (also die
+   Anzahl der *bearbeiteten* SurfaceFills ist stabil) aber vier
+   verschiedene `fill_paths`-Werte (229959-230212) und drei
+   verschiedene `fill_length_u`-Werte. Hoeheres Filament korreliert
+   streng mit mehr `fill_paths`/`length_u`. Delta Hoch-Tief:
+   ~250 fehlende Pfade = ~130 Mio scaled units Pfadlaenge
+   = ca. 130 mm Pfadlaenge (ex-Flow ≈ 4-5 mm Filament,
+   konsistent mit beobachteten 4.5 mm Filament-Delta).
+2. **Zweite Quelle existiert, downstream der Pfadgenerierung.**
+   arm64-2 und arm64-3 haben *identischen* Fill-Output (gleiche
+   Counts, gleiche Hashes), aber unterschiedliche G-Code-SHAs
+   `6aebe2a1…` vs `b1f6a7b8…`. Also: Fill-Walker produziert dieselbe
+   Pfadsammlung, aber Downstream (chain_lines / Perimeter-Interleaving
+   / GCode-Writer / Seam-Placer) produziert sie in anderer
+   Reihenfolge.
+
+**x86 vs arm64:** x86 generiert *weniger* Pfade (229200) als arm64 selbst
+in seinem "niedrigsten" Lauf (229959 bei arm64-5), aber die
+Pfad-*Laenge*-Summen sind nahe (x86 190744M vs arm64 190646-190781M).
+Also: arm64 teilt dieselbe Flaeche in mehr kurze Pfade; x86 fasst mehr
+zu laengeren Pfaden zusammen. Konsistent mit einer FP-Toleranz
+Unterschied in `chain_lines`/path-splitting.
+
+**Naechster Schritt (Klaus-Plan):** innerhalb der Pfadgenerierung
+weiter eingrenzen — vor/nach den intermediate steps der
+FillMonotonic/FillRectilinear-Pipeline (intersections sort,
+Monotonic-region building, path chaining). Plus Detail-Dump einer
+betroffenen Flaeche fuer hoch/niedrig nebeneinander.
+
+**Branch-Status Submodul:**
+- `main` (= Hauptrepo-Ref): `8500fcdcca` (upstream unveraendert)
+- `experiment/arm64-divergence`: enthaelt Stufe-A/B/C-Zaehler
+  (ea8057f908) + Stufe-3b-Zaehler (neu, folgt dieses Commit)
+
+**Referenztest gruen,** Scrub sauber.
+
+---
+
 ## 2026-11-02 02:05 UTC – Divergenz Stufe B+C: Dedup und mixed-Geometrie ebenfalls deterministisch (alles vor der Fuellung ist OK)
 
 Nach dem klaren Nein auf Hypothese A: zwei weitere Zaehler-Serien
