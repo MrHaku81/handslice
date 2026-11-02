@@ -18,6 +18,70 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-02 00:58 UTC – Divergenz Stufe A: Hypothese A falsifiziert (narrow/normal-Klassifikation ist nicht die Ursache)
+
+Zaehler-Patch (gated by `-DHANDSLICE_COUNT_SPLIT_SOLID`) am Caller-Site
+von `split_solid_surface` (Fill.cpp:1161) misst drei disjunkte
+Outcomes pro SurfaceFill:
+- `normal_only` : `narrow_infill.empty()` → keine Reklassifikation
+- `full_narrow` : `normal_infill.empty()` → ganzer SurfaceFill wird `ipConcentricInternal`
+- `mixed`       : beide non-empty → SurfaceFill wird in zwei gesplittet
+
+Jedes Outcome bekommt einen Zaehler und einen XOR-Hash
+`(layer_id << 20) ^ first_x`.
+
+**Mess-Setup:** eigene `-count`-Binaries (`handslice-cli-x86-count`,
+`handslice-cli-arm64-count`), Standard-CLI und Referenz-Test
+unveraendert. Modell: `local-test/auryn.stl`, Elegoo CC2 0.4 +
+0.20mm Standard + Elegoo PLA. x86 1 Lauf lokal, Poco X3 Pro 5 Laeufe
+via Wireless ADB. Alle 6 Laeufe ohne `--threads`-Limit (default-TBB).
+
+**Ergebnis (`/tmp/stufe-a/tally.tsv`):**
+
+| run     | runtime | gcode sha      | normal_only | full_narrow | mixed | full_narrow_hash | mixed_hash   | filament     |
+|---------|---------|----------------|-------------|-------------|-------|------------------|--------------|--------------|
+| x86-1   | 21.9 s  | d22a4e93…      | 0           | 779         | 345   | 0xc0f8b5de       | 0x2922e197   | 39223.58 mm  |
+| arm64-1 | 74.4 s  | cc7c68de…      | 0           | 779         | 345   | 0xc0c80fcc       | 0x293bda08   | 39224.94 mm  |
+| arm64-2 | 76.6 s  | 98679918…      | 0           | 779         | 345   | 0xc0c80fcc       | 0x293bda08   | 39224.94 mm  |
+| arm64-3 | 75.8 s  | 3b9ced0c…      | 0           | 779         | 345   | 0xc0c80fcc       | 0x293bda08   | 39157.78 mm  |
+| arm64-4 | 78.3 s  | 6f2abcd5…      | 0           | 779         | 345   | 0xc0c80fcc       | 0x293bda08   | 39224.94 mm  |
+| arm64-5 | 78.6 s  | e0c46b6a…      | 0           | 779         | 345   | 0xc0c80fcc       | 0x293bda08   | 39220.36 mm  |
+
+**Vier Beobachtungen:**
+
+1. **arm64-Zaehler ueber alle 5 Laeufe identisch** — gleiche Counts
+   UND gleiche Hashes. Welche Inseln als narrow/mixed klassifiziert
+   werden, ist auf arm64 vollstaendig deterministisch.
+2. **gcode-SHAs trotzdem alle 5 verschieden** — Nichtdeterminismus
+   besteht fort, aber **nicht** an diesem Entscheidungspunkt.
+3. **arm64 vs x86: Counts identisch, Hashes verschieden** —
+   Narrow/Normal-Entscheidungen stimmen in der Anzahl ueberein (779
+   full_narrow, 345 mixed, 0 normal_only), aber x86 klassifiziert
+   *andere* Inseln als narrow. Erklaert die Byte-Divergenz zwischen
+   x86 und arm64 nur zum Teil (eine Dimension davon).
+4. **Varianten unter den 5 Laeufen (Filament):**
+   - 3× 39224.94 mm (hoch): arm64-1, -2, -4
+   - 1× 39157.78 mm (niedrig, Delta −67 mm): arm64-3
+   - 1× 39220.36 mm (= Stufe-1 „hoch"-Variante `e4f28cab…`): arm64-5
+   - Die niedrige Variante aus Stufe 1 (`8a50e806…`, 38906.85 mm,
+     −316 mm) ist in diesen 5 Laeufen *nicht* mehr aufgetaucht.
+
+**Konsequenz:** Hypothese A ist **falsifiziert**. Weiter mit
+Hypothese B (SurfaceFillParams-std::set FP-Tie, Fill.cpp:833).
+
+**Belegstellen Patch:**
+- `src/libslic3r/Fill/Fill.cpp:23-54` – atomic-Zaehler + Reset
+- `src/libslic3r/Fill/Fill.cpp:1180-1230` – Instrumentierung am Caller-Site
+  (`#ifdef HANDSLICE_COUNT_SPLIT_SOLID`-Block)
+- `engine/cli/handslice-cli.cpp:60-73` – extern-Deklarationen
+- `engine/cli/handslice-cli.cpp:1130-1152` – Reset + stderr-Dump
+
+**Reference-Test gruen gehalten:** Standard-x86 nach jedem Rebuild
+mit `bash engine/test/run-reference-test.sh` verifiziert, SHA
+`92951c26…` bleibt stabil.
+
+---
+
 ## 2026-11-01 23:45 UTC – Divergenz Stufe 3: libslic3r-Kandidaten fuer solidInfill-Divergenz
 
 Aufgabe: in `src/libslic3r/` die Stellen finden, an denen (a) solidInfill-

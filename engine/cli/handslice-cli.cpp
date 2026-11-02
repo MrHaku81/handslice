@@ -46,6 +46,20 @@
 #include "nlohmann/json.hpp"
 
 #include "libslic3r/libslic3r.h"
+
+#ifdef HANDSLICE_COUNT_SPLIT_SOLID
+#include <atomic>
+#include <cstdint>
+namespace Slic3r {
+    extern std::atomic<uint64_t> g_hs_split_normal_only;
+    extern std::atomic<uint64_t> g_hs_split_full_narrow;
+    extern std::atomic<uint64_t> g_hs_split_mixed;
+    extern std::atomic<uint64_t> g_hs_split_normal_only_hash;
+    extern std::atomic<uint64_t> g_hs_split_full_narrow_hash;
+    extern std::atomic<uint64_t> g_hs_split_mixed_hash;
+    void hs_split_counters_reset();
+}
+#endif
 #include "libslic3r/libslic3r_version.h"
 #include "libslic3r/Exception.hpp"
 #include "libslic3r/Config.hpp"
@@ -1127,7 +1141,24 @@ static int run(int argc, char** argv) {
     // Alles TBB-heavy; muss in der konfigurierten Arena laufen,
     // sonst sieht Orcas Thread.cpp:222 die HW-Cores-Kapazitaet statt
     // der limitierten N.
+#ifdef HANDSLICE_COUNT_SPLIT_SOLID
+    // Experimental counters for Hypothese A (narrow/normal solidInfill
+    // classification in Fill.cpp:split_solid_surface). Reset here, dump
+    // on stderr after process() completes. Standard builds don't define
+    // the macro, so this entire block compiles out.
+    Slic3r::hs_split_counters_reset();
+#endif
     run_in_arena([&] { print.process(); });
+#ifdef HANDSLICE_COUNT_SPLIT_SOLID
+    std::cerr << "HS_SPLIT_SOLID"
+              << " normal_only=" << Slic3r::g_hs_split_normal_only.load()
+              << " full_narrow=" << Slic3r::g_hs_split_full_narrow.load()
+              << " mixed=" << Slic3r::g_hs_split_mixed.load()
+              << " normal_only_hash=0x" << std::hex << Slic3r::g_hs_split_normal_only_hash.load() << std::dec
+              << " full_narrow_hash=0x" << std::hex << Slic3r::g_hs_split_full_narrow_hash.load() << std::dec
+              << " mixed_hash=0x" << std::hex << Slic3r::g_hs_split_mixed_hash.load() << std::dec
+              << "\n";
+#endif
 
     // 6a. Preview-Mesh-Export (Pflicht 7 – plate-view benchmark).
     //
