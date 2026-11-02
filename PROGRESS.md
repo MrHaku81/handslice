@@ -18,6 +18,86 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-02 02:05 UTC – Divergenz Stufe B+C: Dedup und mixed-Geometrie ebenfalls deterministisch (alles vor der Fuellung ist OK)
+
+Nach dem klaren Nein auf Hypothese A: zwei weitere Zaehler-Serien
+mit demselben Setup (Auryn, x86 1× + Poco 5×, `-count`-Binaries,
+`-DHANDSLICE_COUNT_SPLIT_SOLID`).
+
+**Hypothese B** (SurfaceFillParams-std::set FP-Tie, Fill.cpp:833):
+Zaehler `surfaces_seen` und `unique_params` am Ende der Set-Belegung
+(Fill.cpp:1053) + Per-Layer `size_hash`.
+→ Alle 5 arm64-Laeufe: `surfaces_seen=21993, unique_params=3567,
+size_hash=0x1640003` identisch. **Falsifiziert.**
+
+**Hypothese C** (modifiziert — Geometrie *inside* mixed-Outcomes):
+Fuer jedes mixed-Resultat Vertex-Anzahlen von `normal_infill` und
+`narrow_infill` zusammenzaehlen, plus Geom-Hash aus den ersten
+Konturpunkt-Koordinaten der entstehenden Expolygone (Fill.cpp:1225-1250).
+→ Alle 5 arm64-Laeufe: `normal_vcount=29444, narrow_vcount=324653,
+geom_hash=0xfffa237886c543b6` identisch. **Falsifiziert.**
+
+**Mess-Serie (5 Laeufe hat beide Varianten erwischt):**
+
+| run     | sha                 | fil mm   | norm_v | narr_v | geom_hash              |
+|---------|---------------------|----------|--------|--------|-----------------------|
+| x86-1   | 5ff18b24…           | 39223.58 | 29441  | 324668 | 0xffbfcbfbceb530a2    |
+| arm64-1 | 8445b27e…           | 39224.94 | 29444  | 324653 | 0xfffa237886c543b6    |
+| arm64-2 | 057a447a…           | 38907.52 | 29444  | 324653 | 0xfffa237886c543b6    |
+| arm64-3 | e4bc484f…           | 38908.62 | 29444  | 324653 | 0xfffa237886c543b6    |
+| arm64-4 | 567020d1…           | 39220.36 | 29444  | 324653 | 0xfffa237886c543b6    |
+| arm64-5 | e3dfb0bc…           | 38907.30 | 29444  | 324653 | 0xfffa237886c543b6    |
+
+**Entscheidender Punkt:** Die 5 arm64-Laeufe decken beide Varianten ab
+(hoch ~39220/39225 mm, niedrig ~38907 mm — passt zur Stufe-1-Variante
+`8a50e806`), und **alle 5 haben identische Zaehler in jedem Feld**.
+
+**Schlussfolgerung:** Der arm64-Nichtdeterminismus liegt vollstaendig
+*downstream* der Flaechen-Klassifikation. `make_fills() → group_fills()
+→ split_solid_surface()` liefert auf arm64 bit-identische Entscheidungen
+UND bit-identische Polygon-Geometrien zwischen 5 Laeufen. Die Divergenz
+muss nach diesem Punkt entstehen:
+
+1. **FillBase/FillMonotonic/FillRectilinear Pfadgeneration** –
+   verwandelt die Expolygone in Extrusions-Linien. Nichtdeterminismus
+   koennte dort entstehen (siehe Stufe-3-Katalog, Fill/FillBase.cpp:1455,
+   1700, 2493, 2633, Fill/FillRectilinear.cpp:852, 2092-2093).
+2. **ShortestPath / chain_points / chain_polylines** –
+   Polyline-Chaining mit Tolleranz-Vergleichen.
+3. **PerimeterGenerator / Arachne**-Reihenfolge (Stufe-3-Hypothese D).
+4. **ExtrusionEntityCollection::sort** oder GCode-Writer-Interne
+   Sort-Operationen.
+5. **bridge_over_infill** (Stufe-3 originale Hypothese C,
+   PrintObject.cpp:3131/3143).
+
+Zwei Beobachtungen stuetzen Variante 1 oder 2:
+- arm64-1 und arm64-4 haben nah beieinanderliegende Filament-Werte
+  (39224/39220) aber unterschiedliche G-Codes → Reihenfolge-Diff.
+- arm64-2/3/5 haben untereinander variierende Filament-Werte
+  (38907.52 / 38908.62 / 38907.30) → kleine Materialunterschiede,
+  wahrscheinlich kleine Pfadlaengen-Unterschiede im Fuellmuster
+  selbst.
+
+Beides passt zu einer nicht-deterministischen Pfadgeneration, nicht
+zu einer anderen Klassifikation.
+
+**Nach CLAUDE.md Drei-Versuche-Regel:** Drei Hypothesen aus dem
+Stufe-3-Katalog (A, B, C) sind nun je mit sauberer Instrumentierung
+widerlegt. Haltemoment: nicht ins vierte Thema hineinraten, sondern
+den Befund melden und auf Klaus warten. Default-Weiterarbeit ohne
+Antwort: keine — Stufe D/E/F ohne Richtungswechsel waere spekulativ.
+
+**Fuer Klaus:** Mein Vorschlag ist, als naechste gezielte Hypothese
+die **FillMonotonic/FillRectilinear-Pfadgeneration** zu testen
+(Fill/FillRectilinear.cpp:852 `std::sort(sil.intersections.begin(),
+sil.intersections.end())` oder Fill/FillBase.cpp:1455 Edge-Grid-
+Projektion mit sort auf `std::pair<..., size_t>`-Keys). Ein Zaehler-
+Patch dort fiele kurz und zielsicher aus. Wenn du einen anderen Weg
+bevorzugst (z.B. erst `chain_points` oder `bridge_over_infill`),
+sag Bescheid.
+
+---
+
 ## 2026-11-02 00:58 UTC – Divergenz Stufe A: Hypothese A falsifiziert (narrow/normal-Klassifikation ist nicht die Ursache)
 
 Zaehler-Patch (gated by `-DHANDSLICE_COUNT_SPLIT_SOLID`) am Caller-Site

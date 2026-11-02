@@ -57,6 +57,12 @@ namespace Slic3r {
     extern std::atomic<uint64_t> g_hs_split_normal_only_hash;
     extern std::atomic<uint64_t> g_hs_split_full_narrow_hash;
     extern std::atomic<uint64_t> g_hs_split_mixed_hash;
+    extern std::atomic<uint64_t> g_hs_set_surfaces_seen;
+    extern std::atomic<uint64_t> g_hs_set_unique_params;
+    extern std::atomic<uint64_t> g_hs_set_size_hash;
+    extern std::atomic<uint64_t> g_hs_mixed_normal_vcount;
+    extern std::atomic<uint64_t> g_hs_mixed_narrow_vcount;
+    extern std::atomic<uint64_t> g_hs_mixed_geom_hash;
     void hs_split_counters_reset();
 }
 #endif
@@ -1157,6 +1163,16 @@ static int run(int argc, char** argv) {
               << " normal_only_hash=0x" << std::hex << Slic3r::g_hs_split_normal_only_hash.load() << std::dec
               << " full_narrow_hash=0x" << std::hex << Slic3r::g_hs_split_full_narrow_hash.load() << std::dec
               << " mixed_hash=0x" << std::hex << Slic3r::g_hs_split_mixed_hash.load() << std::dec
+              << "\n";
+    std::cerr << "HS_SET_PARAMS"
+              << " surfaces_seen=" << Slic3r::g_hs_set_surfaces_seen.load()
+              << " unique_params=" << Slic3r::g_hs_set_unique_params.load()
+              << " size_hash=0x" << std::hex << Slic3r::g_hs_set_size_hash.load() << std::dec
+              << "\n";
+    std::cerr << "HS_MIXED_GEOM"
+              << " normal_vcount=" << Slic3r::g_hs_mixed_normal_vcount.load()
+              << " narrow_vcount=" << Slic3r::g_hs_mixed_narrow_vcount.load()
+              << " geom_hash=0x" << std::hex << Slic3r::g_hs_mixed_geom_hash.load() << std::dec
               << "\n";
 #endif
 

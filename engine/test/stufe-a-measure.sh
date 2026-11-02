@@ -36,18 +36,23 @@ if [[ ! -f "${MODEL}" ]]; then
 fi
 
 mkdir -p "${OUT_DIR}"
-echo -e "run\tplatform\truntime_s\tgcode_sha\tnormal_only\tfull_narrow\tmixed\tnormal_only_hash\tfull_narrow_hash\tmixed_hash" > "${TALLY}"
+echo -e "run\tplatform\truntime_s\tgcode_sha\tfull_narr\tmixed\tsurfs_seen\tuniq_params\tnorm_v\tnarr_v\tgeom_hash" > "${TALLY}"
 
 MACHINE="${PROFILES}/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json"
 PROCESS="${PROFILES}/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json"
 FILAMENT="${PROFILES}/filament/ECC2/Elegoo PLA @ECC2.json"
 
 run_counters_from_stderr() {
-    # Parse the single `HS_SPLIT_SOLID` stderr line.
-    #   HS_SPLIT_SOLID normal_only=N full_narrow=M mixed=K <... three hashes ...>
+    # Parse HS_SPLIT_SOLID / HS_SET_PARAMS / HS_MIXED_GEOM.
     local stderr_file="$1"
-    grep '^HS_SPLIT_SOLID' "${stderr_file}" | \
-        sed -E 's|^HS_SPLIT_SOLID normal_only=([0-9]+) full_narrow=([0-9]+) mixed=([0-9]+) normal_only_hash=(0x[0-9a-f]+) full_narrow_hash=(0x[0-9a-f]+) mixed_hash=(0x[0-9a-f]+)$|\1\t\2\t\3\t\4\t\5\t\6|'
+    local split_fields set_fields geom_fields
+    split_fields=$(grep '^HS_SPLIT_SOLID' "${stderr_file}" | \
+        sed -E 's|^HS_SPLIT_SOLID normal_only=[0-9]+ full_narrow=([0-9]+) mixed=([0-9]+) .*$|\1\t\2|')
+    set_fields=$(grep '^HS_SET_PARAMS' "${stderr_file}" | \
+        sed -E 's|^HS_SET_PARAMS surfaces_seen=([0-9]+) unique_params=([0-9]+) .*$|\1\t\2|')
+    geom_fields=$(grep '^HS_MIXED_GEOM' "${stderr_file}" | \
+        sed -E 's|^HS_MIXED_GEOM normal_vcount=([0-9]+) narrow_vcount=([0-9]+) geom_hash=(0x[0-9a-f]+)$|\1\t\2\t\3|')
+    printf "%s\t%s\t%s" "${split_fields}" "${set_fields}" "${geom_fields}"
 }
 
 echo "=== x86: 1 Lauf (lokal) ==="
