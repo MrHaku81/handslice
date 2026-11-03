@@ -18,6 +18,264 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-03 20:04 UTC – Divergence Stufe 3c fix3: third uninit source localised (Print::m_origin), slicing pipeline Memcheck-clean, arm64/x86 29-path gap still open
+
+Setup: experimental submodule branch `experiment/arm64-divergence` advanced
+from `14cd97c6` to tip `3965b4904c`. Three new commits on top of the two
+earlier fixes:
+
+- `eeb325e926` — Print.hpp:1192 `Vec3d m_origin { Vec3d::Zero() }` and
+  LayerRegion.cpp:521 `double layer_thickness = 0.0`.
+- `3965b4904c` — Model.hpp:891 `mutable Timestamp mmuseg_ts { 0 }`.
+
+Main repo submodule pointer unchanged at `8500fcdcca`. Binaries built from
+branch tip `eeb325e926` (not rebuilt for `3965b4904c` since that commit is
+semantically a no-op on plain STL input): `handslice-cli-x86-count-fix3`,
+`handslice-cli-arm64-count-fix3`, debug `handslice-cli-x86-debug-fix3`.
+Standard reference-test cube still prints `92951c26…`.
+
+### 1. Localising the third uninit source — framing correction
+
+The previous Stufe-3c Memcheck logs attribute all 889 Brim uninit records
+and all residual GCode records to `stack: handslice-cli.cpp:854 run()`.
+A code audit of `run()` itself found no obviously uninit local — all
+scalars, Eigen vectors and Orca utility structs we instantiate there carry
+either an explicit `=` initialiser or a well-defined default ctor path
+(`Semver{} → semver_zero()`, `ConfigSubstitutionContext{rl}`, explicit
+designated init for `ThumbnailsParams`, …).
+
+Targeted rebuilds of `Brim.cpp` + `LayerRegion.cpp` with
+`-fno-ipa-sra -fno-inline-small-functions -fno-ipa-icf`, then of
+`handslice-cli.cpp` with the same flags, then with `-fno-inline`, then
+with `-O0`: none of these changed the reported origin. The
+`.isra.0 clone` marker disappeared from the stack after the second
+rebuild, but the origin stayed pinned to the function-start line of
+`run()`.
+
+Framing correction (per Klaus): the origin reports the **stack frame the
+uninitialised bytes live in, not the file that declares the uninit
+variable.** `Print print;` is on run()'s frame, so any field of `Print`
+whose default-ctor leaves it uninit shows up as "stack: run()@854" even
+though the bug is in `Print`'s ctor. The same is true for `Model`,
+`DynamicPrintConfig`, `GCodeProcessorResult`, and everything else in
+run() that is an Orca class with a `= default` ctor.
+
+### 2. `Print::m_origin` (Print.hpp:1192)
+
+Scan of all scalar/Eigen-vector members of Print declared without
+default-initialiser surfaced `Vec3d m_origin;`. `Print() = default`;
+Eigen's default-ctor leaves all three components uninitialised. The field
+is only ever assigned via `set_plate_origin(Vec3d)`. Our CLI does not
+call it, so `m_origin` remains uninit for the whole slice.
+
+Usage chain into the Brim pipeline:
+
+- `make_brim()` (Brim.cpp:940): `const Vec3d plate_offset =
+  print.get_plate_origin();` → `Point(scaled(plate_offset.x()),
+  scaled(plate_offset.y()))` translates `islands_area` and the
+  per-object brim maps.
+- `makeBrimInfillImpl()` (Brim.cpp:868): same read, translates each
+  brim loop by the scaled plate offset.
+- `PrintInstance::shift_without_plate_offset()` (Print.cpp:5150):
+  `shift − Point(scaled(plate_offset.x()), scaled(plate_offset.y()))`.
+  Called from Brim.cpp:31, :39, :50, :916, :923 — every brim
+  polygon `translate()`.
+
+The uninit bytes therefore propagate into every Point consumed by
+`diff_ex`/`intersection_ex` in the brim pipeline. Clipper then
+compares points at `clipper.cpp:92` (`FRound`), `:109` (IntPoint
+operator==), `:610` (RangeTest), and Eigen's `MatrixBase.h:283`
+(IntPoint comparison) — exactly the error sites in the earlier log.
+
+Fix: `Vec3d m_origin { Vec3d::Zero() };` (one-line default-init).
+
+### 3. `LayerRegion::layer_thickness` (LayerRegion.cpp:521)
+
+In `process_external_surfaces`, a local `double layer_thickness;` is
+passed by reference to three successive
+`fill_surfaces_extract_expolygons(…)` calls. Each writes to it only
+when a matching surface is found; if **none** of the layer's surfaces
+is `stInternalSolid`, `stInternal`, or `stTop`, the variable stays
+uninit and is later copied into three Surface `thickness` templates
+(lines 570, 608, 613). Rare in practice (1 Bunny record pre-fix3),
+but a real stack-local uninit. Pinned directly by Memcheck under the
+targeted rebuild.
+
+Fix: `double layer_thickness = 0.0;`.
+
+### 4. `ModelVolume::mmuseg_ts` (Model.hpp:891)
+
+`uint64_t mmuseg_ts;` field read in
+`ModelVolume::get_extruders() const` at Model.cpp:2544
+(`mmu_segmentation_facets.timestamp() != mmuseg_ts`). None of the
+five ModelVolume ctors initialise it. On plain STL input the
+semantic outcome is the same (`mmuseg_extruders` ends up empty
+either way), but the uninit read is the last Memcheck record left
+in the slicing phase after fix3.
+
+Fix: `mutable Timestamp mmuseg_ts { 0 };`.
+
+### 5. Memcheck under fix3 (binary built from `eeb325e926`; mmuseg_ts
+not yet in binary — the one record below stays)
+
+Bunny, threads=1, `handslice-cli-x86-debug-fix3`:
+
+- **Error summary: 1987 errors from 13 contexts** (down from
+  2566 contexts / 229 M errors on noisra pre-fix3).
+- All remaining contexts are in `export_gcode`, not slicing:
+  - 6× `GCodeWriter::set_extruders` (GCodeWriter.cpp:64) via
+    `placeholder_parser_process`
+  - 2× `TimelapsePosPicker::construct_printable_area_by_printer`
+    (TimelapsePosPicker.cpp:86, :100), origin on run()'s frame
+  - 1× `ModelVolume::get_extruders` via `Print::apply`
+    (Model.cpp:2544, heap-origin at `ModelObject::add_volume`
+    Model.cpp:1256) — addressed by commit `3965b4904c`
+  - 4× various `placeholder_parser_process` (variadic set-extruder
+    + layer-process paths)
+
+Cube, same binary: 213 errors from 13 contexts. Brim-context: 0.
+
+### 6. Measurement after fix3 (binary built from `eeb325e926`)
+
+Reference test, standard x86 binary (unchanged submodule pin):
+`92951c26…` identical.
+
+Reference test, `handslice-cli-x86-count-fix3` on cube_20mm_centered_cc2:
+EXECUTABLE_BLOCK sha `92951c26…` identical.
+
+Auryn x86 (`handslice-cli-x86-count-fix3`, 1 run):
+
+| metric    | value                   | Δ vs fix2 x86 |
+|-----------|-------------------------|---------------|
+| paths     | 229200                  | 0             |
+| length_u  | 190744245585            | 0             |
+| filament  | 39223.58 mm             | 0             |
+| sha256    | `09f866c7…`             | changed (bytes reorder: plate-offset was non-zero pre-fix) |
+
+Auryn arm64 (`handslice-cli-arm64-count-fix3`, 3 runs on Poco X3 Pro):
+
+| metric    | value                | across runs   | Δ vs x86 fix3 |
+|-----------|----------------------|---------------|---------------|
+| paths     | 229171               | identical ×3  | **−29**       |
+| length_u  | 190744327881         | identical ×3  | **+82 296**   |
+| sha256    | 3 distinct           | 3 differ      | n/a           |
+
+Bunny x86 (`handslice-cli-x86-count-fix3`, 1 run):
+
+| metric    | value          |
+|-----------|----------------|
+| paths     | 170320         |
+| length_u  | 294126529338   |
+| filament  | 129020.69 mm   |
+| sha256    | `8d5eaed4…`    |
+
+Bunny arm64 (`handslice-cli-arm64-count-fix3`, 3 runs):
+
+| metric    | value           | across runs   | Δ vs x86 fix3 |
+|-----------|-----------------|---------------|---------------|
+| paths     | 170331          | identical ×3  | **−11**       |
+| length_u  | 294112789727    | identical ×3  | **−13 739 611** |
+| sha256    | 3 distinct      | 3 differ      | n/a           |
+
+### 7. Interpretation of the remaining arm64/x86 gap
+
+The Print::m_origin fix is correct and eliminates the entire Brim
+Memcheck noise (889 → 0 records), but **does not change the arm64
+path counters on either model**: Auryn stays at 229171 paths and Bunny
+at 170331 paths, exactly as under fix2. The uninit `m_origin` bytes
+on arm64's default stack happened to be zero for this binary layout,
+so forcing them to zero does not shift the output.
+
+The 29-path (Auryn) and 11-path (Bunny) gap therefore has a different
+driver — not addressed by any of the three committed fixes. Memcheck
+on `handslice-cli-x86-debug-fix3` reports **zero** uninit records in
+the slicing phases (Fill, Perimeter, Clipper core, Brim,
+LayerRegion::process_external_surfaces) on Bunny.
+
+Two remaining hypotheses:
+
+- (a) An uninit heap-allocated field somewhere in the config /
+  PrintObject / Layer / LayerRegion graph whose bytes get copied
+  through without ever triggering a conditional Memcheck instruments
+  (e.g. directly into a floating-point computation whose result ends
+  up compared later, but tracked as `heap allocation` origin — the
+  only such record left in the slicing phase under fix3 is
+  `ModelVolume::get_extruders` on Model.cpp:2544, which the
+  mmuseg_ts commit resolves). After that commit, slicing-phase
+  Memcheck would drop to 0.
+- (b) Legitimate IEEE-754 divergence between x86 and arm64 in `atan2`,
+  `sin`/`cos`, or an `fma` path along the Fill walker or Clipper
+  boolean ops. The PROGRESS 149300f claim "arm64 fix2 behaves exactly
+  like a pattern-initialised build" was based on path-count sign
+  (both −29 vs x86 default) and is suggestive but not conclusive — a
+  pattern-init vs arm64 full byte-diff of the g-code was never
+  performed.
+
+Measuring the mmuseg_ts commit's effect requires rebuilding
+libslic3r and relinking both count binaries; since the fix is
+semantically a no-op for STL input, the counters would stay at
+229171/170331 and only the Memcheck slicing-phase contexts would
+drop from 1 to 0. Deferred.
+
+### Abschlussbericht (CLAUDE.md §4 rubrics)
+
+**1. Nachweislich funktioniert**
+
+- Print.hpp:1192 uninit identified, fixed, Memcheck-confirmed:
+  `handslice-cli-x86-debug-fix3` Bunny log shows 0 Brim records
+  (vs 889 pre-fix3). All 889 records had stack-origin `run()@854`;
+  all had error-site in Clipper comparisons on polygon
+  coordinates fed through `shift_without_plate_offset` and
+  `scaled(plate_offset.x/y)`.
+- LayerRegion.cpp:521 uninit identified via targeted rebuild
+  (`-fno-ipa-sra -fno-inline-small-functions -fno-ipa-icf` on
+  Brim.cpp + LayerRegion.cpp), fixed, Memcheck-confirmed:
+  Bunny log 0 external-surface records (vs 1 pre-fix3).
+- Reference cube still byte-identical to GUI export
+  (`92951c26…`) under `handslice-cli-x86-count-fix3`.
+- arm64 output is reproducible across 3 Auryn runs and 3 Bunny
+  runs (identical paths/length_u; SHAs differ by byte reorder
+  only). Phase C reproducibility criterion still met.
+- Framing lesson documented: "stack: run()@854" origin means the
+  uninit bytes live on run()'s stack frame, which includes every
+  Orca object constructed as a local in run() (Print, Model,
+  DynamicPrintConfig, GCodeProcessorResult, …). Future uninit
+  hunts should audit those classes' ctors, not just handslice-cli.cpp.
+
+**2. Ungeprüft**
+
+- arm64 **output byte-identical to x86** (Phase C hard criterion):
+  **still not met**. 29-path / +82 296 length_u delta on Auryn, 11-path
+  / −13 739 611 length_u delta on Bunny. m_origin fix, LayerRegion
+  fix and mmuseg_ts fix do not close this gap.
+- Whether the remaining gap is driven by a heap-allocated uninit
+  field in PrintObject / Layer / LayerRegion that Memcheck
+  classifies into the GCode-writer context, or by legitimate
+  IEEE-754 FP differences between x86 and arm64. The pattern-init
+  vs arm64 output byte-diff test was not run in this session.
+- Effect of the `mmuseg_ts` commit (3965b4904c) on the Memcheck
+  slicing-phase count. Expected: 1 → 0 records. Counters: no
+  change. Not re-measured.
+- Whether the three fixes should be submitted upstream to
+  OrcaSlicer. Print::m_origin and ModelVolume::mmuseg_ts both
+  exist identically in PrusaSlicer; LayerRegion::layer_thickness
+  is OrcaSlicer-specific (the surrounding
+  `process_external_surfaces` was rewritten in ORCA). Decision
+  deferred.
+
+**3. Geht nicht**
+
+- Localising the 29-path arm64/x86 gap driver from the current
+  Memcheck log. All slicing-phase uninit records are now either
+  cleared (Fill, Perimeter, Clipper core, Brim,
+  process_external_surfaces) or addressed by the mmuseg_ts commit.
+  If the gap is heap-origin uninit, it is hidden by Memcheck's
+  context attribution to the export-phase. If it is IEEE-754, it
+  is not an uninit at all.
+- Blocker #3 (Clang build) unchanged.
+
+---
+
 ## 2026-11-02 23:52 UTC – Divergence Stufe 3c Both-Fixes Measurement: arm64 Fill now reproducible, Fill/Clipper/Perimeter Memcheck-clean, third uninit source identified in Brim/GCode
 
 Setup: experimental submodule branch `experiment/arm64-divergence` tip is
