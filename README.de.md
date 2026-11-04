@@ -33,7 +33,14 @@ bildet das Carbon-Muster vollflächig ab. Zeitraffer:
 
 Handslice ist ein **eigenständiges Projekt**. Es bettet die Slicing-Engine von
 [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) (SoftFever) ein und
-übernimmt Profile und Netzwerkprotokoll aus
+baut derzeit aus einem kleinen Fork unter
+[`MrHaku81/OrcaSlicer`, Zweig `fix/uninit-handslice`](https://github.com/MrHaku81/OrcaSlicer/tree/fix/uninit-handslice).
+Der Fork sitzt auf OrcaSlicer 2.4 und trägt fünf kleine
+Default-Initialiser-Fixes, die undefinierte Stack- und Member-Lesevorgänge
+in der Slicing-Pipeline beseitigen und die Slicer-Ausgabe über
+wiederholte Läufe und zwischen x86 und arm64 reproduzierbar machen.
+Die Fixes werden Orca upstream angeboten.
+Handslice übernimmt außerdem Profile und Netzwerkprotokoll aus
 [ElegooSlicer](https://github.com/ELEGOO-3D/ElegooSlicer). Es ist **kein**
 offizielles Produkt von SoftFever, Elegoo oder Bambu Lab.
 

@@ -33,7 +33,13 @@ layer picks up the carbon pattern across its full area. Timelapse:
 
 Handslice is an **independent project**. It embeds the slicing engine
 from [OrcaSlicer](https://github.com/SoftFever/OrcaSlicer) (SoftFever),
-and borrows printer profiles and the network protocol from
+currently built from a small fork at
+[`MrHaku81/OrcaSlicer`, branch `fix/uninit-handslice`](https://github.com/MrHaku81/OrcaSlicer/tree/fix/uninit-handslice).
+The fork tracks OrcaSlicer 2.4 and carries five small default-initialiser
+fixes that eliminate undefined stack / member reads in the slicing
+pipeline and make slicer output reproducible across repeated runs and
+across x86 / arm64. The fixes will be offered upstream to OrcaSlicer.
+Handslice also borrows printer profiles and the network protocol from
 [ElegooSlicer](https://github.com/ELEGOO-3D/ElegooSlicer). It is
 **not** an official product of SoftFever, Elegoo or Bambu Lab.
 

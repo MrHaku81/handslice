@@ -12,6 +12,37 @@ Keine Engine-Patches aus Hersteller-Forks. ElegooSlicer merged Orca-Upstream
 nur periodisch und liegt zurück; zwei Codebasen zu verfolgen ist nicht
 tragbar.
 
+## Current engine source (2026-11-04)
+
+The submodule at `engine/OrcaSlicer` points at a small Handslice-owned
+fork of OrcaSlicer:
+[`MrHaku81/OrcaSlicer`, branch `fix/uninit-handslice`](https://github.com/MrHaku81/OrcaSlicer/tree/fix/uninit-handslice).
+The fork sits on OrcaSlicer 2.4 (tag `v2.4.2`) and carries five small
+default-initialiser commits (PolyNode, WallToolPathsParams,
+`Print::m_origin`, `LayerRegion::layer_thickness`,
+`ModelVolume::mmuseg_ts`). None of the five commits add instrumentation
+or behaviour changes; each one turns an undefined stack / member read
+into a canonical zero / default value.
+
+Why this is not a vendor fork in the CLAUDE.md §2 sense: no code is
+taken from ElegooSlicer, Creality or any other hardware vendor branch.
+All five fixes were authored for Handslice from public evidence
+(Valgrind traces, reading the surrounding call chain) and target bugs
+that also exist in current OrcaSlicer main (modulo the Clipper2
+migration, which replaces the file the PolyNode fix touches) and in
+PrusaSlicer's `bundled_deps/clipper`.
+
+Why we need them on the engine: the five fixes together eliminate
+~1 100 Memcheck records in the slicing pipeline on a reference test
+slice and make the arm64 Fill-walker output reproducible across
+repeated runs on the same device. The remaining arm64 ↔ x86 gap after
+the fixes is a deterministic platform computation difference (sub-path
+splits in the Fill walker), not an uninitialised-stack artefact — see
+`PROGRESS.md`, entry 2026-11-04 05:23 UTC.
+
+The fixes will be offered upstream to OrcaSlicer. Once accepted, the
+submodule will track OrcaSlicer upstream again and the fork goes away.
+
 ## Reihenfolge – jeder Schritt ein eigener Auftrag mit eigenem Nachweis
 
 ### Schritt A: Headless-Build auf x86 (CachyOS)
