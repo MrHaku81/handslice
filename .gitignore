@@ -56,6 +56,11 @@ __pycache__/
 # Large bundled engine binaries (über Release-Assets verteilen)
 /engine/bin/*-arm64
 /engine/bin/*-x86
+# CLI-Varianten (Debug, Zaehler-Builds, Experimente): alles unter
+# /engine/bin/handslice-cli-* ist Build-Ausgabe, kein Quelltext.
+/engine/bin/handslice-cli-*
+# .prefix-backup-Dateien, die Build-Scripts fuer Rollback anlegen
+/engine/bin/*.prefix-backup
 # Side-Car-Hash-Dateien, die die Build-Scripts neben die Binaries schreiben
 /engine/bin/*.commit
 # Schema-Join-Zwischendateien (aus engine/scripts/*.py); eingecheckt
@@ -70,4 +75,6 @@ __pycache__/
 # eincheckbar, falls spaeter angelegt – nur der User-lokale Override wird
 # ignoriert)
 .claude/settings.local.json
+# Claude Code Session-/Scheduler-Locks (lokaler Prozesszustand)
+.claude/*.lock
 /local-test/

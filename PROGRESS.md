@@ -18,6 +18,29 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## Offen nach Fork-Umschaltung (2026-11-04)
+
+Offene Punkte nach dem Abschluss des Fork-Umbaus (Haupt-Commit 2931023,
+Submodul-Zweig fix/uninit-handslice auf MrHaku81/OrcaSlicer).
+
+a) Gerätetest der aktuellen Release-APK auf dem Poco (Klaus) und
+   Probedruck Bunny auf dem CC2 (Klaus startet den Druck).
+
+b) Vor dem Release CLIs + APK einmal mit dem finalen Haupt-Commit neu
+   bauen (zuletzt HANDSLICE_CLI_COMMIT=50f88f5, HEAD ist 2931023).
+
+c) Submodul-Zweig fix/uninit-upstream: Commit-Messages bereinigen
+   (kein Modellname, interner Jargon raus), dann bauen und testen –
+   Vorbereitung für Orca-Issue + PR.
+
+d) Valgrind: 12 Kontexte im `export_gcode`-Pfad (TimelapsePosPicker,
+   GCodeWriter::set_extruders, placeholder_parser_process) noch offen.
+
+e) Upstream-Commit 99dea01cc3 (m_origin) lesen: wurde der
+   Determinismus-Aspekt dort erkannt?
+
+---
+
 ## 2026-11-04 19:26 UTC – fix/uninit-handslice: five clean uninit fixes on top of 8500fcdcca, verified; upstream rebase probe; PrusaSlicer comparison
 
 Preparation for the handslice fork + Orca PR. No pushes; main-repo
