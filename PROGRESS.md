@@ -18,6 +18,173 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-04 19:26 UTC – fix/uninit-handslice: five clean uninit fixes on top of 8500fcdcca, verified; upstream rebase probe; PrusaSlicer comparison
+
+Preparation for the handslice fork + Orca PR. No pushes; main-repo
+submodule pointer unchanged (committed at 8500fcdcca; working tree is
+on the new branch fix/uninit-handslice).
+
+### 1. Branch `fix/uninit-handslice` (base 8500fcdcca)
+
+Five commits, one per fix, English messages with What / Why /
+Evidence and the Co-Authored-By trailer. Diffstat: 5 files, +6/-4
+lines.
+
+| sha        | summary                                                                                      |
+|------------|----------------------------------------------------------------------------------------------|
+| 63124563ef | clipper: default-init PolyNode::m_jointype / m_endtype                                        |
+| 3aaf35dc83 | fill: initialise WallToolPathsParams.min_length_factor and is_top_or_bottom_layer in FillConcentricInternal |
+| fccc0fe868 | print: default-init Print::m_origin to Vec3d::Zero()                                          |
+| 06ca0d9ebb | layer_region: default-init layer_thickness local in process_external_surfaces                 |
+| a13dce311e | model: default-init ModelVolume::mmuseg_ts to 0                                               |
+
+No counter/debug/experimental code in any of these commits. The
+instrumentation commits that previously rode on top
+(`0b5d4c3a7e …eeb325e926`, `3965b4904c`) stay on
+`experiment/arm64-divergence` only.
+
+### 2. Verification (standard build flags; no HANDSLICE_COUNT_SPLIT_SOLID, no init flags)
+
+Fresh binaries built from fix/uninit-handslice:
+
+- `handslice-cli-x86`   (`engine/build-headless-x86.sh`)
+- `handslice-cli-arm64` (`engine/build-cli-arm64.sh`)
+- `handslice-cli-x86-debug` (`engine/build-headless-x86-debug.sh`)
+
+Reference cube on new x86 binary via `engine/test/run-reference-test.sh`:
+EXECUTABLE_BLOCK sha `92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`,
+8479 lines — **identical** to the pinned v2.4.2 GUI export.
+
+arm64 reproducibility (three slices each, Poco X3 Pro, standard
+binary; counters not available, so reproducibility checked via
+`total_filament_used_mm` from stats JSON):
+
+| model | 3× runs filament_mm                 |
+|-------|-------------------------------------|
+| Auryn | 39 223.4934147595 (3× identical)    |
+| Bunny | 129 020.89814531246 (3× identical)  |
+
+Full-gcode sha256 differs across runs only in header timestamps; the
+semantic output is bit-stable. Stufe-3c reproducibility criterion met
+under this branch.
+
+Valgrind short run, Bunny x86-debug, `--threads 1 --quiet`
+(`local-test/stufe-3c/uninit-handslice-valgrind/memcheck.log`):
+
+- **ERROR SUMMARY: 1986 errors from 12 contexts** (vs 1987 / 13
+  contexts under fix3; the one less context is the Model.cpp:2544
+  `ModelVolume::get_extruders` record that the mmuseg_ts commit
+  resolves — previously heap-origin via `ModelObject::add_volume`).
+- Context breakdown: 4× `TimelapsePosPicker::construct_printable_area_by_printer`
+  (s_round at Point.hpp:197 + ClipperOffset::AddPath at clipper.cpp:3391),
+  1× `GCodeWriter::set_extruders` via `placeholder_parser_process`,
+  6× `placeholder_parser_process` (variadic set-extruder, process_layer
+  :4639, :4682, _do_export :3118, :3485, :3493, :3912). **All 12
+  contexts are in `export_gcode`.** The slicing pipeline (Fill,
+  Perimeter, Clipper core, Brim, LayerRegion::process_external_surfaces,
+  Arachne/WallToolPaths) reports zero uninit records.
+
+### 3. Upstream delta since 8500fcdcca
+
+`origin/main` fetched today; tip `79985162e4`. Merge-base with
+`8500fcdcca` is `3ffb9585d2`, confirming 8500fcdcca is on the Orca
+2.4 release branch and not an ancestor of main. 3 623 commits on
+main since the divergence.
+
+Rebase probe branch `fix/uninit-upstream` (based on origin/main
+79985162e4) — cherry-pick all five fixes:
+
+| fix                      | result on upstream main | note                                                                                                                 |
+|--------------------------|-------------------------|----------------------------------------------------------------------------------------------------------------------|
+| PolyNode                 | **conflict (file gone)** | `deps_src/clipper/clipper.hpp` was removed by Clipper2 migration `222c6a2df5` (2026-10-02). Needs Clipper2 port.      |
+| WallToolPathsParams      | auto-merge (OK)         | FillConcentricInternal.cpp hunk applied cleanly with offset (fix block moved from line 29 to 47 of upstream).         |
+| Print::m_origin          | **already fixed**       | Noisyfox `99dea01cc3` (2026-06-22) introduced `Vec3d m_origin {0, 0, 0};` — equivalent to our `Vec3d::Zero()`. Skip. |
+| LayerRegion::layer_thickness | auto-merge (OK)     | Line moved from 521 to 551 of upstream, same context.                                                                 |
+| ModelVolume::mmuseg_ts   | auto-merge (OK)         | Line moved from 891 to 1021 of upstream, same context.                                                                |
+
+Net branch state: `fix/uninit-upstream` = origin/main + 3 commits
+(31a98f9cff, df0dbb5b06, def393b088). Not built, not tested — probe
+only.
+
+### 4. Per-fix `git blame` (introduction) and PrusaSlicer comparison
+
+| fix line                              | introduced        | by                | PrusaSlicer master (tip `ff3d667` "Bumped up version to 3.0.0-alpha13") |
+|---------------------------------------|-------------------|-------------------|-------------------------------------------------------------------------|
+| PolyNode ctor, clipper.hpp:144        | 2022-07-15        | lane.wei (1555904bef, "Initial commit") | **identical bug** at `bundled_deps/clipper/include/clipper/clipper.hpp:143` — `PolyNode() : Parent(0), Index(0), m_IsOpen(false) {}` |
+| WallToolPathsParams block, FillConcentricInternal.cpp | 2022-08-10 / 2022-10-12 | salt.wei (aab8a12801, 0f1a001fd6) | not compared — Arachne is Orca-specific                                 |
+| Print::m_origin, Print.hpp:1192       | 2022-07-15        | lane.wei (1555904bef)   | **field does not exist** — PrusaSlicer has no Print::m_origin. BBS/Orca-only.           |
+| LayerRegion::layer_thickness, LayerRegion.cpp:521 | 2023-10-19 | Noisyfox (075a08bca8)    | not compared (not requested; Orca-specific process_external_surfaces path).            |
+| ModelVolume::mmuseg_ts, Model.hpp:891 | 2022-07-15        | lane.wei (1555904bef)   | **field does not exist** — PrusaSlicer has no mmuseg_* at all. BBS/Orca-only.          |
+
+Takeaway: of the three fields the user asked us to cross-check in
+PrusaSlicer, **PolyNode is a shared upstream bug** worth mentioning
+in a PR (same bug since original Clipper1 import), while
+`Print::m_origin` and `ModelVolume::mmuseg_ts` are BBS/Orca-specific
+fields and cannot be ported upstream to PrusaSlicer. The PolyNode
+fix is also moot on current Orca main because of the Clipper2
+migration; our fix is still valid on the 2.4 release line.
+
+### 5. Artefacts
+
+- Submodule branches (local, not pushed):
+  - `fix/uninit-handslice` — 5 commits on 8500fcdcca (the Handslice
+    fork candidate).
+  - `fix/uninit-upstream` — 3 commits on origin/main 79985162e4 (the
+    probe for Orca PR; PolyNode and Print::m_origin not applicable).
+- Standard binaries at HEAD of fix/uninit-handslice:
+  `handslice-cli-{x86,arm64,x86-debug}` in `engine/bin/` (pre-fix
+  binaries preserved as `*.prefix-backup`).
+- Verification outputs under `local-test/stufe-3c/`:
+  - `uninit-handslice-valgrind/{memcheck.log,run.sh}`
+  - Poco: `/data/local/tmp/handslice/verify-uninit-handslice/`
+    (3 Auryn + 3 Bunny runs); summary `verify.log`.
+
+### Final report (CLAUDE.md §4 rubrics)
+
+**1. Demonstrably works**
+
+- Branch `fix/uninit-handslice` created at 8500fcdcca with five
+  clean commits (sha trailer above), English messages with
+  What / Why / Evidence / Co-Authored-By. No counter or debug
+  code in the branch.
+- Standard-flag cube reference on the new x86 binary:
+  `92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`
+  identical to v2.4.2 GUI reference.
+- arm64 Auryn 3× and Bunny 3× on Poco X3 Pro with the new standard
+  binary: filament_mm bit-stable across runs (39 223.493 /
+  129 020.898 mm).
+- Valgrind Memcheck on Bunny x86-debug: slicing pipeline (Fill,
+  Perimeter, Clipper core, Brim, LayerRegion::process_external_surfaces,
+  Arachne) reports zero uninit records; the 12 remaining contexts
+  are all in GCode export (`TimelapsePosPicker`, `GCodeWriter::set_extruders`
+  via `placeholder_parser`, variadic set-extruder paths).
+- Upstream rebase probe: 3 of 5 fixes cherry-pick cleanly to
+  current origin/main; PolyNode blocked by Clipper2 migration;
+  Print::m_origin already fixed upstream by 99dea01cc3.
+- PrusaSlicer cross-check: PolyNode bug identical in PrusaSlicer's
+  bundled_deps/clipper; Print::m_origin and ModelVolume::mmuseg_ts
+  fields are BBS/Orca-specific and absent in PrusaSlicer.
+
+**2. Unverified**
+
+- fix/uninit-upstream has not been built or tested — probe only.
+  Before submitting a PR, Klaus will want to build that branch
+  on the upstream dependency set and rerun at least the cube
+  reference test there.
+- Whether the Clipper2 migration on upstream main
+  (`222c6a2df5`) left the equivalent PolyPath/PolyTree member
+  default-init in the same undefined state. Not inspected.
+- WallToolPathsParams and LayerRegion::layer_thickness were not
+  cross-checked against PrusaSlicer (not requested; also
+  path-sensitive and may live in other files there).
+
+**3. Blocked**
+
+- Nothing new. Main-repo submodule pointer stays committed at
+  8500fcdcca per instruction; no pushes performed.
+
+---
+
 ## 2026-11-04 05:23 UTC – Divergence Stufe 3c decision test: init-mode invariance proves uninit stack variables no longer drive the arm64/x86 gap
 
 Setup: experimental submodule branch `experiment/arm64-divergence` at tip
