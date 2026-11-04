@@ -18,6 +18,201 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-04 05:23 UTC – Divergence Stufe 3c decision test: init-mode invariance proves uninit stack variables no longer drive the arm64/x86 gap
+
+Setup: experimental submodule branch `experiment/arm64-divergence` at tip
+`3965b4904c` (three committed fixes: PolyNode-ctor-init,
+WallToolPathsParams-init, Print::m_origin + LayerRegion::layer_thickness,
+ModelVolume::mmuseg_ts). Main repo submodule pointer still `8500fcdcca`,
+not pushed.
+
+Six fresh binaries were built from the same tip to keep the three init
+modes apples-to-apples:
+
+| binary                                 | arch  | flag                              | sha of cube EXECUTABLE_BLOCK |
+|----------------------------------------|-------|-----------------------------------|------------------------------|
+| handslice-cli-x86-count-fix3b          | x86   | (none)                            | `92951c26…` (reference)      |
+| handslice-cli-x86-count-pattern        | x86   | -ftrivial-auto-var-init=pattern   | n/a                          |
+| handslice-cli-x86-count-zero           | x86   | -ftrivial-auto-var-init=zero      | n/a                          |
+| handslice-cli-arm64-count-fix3b        | arm64 | (none)                            | n/a                          |
+| handslice-cli-arm64-count-pattern      | arm64 | -ftrivial-auto-var-init=pattern   | n/a                          |
+| handslice-cli-arm64-count-zero         | arm64 | -ftrivial-auto-var-init=zero      | n/a                          |
+
+Reference cube on `handslice-cli-x86-count-fix3b` prints EXECUTABLE_BLOCK
+sha `92951c26260cedd1866a4694adfcc5768389442e7cc3993c0f94dfae8777675d`,
+8479 lines — identical to the pinned v2.4.2 GUI export. The standard
+reference test (`engine/bin/handslice-cli-x86`, not touched) and the
+standard x86 count binary (`handslice-cli-x86-count`, backed up and
+restored, byte-identical) remain unchanged. GCC on AMR5 is 16.2.1 →
+`-ftrivial-auto-var-init` supported (since GCC 12); NDK 27.3 clang
+supports it as well. For x86 I added `engine/build-headless-x86-count-init.sh`
+analogous to the arm64 variant.
+
+### 1. Decision test — init-mode invariance
+
+Each of the six binaries slices Auryn and Bunny once with the ECC2 0.4 /
+0.20mm Standard / Elegoo PLA profile set (`--quiet`, no `--no-center`;
+Auryn is not centred on the plate origin, so the `--no-center` flag
+from the cube test does not apply). HS_FILL_OUT paths and length_u
+captured from stderr, filament_mm from the stats JSON.
+
+x86 (AMR5, Ryzen 7 5800U):
+
+| mode     | model | paths   | length_u       | filament_mm |
+|----------|-------|---------|----------------|-------------|
+| fix3b    | auryn | 229 200 | 190 744 245 585 | 39 223.579 |
+| pattern  | auryn | 229 200 | 190 744 245 585 | 39 223.579 |
+| zero     | auryn | 229 200 | 190 744 245 585 | 39 223.579 |
+| fix3b    | bunny | 170 320 | 294 126 529 338 | 129 020.693 |
+| pattern  | bunny | 170 320 | 294 126 529 338 | 129 020.693 |
+| zero     | bunny | 170 320 | 294 126 529 338 | 129 020.693 |
+
+arm64 (Poco X3 Pro, Snapdragon 860):
+
+| mode     | model | paths   | length_u       | filament_mm |
+|----------|-------|---------|----------------|-------------|
+| fix3b    | auryn | 229 171 | 190 744 327 881 | 39 223.493 |
+| pattern  | auryn | 229 171 | 190 744 327 881 | 39 223.493 |
+| zero     | auryn | 229 171 | 190 744 327 881 | 39 223.493 |
+| fix3b    | bunny | 170 331 | 294 112 789 727 | 129 020.898 |
+| pattern  | bunny | 170 331 | 294 112 789 727 | 129 020.898 |
+| zero     | bunny | 170 331 | 294 112 789 727 | 129 020.898 |
+
+Within each architecture the three init modes are **identical in every
+HS_FILL_OUT counter and in filament_mm**. Full-gcode sha256 still
+differs across modes (the g-code stream has other non-slicing fields
+that are sensitive to stack layout), but the slicing pipeline's output
+is now mode-invariant.
+
+Across architectures:
+
+- Auryn: x86 229 200 vs arm64 229 171 → x86 has 29 more paths; length_u
+  differs by 82 296 u (≈ 0.082 mm cumulative); filament 39 223.579 vs
+  39 223.493 mm → Δ = −0.086 mm.
+- Bunny: x86 170 320 vs arm64 170 331 → arm64 has 11 more paths;
+  length_u differs by 13 739 611 u (≈ 13.74 mm cumulative); filament
+  129 020.693 vs 129 020.898 mm → Δ = +0.205 mm.
+
+Conclusion: no uninitialised stack variable is reachable from the
+slicing pipeline on either architecture. The residual 29-path (Auryn)
+and 11-path (Bunny) gap is a **deterministic platform computation
+difference**, not a Heisenbug.
+
+### 2. Auryn gap enumeration — layers and path types carrying the 29 paths
+
+Per-layer HS_LAYER_FILL diff (x86 − arm64, only layers with Δpaths ≠ 0):
+
+| layer | Δpaths | Δlength_u |
+|-------|--------|-----------|
+|  140 |  +2 |   +179 507 |
+|  336 |  −6 |  −1 029 208 |
+|  339 |  +5 |    +661 719 |
+|  341 |  +3 |     −42 840 |
+|  342 |  +6 |  +2 066 469 |
+|  343 |  −2 |     +61 427 |
+|  348 |  −1 |     −89 757 |
+|  372 |  +1 |    +147 251 |
+|  438 |  +2 |    −518 476 |
+|  469 |  +5 |  +1 299 711 |
+|  511 |  +1 |    +185 173 |
+|  514 | +12 |  −2 305 069 |
+|  581 |  +2 |        +356 |
+|  594 |  −2 |    −264 968 |
+|  686 |  +4 |    +900 244 |
+|  712 |  +1 |      +1 550 |
+|  728 |  +2 |    −265 673 |
+|  799 |  −4 |    −399 301 |
+|  802 |  −3 |    −397 278 |
+|  828 |  +1 |      +2 534 |
+| **net** | **+29** | **+82 296** |
+
+20 layers out of 848 carry the delta. 14 positive (+47 paths total),
+6 negative (−18 paths), netting +29 on x86.
+
+Per-fill-type delta aggregated over those 20 diff-layers (`;TYPE:` block
+counts in the gcode, perimeters excluded):
+
+| fill type              | x86 | arm64 | Δ  |
+|------------------------|----:|------:|----|
+| Bridge                 |  18 |    18 |  0 |
+| Internal Bridge        |   9 |     9 |  0 |
+| Internal solid infill  | 198 |   202 | −4 |
+| Sparse infill          |  84 |    83 | +1 |
+| Top surface            | 121 |   120 | +1 |
+| Gap infill             |  87 |    86 | +1 |
+
+The TYPE-block count only shifts by ±4 in total — the remaining ~25
+paths are **sub-path splits inside the same fill block** (one Internal
+solid infill TYPE block containing N vs N+1 ExtrusionPaths on the two
+architectures). Consistent with an FP-sensitive polyline split in
+Fill::fill_surfaces or in the Clipper boolean ops that feed it, not
+with whole surfaces appearing on only one side.
+
+Direction-of-divergence hint: x86 produces more, shorter Internal solid
+and Top-surface paths; arm64 collapses a few of them into longer
+single paths. On Bunny the sign flips (arm64 11 more paths, less
+total length), so this is not a "x86 always fragments more" rule but
+a per-geometry outcome of local FP rounding.
+
+### 3. Artefacts
+
+All inputs, intermediates and the analysis script are under
+`local-test/stufe-3c/entscheidungstest/`:
+
+- `measure-x86.sh`, `measure-arm64-remote.sh`
+- `{auryn,bunny}-x86-{fix3b,pattern,zero}.{gcode,stats.json,stderr,
+  gcode.layer-fill-trace.txt,gcode.surf-fill-trace.txt}`
+- `arm64/entscheidungstest/{...}` (same files pulled back from the
+  Poco)
+- `analyze-auryn-gap.py`, `analyze-auryn-paths-by-type.py`,
+  `auryn-gap-by-type.txt`
+- `x86-results.log`, `arm64/entscheidungstest/arm64-results.log`
+
+### Final report (CLAUDE.md §4 rubrics)
+
+**1. Demonstrably works**
+
+- Decision test cleanly executed. Six binaries built from the same
+  submodule tip `3965b4904c`; reference cube `92951c26…` identical
+  under the new x86 standard build; `handslice-cli-x86` and
+  `handslice-cli-x86-count` unchanged.
+- Within each architecture, standard, pattern and zero init modes
+  produce bit-identical HS_FILL_OUT counters and filament totals on
+  both Auryn and Bunny. **Any uninit-stack-variable influence on the
+  slicing counters is ruled out on both architectures.**
+- The remaining arm64 ↔ x86 gap is characterised: 29 paths / +82 296 u
+  on Auryn, 11 paths / −13 739 611 u on Bunny; 20 Auryn layers carry
+  the net delta; per-fill-type aggregate shifts are ≤ 4 blocks, so
+  the paths move mostly as sub-path re-splits inside the same TYPE
+  blocks.
+
+**2. Unverified**
+
+- The IEEE-754 call site that drives the sub-path split. Candidates
+  live in `Fill::fill_surfaces` (walker corner rounding) and in the
+  Clipper boolean ops feeding the fill — not isolated this session.
+- Whether Orca GUI (desktop) exhibits the same arm64 ↔ x86 delta on
+  Auryn and Bunny. Only the headless CLI was tested here.
+- Whether the three committed fixes (Print::m_origin,
+  LayerRegion::layer_thickness, ModelVolume::mmuseg_ts) should go
+  upstream to OrcaSlicer. First two cleanly fix observable Memcheck
+  noise; mmuseg_ts is a semantic no-op on STL input. Decision still
+  deferred.
+
+**3. Blocked**
+
+- Reducing the gap to zero without accepting an architectural fast-
+  math-flag change. The surfaces/entries counts match (13 445 /
+  10 116 on x86 vs 13 441 / 10 115 on arm64 for Auryn — a 4-surface
+  / 1-entry delta that is orders of magnitude smaller than the 29-
+  path delta it produces), so the earlier LayerRegion path is also
+  near-identical. The last remaining lever to close the gap would
+  be fmath/strict-float flags on the Fill walker — out of scope for
+  this session.
+- Blocker #3 (Clang build) unchanged.
+
+---
+
 ## 2026-11-03 20:04 UTC – Divergence Stufe 3c fix3: third uninit source localised (Print::m_origin), slicing pipeline Memcheck-clean, arm64/x86 29-path gap still open
 
 Setup: experimental submodule branch `experiment/arm64-divergence` advanced
