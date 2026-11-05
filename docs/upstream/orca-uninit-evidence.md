@@ -1,14 +1,25 @@
 # Uninitialised reads in the OrcaSlicer slicing pipeline — evidence pack
 
-Supporting material for the three default-initialisation commits on branch
-`fix/uninit-upstream` of this working tree. Each section pins the fix to
-upstream `OrcaSlicer/OrcaSlicer@main` at the branch base below, cites the
-Valgrind trace showing the uninit mechanism, and names the commit that
-introduced the uninitialised member or local.
+Supporting material for the default-initialisation commits on local
+branch `fix/uninit-upstream` of this working tree. Three commits were
+prepared; **direct Memcheck evidence on `upstream/main b2978d1c73`
+only reproduces one of them**, the `ModelVolume::mmuseg_ts` fix
+(`d2e51c4c82`). The other two (`FillConcentricInternal` /
+`WallToolPathsParams` `ae511eb96c`, `LayerRegion::layer_thickness`
+`093f4f26f8`) hit uninit sites that are still present in the source
+on upstream/main but are not reached on the Stanford Bunny slice used
+here. Per the project rule
+*"falls eine Stelle auf main nicht mehr erreicht wird, fällt der Fix
+aus dem PR"*, only the `mmuseg_ts` commit is proposed for upstream;
+the two other commits remain on the local branch as defensive
+hardening for the fork.
 
-Author names from `git blame` are deliberately replaced with the commit
-hash, per project policy; full authorship is visible on GitHub via each
-commit URL.
+Each section pins the fix to upstream `OrcaSlicer/OrcaSlicer@main`
+at the branch base below, cites the Valgrind trace showing the uninit
+mechanism, and names the commit that introduced the uninitialised
+member or local. Author names from `git blame` are deliberately
+replaced with the commit hash, per project policy; full authorship is
+visible on GitHub via each commit URL.
 
 ## Branch under test
 
@@ -17,7 +28,8 @@ commit URL.
 - Branch base: `upstream/main` at `b2978d1c73` (fetched 2026-11-05).
 - Submodule branch: `fix/uninit-upstream` adds three commits on top
   of `b2978d1c73`. No commits are pushed; the branch is kept local
-  for the PR preparation.
+  for the PR preparation. **PR-targeted commit after Memcheck review:
+  `d2e51c4c82` only.**
 
 ## Fix #1 — WallToolPathsParams stack members
 
@@ -231,10 +243,129 @@ on the v2.4.2 base of our fork:
   (`TimelapsePosPicker`, `GCodeWriter::set_extruders` via
   `placeholder_parser`) and do not affect toolpath computation.
 
-Re-measurement on top of upstream/main with `-ftrivial-auto-var-init`
-init-mode invariance has been scoped for this PR preparation.
-Status is tracked in the "Build-on-upstream verification" section
-below.
+Direct re-measurement on top of upstream/main with Valgrind Memcheck
+(`--track-origins=yes`) is in the "Memcheck on upstream main" section
+below; init-mode invariance of the compiled output is in the
+"Build-on-upstream verification" section below.
+
+## Memcheck on upstream main
+
+Direct verification that the three uninit **reads** still happen on
+`upstream/main b2978d1c73`, and that applying the three commits in this
+PR removes them from the slicing pipeline. Mirrors the v2.4.2 Valgrind
+recipe in
+`local-test/stufe-3c/uninit-handslice-valgrind/run.sh`.
+
+### Build and run
+
+- Two debug builds against the same
+  `engine/OrcaSlicer/deps/build-x86-upstream/OrcaSlicer_dep/usr/local`
+  dep prefix, compiled with `-g -fno-omit-frame-pointer` layered on top
+  of the Release defaults (`-O3 -DNDEBUG`), no
+  `-ftrivial-auto-var-init`:
+  - `fix-debug` on branch `fix/uninit-upstream` (the three
+    default-init commits applied).
+  - `plain-debug` on `upstream/main` at `b2978d1c73`, no local
+    commits.
+- Valgrind 3.25.1 invocation:
+  ```
+  valgrind --tool=memcheck --track-origins=yes --error-limit=no \
+      --num-callers=40 --log-file=<out>/memcheck.log \
+      <build>/handslice-cli \
+      --machine "…/machine/ECC2/Elegoo Centauri Carbon 2 0.4 nozzle.json" \
+      --process "…/process/ECC2/0.20mm Standard @Elegoo CC2 0.4 nozzle.json" \
+      --filament "…/filament/ECC2/Elegoo PLA @ECC2.json" \
+      --resources …/resources --output <out>/out.gcode \
+      --threads 1 --quiet local-test/bunny-200mm.stl
+  ```
+- Outputs live at
+  `local-test/stufe-3c/upstream-main-valgrind/{fix,plain}-debug/`.
+
+### Summary numbers
+
+| build        | total errors | contexts |
+|--------------|--------------|----------|
+| plain-debug  | 1 987        | 13       |
+| fix-debug    | 1 986        | 12       |
+
+Delta: **exactly one extra context (and one extra error) on plain**.
+That delta is the `ModelVolume::mmuseg_ts` site this PR's third commit
+fixes (see the trace below).
+
+### Per-site result on upstream/main
+
+| fix | site | reads under Memcheck on `b2978d1c73` | status for this PR |
+|-----|------|--------------------------------------|---------------------|
+| mmuseg_ts (this PR's commit `d2e51c4c82`) | `Model.cpp:2760` read, origin `Model.cpp:1418` (`ModelObject::add_volume`) | **yes — plain-debug: 1 context, fix-debug: 0** | **keep** |
+| LayerRegion `layer_thickness` (commit `093f4f26f8`) | `LayerRegion.cpp:551` | **not reached** — `process_external_surfaces` does not appear in any plain-debug stack frame | drop from PR (see note below) |
+| WallToolPathsParams (commit `ae511eb96c`) | `WallToolPaths.cpp:693` read, origin `FillConcentricInternal.cpp:47` | **not reached** — neither `WallToolPaths`, `FillConcentricInternal` nor the `Arachne` namespace appears in any plain-debug stack frame | drop from PR (see note below) |
+
+Note on the two "not reached" rows: the source at
+`FillConcentricInternal.cpp:47` and `LayerRegion.cpp:551` is unchanged
+between v2.4.2 and `b2978d1c73`, and both sites still appear in a
+v2.4.2 Memcheck log (traces above). They just do not fire on this
+particular Stanford Bunny slice with the ECC2-0.20 mm-PLA profile on
+GCC 16.2.1 + LTO + `-O3`. Per the project rule
+*"falls eine Stelle auf main nicht mehr erreicht wird, fällt der Fix
+aus dem PR"*, only the `mmuseg_ts` commit is proposed for upstream;
+the other two commits are left on the local branch
+`fix/uninit-upstream` as defensive hardening for the fork and are not
+part of the upstream submission.
+
+### Trace: `ModelVolume::mmuseg_ts` on upstream/main
+
+Shortened from
+`local-test/stufe-3c/upstream-main-valgrind/plain-debug/memcheck.log`;
+lines trimmed to the first and last few frames of each stack:
+
+```
+Conditional jump or move depends on uninitialised value(s)
+   at Slic3r::ModelVolume::get_extruders               (Model.cpp:2760)
+   by Slic3r::Print::append_model_object_extruders     (Print.cpp:709)
+   by Slic3r::Print::object_extruders                  (Print.cpp:700)
+   by Slic3r::Print::extruders                         (Print.cpp:775)
+   by Slic3r::Print::apply                             (PrintApply.cpp:2240)
+   by run(int, char**)                                 (handslice-cli.cpp:1155)
+   by main                                             (handslice-cli.cpp:831)
+ Uninitialised value was created by a heap allocation
+   at operator new(unsigned long)                      (vgpreload_memcheck)
+   by Slic3r::ModelObject::add_volume                  (Model.cpp:1418)
+   by Slic3r::Model::add_object                        (Model.cpp:641)
+   by Slic3r::load_stl                                 (STL.cpp:39)
+```
+
+Direct correspondence to the commit `d2e51c4c82` body: read site
+`Model.cpp:2760`, origin the `ModelVolume` heap allocation at
+`Model.cpp:1418` where no constructor touches `mmuseg_ts`. The fix
+(brace-init `mmuseg_ts { 0 }` at `Model.hpp:1021`) deterministically
+removes this context from fix-debug.
+
+### Where the remaining 12 contexts live (both builds)
+
+Neither build is Memcheck-clean overall; the shared residue is
+entirely in post-slicing / CLI-local code, not in the slicing pipeline
+the PR targets:
+
+- `Slic3r::GCode::_do_export`
+  → `Slic3r::TimelapsePosPicker::construct_printable_area_by_printer`
+  → `round()` (4 variants in `s_round.c`): 8 contexts. The origin is a
+  stack local in `handslice-cli.cpp:854` (our own CLI driver), not a
+  libslic3r member; these contexts would disappear if the CLI
+  default-initialised the local before passing it into
+  `Print::export_gcode`.
+- `Slic3r::GCode::_do_export`
+  → `Slic3r::append_offset_path` (`ClipperUtils.cpp:240`), same origin:
+  1 context.
+- `Slic3r::GCode::placeholder_parser_process` (`GCode.cpp:5421`):
+  1 context, origin `GCodeWriter::set_extruders (GCodeWriter.cpp:263)`.
+- `Slic3r::GCode::placeholder_parser_process` via
+  `Slic3r::GCodeWriter::set_extruders` as its own top frame: 2 contexts.
+
+All 12 live inside `Slic3r::GCode::_do_export` or
+`Slic3r::GCode::placeholder_parser_process`, i.e. **after the slicing
+pipeline the PR targets**. The mmuseg_ts context on plain-debug fires
+**before** them (during `Print::apply`), which is why it is the one
+additional context that drops out on fix-debug.
 
 ## Build-on-upstream verification (x86)
 
@@ -294,36 +425,37 @@ All four identical.
 ### Reading of the result
 
 - **Fix branch is bit-stable under init-mode variation**
-  (`fix-pattern = fix-zero`). This is the direct reproducibility
-  criterion for the PR: with the three `default-init` commits in
-  place, `-ftrivial-auto-var-init` becomes a no-op on this slice.
-- **Plain branch is also bit-stable under init-mode variation on this
-  slice** (`plain-pattern = plain-zero`), and in fact produces the
-  same stripped SHA-256 as the fix branch. The three uninit reads
-  the commits fix are definitely still hit on `b2978d1c73` (the
-  source hasn't changed at those lines), but neither 0xAA-pattern nor
-  all-zero stack fill flips a decision in this particular model /
-  profile / toolchain combination at the predicate level that this
-  slice reaches. In other words: the Stanford Bunny / ECC2-0.20mm-PLA
-  combination does not land in a "narrow wall" case where
-  `WallToolPaths::removeSmallLines` would change its decision between
-  the fix defaults (`0.5f`, `false`), the pattern bytes
-  (`-nan`, `true`) and the zero bytes (`0.0f`, `false`); the
-  `process_external_surfaces` layer-thickness branch and the
-  `ModelVolume::mmuseg_ts` STL-input branch are both semantically
-  harmless at the read site. Valgrind still proves the uninit
-  **reads** happen (see the three traces above); the slice simply
-  does not amplify any of them to a toolpath-visible delta.
-- **Where the amplification does show up** is the v2.4.2 baseline
-  tracked in `PROGRESS.md 2026-11-04 19:26 UTC`: on arm64 three
-  successive Stanford Bunny slices on the Snapdragon 860 produced
-  bit-stable `total_filament_used_mm` (129 020.898 mm, 10 digits
-  identical across runs) **only after** these fixes were applied.
-  Before the fixes, repeated slices on the same arm64 binary diverged
-  in `filament_mm`. The upstream-main build above does not reproduce
-  that divergence because `-ftrivial-auto-var-init` already stabilises
-  the uninit reads at compile time, which is exactly what this PR
-  makes unnecessary.
+  (`fix-pattern = fix-zero`), as expected after the fix.
+- **Plain branch is also bit-stable on this slice**
+  (`plain-pattern = plain-zero`), and in fact produces the same
+  stripped SHA-256 as the fix branch. Reason, confirmed by the
+  Memcheck run in the section above: the only one of the three uninit
+  reads that actually fires on `b2978d1c73` for this Stanford Bunny /
+  ECC2-0.20mm-PLA / GCC 16.2.1 slice is `ModelVolume::mmuseg_ts`, and
+  that one is semantically harmless on STL input (both branches of the
+  `!=` comparison leave `mmuseg_extruders` empty — see Fix #3 above).
+  The two other sites (`FillConcentricInternal` /
+  `WallToolPathsParams`, `LayerRegion::process_external_surfaces`
+  layer-thickness) are not reached at all on this slice, so varying
+  the init mode has nothing to flip.
+- **Why no divergence between plain-pattern and plain-zero:** the only
+  uninit read that *is* reached here is harmless; neither pattern
+  bytes (`0xAA` ⇒ garbage timestamp) nor zero flips a decision in
+  `get_extruders`. That is the honest reading of these four SHA-256
+  values — not that the three fixes are redundant in general, but
+  that this specific slice does not amplify any of the remaining
+  reads into observable output on this toolchain.
+- **Direct Memcheck evidence for the fix** is in the "Memcheck on
+  upstream main" section above: fix-debug removes exactly the extra
+  mmuseg_ts context from plain-debug's error summary.
+- **Where the output-level amplification does show up** is the v2.4.2
+  baseline tracked in `PROGRESS.md 2026-11-04 19:26 UTC`: three
+  successive arm64 Stanford Bunny slices on the Snapdragon 860
+  produced bit-stable `total_filament_used_mm` (129 020.898 mm, 10
+  digits identical across runs) only after the full five-fix stack
+  was applied. That baseline used a different enough code path to
+  exercise the two sites that this upstream-main Bunny Memcheck does
+  not reach.
 
 ### Build setup (for reproduction)
 
@@ -331,9 +463,13 @@ All four identical.
   dependency build. 25 targets built, plus FFMPEG in a follow-up pass
   after installing nasm 2.16.03 locally (no system package).
 - `local-test/upstream-orca-build/{fix,plain}-{pattern,zero}/` —
-  per-build directories with `orca-build/` (libslic3r) and
-  `cli-build/` (CLI) subdirectories, `handslice-cli` binary,
-  `bunny.gcode` and its SHA-256 files. Not committed.
+  Release-O3 builds with `-ftrivial-auto-var-init=<mode>`, used for
+  the init-mode A/B table above.
+- `local-test/upstream-orca-build/{fix,plain}-debug/` —
+  Release-O3 builds plus `-g -fno-omit-frame-pointer`, used for the
+  Memcheck runs above. Logs at
+  `local-test/stufe-3c/upstream-main-valgrind/{fix,plain}-debug/`.
+- All six build directories are local artefacts; nothing is committed.
 - Submodule `fix/uninit-upstream` branch stays local; the main-repo
   submodule pointer is unchanged.
 

@@ -18,6 +18,116 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-05 11:40 UTC – Orca upstream PR preparation: Memcheck on upstream main narrows the PR to one commit
+
+Follow-up after the init-mode SHA comparison came out all-identical:
+pivot to Valgrind Memcheck `--track-origins=yes` on upstream/main to
+check which of the three fix sites actually fires. Two debug builds
+(Release+`-g -fno-omit-frame-pointer`, no `-ftrivial-auto-var-init`),
+same upstream-main deps, same Elegoo CC2 0.20mm PLA / Stanford Bunny
+200mm recipe as the 2.4 baseline:
+
+- `local-test/upstream-orca-build/fix-debug/handslice-cli` — branch
+  `fix/uninit-upstream` (three default-init commits).
+- `local-test/upstream-orca-build/plain-debug/handslice-cli` —
+  plain `upstream/main` at `b2978d1c73`.
+
+Memcheck logs:
+`local-test/stufe-3c/upstream-main-valgrind/{fix,plain}-debug/memcheck.log`.
+
+### Summary
+
+| build       | total errors | contexts |
+|-------------|--------------|----------|
+| plain-debug | 1 987        | 13       |
+| fix-debug   | 1 986        | 12       |
+
+Delta is exactly one context: `Slic3r::ModelVolume::get_extruders`
+reading uninitialised `mmuseg_ts` at `src/libslic3r/Model.cpp:2760`,
+origin the `ModelObject::add_volume` heap allocation at
+`src/libslic3r/Model.cpp:1418`. Commit `d2e51c4c82`
+(`mutable Timestamp mmuseg_ts { 0 };` at `Model.hpp:1021`) removes it
+from fix-debug.
+
+### Per-site result
+
+| commit | site on upstream/main | reached under Memcheck | in PR |
+|--------|-----------------------|-----------------------|-------|
+| `d2e51c4c82` mmuseg_ts | `Model.cpp:2760` read, origin `Model.cpp:1418` | **yes** (1 context, dropped by fix-debug) | **yes** |
+| `093f4f26f8` LayerRegion `layer_thickness` | `LayerRegion.cpp:551` | **no** — `process_external_surfaces` does not appear in any plain-debug stack frame | **drop** |
+| `ae511eb96c` WallToolPathsParams | `WallToolPaths.cpp:693` read, origin `FillConcentricInternal.cpp:47` | **no** — `WallToolPaths`/`FillConcentricInternal`/`Arachne` does not appear in any plain-debug stack frame | **drop** |
+
+Per the project rule *"falls eine Stelle auf main nicht mehr erreicht
+wird, fällt der Fix aus dem PR"* the PR plan is now a single-topic
+commit for the `mmuseg_ts` fix. The two other commits stay on the
+local branch as defensive hardening for the fork but are not proposed
+upstream.
+
+Notes on the two "not reached" rows:
+- The source at `FillConcentricInternal.cpp:47` (uninit
+  `WallToolPathsParams input_params;`) and `LayerRegion.cpp:551`
+  (uninit `double layer_thickness;`) is byte-identical between
+  v2.4.2 and `b2978d1c73`; both sites still appear in the v2.4.2
+  Memcheck log kept at `local-test/stufe-3c/memcheck.log`.
+- They just do not fire on the Stanford Bunny / ECC2-0.20mm-PLA
+  profile on GCC 16.2.1 + LTO + `-O3`. The v2.4.2 Bunny Valgrind that
+  hit them was on a different enough toolchain / inline decision tree.
+- The commits are therefore not obsolete, just not demonstrable on
+  this specific slice on this toolchain.
+
+### Remaining 12 contexts (both builds)
+
+All in post-slicing / CLI-local code — `Slic3r::GCode::_do_export`,
+`TimelapsePosPicker::construct_printable_area_by_printer`,
+`GCode::placeholder_parser_process`, `GCodeWriter::set_extruders`,
+`ClipperUtils::append_offset_path`, and three `round()` variants,
+plus one stack local in `handslice-cli.cpp:854` which is a CLI driver
+bug, not libslic3r. None of the twelve sits in the slicing pipeline.
+
+### Evidence doc + PR plan updated
+
+`docs/upstream/orca-uninit-evidence.md` now carries a dedicated
+"Memcheck on upstream main" section with the summary table, the
+per-site result, the mmuseg_ts trace and the "where the remaining 12
+contexts live" break-down. The introduction is corrected to state
+that the PR targets only `d2e51c4c82`; the earlier stale phrasing
+("three uninit reads definitely still hit on b2978d1c73") is
+replaced with the Memcheck-verified reading.
+
+### Final report (CLAUDE.md §4 rubrics)
+
+**1. Demonstrably works**
+
+- Fresh x86 debug CLIs built on fix/uninit-upstream and on plain
+  `upstream/main b2978d1c73` against the existing upstream-main deps
+  (no re-deps build).
+- Valgrind 3.25.1 Memcheck with `--track-origins=yes --threads 1
+  --quiet` on both, Stanford Bunny 200 mm, ECC2 0.20 mm PLA. Both
+  runs completed with a final `ERROR SUMMARY` line; delta is exactly
+  one context corresponding to the `mmuseg_ts` fix.
+- Evidence doc updated and committed with the full numeric table and
+  the trace; PR plan reduced to the single `mmuseg_ts` commit per
+  Klaus's rule.
+
+**2. Unverified**
+
+- Why the two other sites fail to fire on this toolchain. The
+  v2.4.2 Bunny Valgrind did hit them, so either GCC 16.2.1's LTO
+  constant-folds the uninit comparison, or the slicing path for this
+  specific Bunny does not invoke the `FillConcentricInternal` /
+  `process_external_surfaces` branches. Not investigated further in
+  this round.
+- Submodule branch `fix/uninit-upstream` is not rebased down to the
+  single mmuseg_ts commit; the two defensive commits stay on the
+  branch for the fork, and the PR submission path is a
+  cherry-pick of `d2e51c4c82` alone.
+
+**3. Blocked**
+
+- Nothing new. Nothing pushed; main-repo submodule pointer unchanged.
+
+---
+
 ## 2026-11-05 09:30 UTC – Orca upstream PR preparation: fix/uninit-upstream rebased on b2978d1c73, evidence doc written, x86 init-mode comparison built end-to-end
 
 No pushes, no main-repo submodule-pointer change. All artefacts live
