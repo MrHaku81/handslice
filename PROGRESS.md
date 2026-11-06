@@ -18,6 +18,17 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-06 15:03 UTC – Orca uninit PR: issue wording decided, submodule back on Handslice state
+
+Klaus answered the open question from the 14:56 entry: no coverage or
+breakpoint check. The issue says "not reported by Memcheck" for the two
+other sites, not "not reached".
+
+Submodule `engine/OrcaSlicer` switched back to `fix/uninit-handslice`
+(`0742e9d10d`); the main repo pointer is unchanged and clean.
+
+---
+
 ## 2026-11-06 14:56 UTC – Orca uninit PR: noisra run on the large test model closes the Memcheck matrix
 
 Evaluated the finished Memcheck run (plain-noisra binary, large test
