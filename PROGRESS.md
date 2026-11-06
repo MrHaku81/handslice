@@ -18,6 +18,36 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-06 14:56 UTC – Orca uninit PR: noisra run on the large test model closes the Memcheck matrix
+
+Evaluated the finished Memcheck run (plain-noisra binary, large test
+model, PID 231116) with grep/tail only. Log:
+`local-test/stufe-3c/upstream-main-valgrind/plain-noisra-largemodel/memcheck.log`.
+
+- Result: `ERROR SUMMARY: 2103 errors from 13 contexts`, same totals as
+  plain-debug on that model. `WallToolPaths`, `FillConcentricInternal`,
+  `process_external_surfaces`, `LayerRegion`: 0 hits.
+- A literal `mmuseg` grep also gives 0 hits in every log, because
+  Memcheck prints functions, not members. The site is present as
+  `ModelVolume::get_extruders() (Model.cpp:2760)`, 1 context in all
+  four runs, 0 in fix-debug.
+- `docs/upstream/orca-uninit-evidence.md`: added the matrix (Bunny /
+  large test model × plain / noisra) and the new conclusion. Only
+  `mmuseg_ts` is reached on upstream/main; the other two sites are
+  documented on v2.4.2 and are offered in the issue as precautionary
+  hardening, not as part of the PR.
+- Doc corrections: the Fix #1 trace heading said Stanford Bunny, but
+  the trace comes from the large-model log. "The paths are not
+  executed" was softened, because Memcheck measures no coverage; the
+  limit is now stated in the doc.
+
+Open question for Klaus: "not reached" rests on Memcheck reports, not
+on coverage, and `WallToolPaths.cpp` was not among the `-O0` units. Is
+that enough for the issue text, or should a coverage or breakpoint
+check confirm whether `FillConcentricInternal` runs on main?
+
+---
+
 ## 2026-11-06 05:50 UTC – Orca uninit PR: two follow-up Memcheck runs confirm the "one site" reading
 
 Follow-up after Klaus's note "die zwei Stellen fallen nicht aus dem

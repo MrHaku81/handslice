@@ -6,13 +6,14 @@ prepared; **direct Memcheck evidence on `upstream/main b2978d1c73`
 only reproduces one of them**, the `ModelVolume::mmuseg_ts` fix
 (`d2e51c4c82`). The other two (`FillConcentricInternal` /
 `WallToolPathsParams` `ae511eb96c`, `LayerRegion::layer_thickness`
-`093f4f26f8`) hit uninit sites that are still present in the source
-on upstream/main but are not reached on the Stanford Bunny slice used
-here. Per the project rule
+`093f4f26f8`) hit uninit sites that are documented on v2.4.2 and
+still present in the source on upstream/main, but no Memcheck run on
+upstream/main reports them, on either test model or build (see the
+matrix under "Final per-site reading"). Per the project rule
 *"falls eine Stelle auf main nicht mehr erreicht wird, fällt der Fix
-aus dem PR"*, only the `mmuseg_ts` commit is proposed for upstream;
-the two other commits remain on the local branch as defensive
-hardening for the fork.
+aus dem PR"*, only the `mmuseg_ts` commit is part of the PR; the two
+other commits are offered in the issue as precautionary hardening,
+not as part of the PR.
 
 Each section pins the fix to upstream `OrcaSlicer/OrcaSlicer@main`
 at the branch base below, cites the Valgrind trace showing the uninit
@@ -62,7 +63,7 @@ visible on GitHub via each commit URL.
   fields we initialise have been uninitialised at this call site since
   the Arachne engine was introduced.
 
-### Valgrind trace (x86, Release+`-g`, slicing Stanford Bunny)
+### Valgrind trace (x86, Release+`-g`, large third-party test model)
 
 Captured on the v2.4.2 base before any fix was applied. Line numbers
 in frames are from the v2.4.2 source tree; the uninit flow is
@@ -297,8 +298,8 @@ fixes (see the trace below).
 | fix | site | reads under Memcheck on `b2978d1c73` | status for this PR |
 |-----|------|--------------------------------------|---------------------|
 | mmuseg_ts (this PR's commit `d2e51c4c82`) | `Model.cpp:2760` read, origin `Model.cpp:1418` (`ModelObject::add_volume`) | **yes — plain-debug: 1 context, fix-debug: 0** | **keep** |
-| LayerRegion `layer_thickness` (commit `093f4f26f8`) | `LayerRegion.cpp:551` | **not reached** — `process_external_surfaces` does not appear in any plain-debug stack frame | drop from PR (see note below) |
-| WallToolPathsParams (commit `ae511eb96c`) | `WallToolPaths.cpp:693` read, origin `FillConcentricInternal.cpp:47` | **not reached** — neither `WallToolPaths`, `FillConcentricInternal` nor the `Arachne` namespace appears in any plain-debug stack frame | drop from PR (see note below) |
+| LayerRegion `layer_thickness` (commit `093f4f26f8`) | `LayerRegion.cpp:551` | **not reached** — `process_external_surfaces` does not appear in any plain-debug stack frame | not in PR; offered in the issue as precautionary hardening (see note below) |
+| WallToolPathsParams (commit `ae511eb96c`) | `WallToolPaths.cpp:693` read, origin `FillConcentricInternal.cpp:47` | **not reached** — neither `WallToolPaths`, `FillConcentricInternal` nor the `Arachne` namespace appears in any plain-debug stack frame | not in PR; offered in the issue as precautionary hardening (see note below) |
 
 Note on the two "not reached" rows: the source at
 `FillConcentricInternal.cpp:47` and `LayerRegion.cpp:551` is unchanged
@@ -307,19 +308,19 @@ v2.4.2 Memcheck log (traces above). They just do not fire on this
 particular Stanford Bunny slice with the ECC2-0.20 mm-PLA profile on
 GCC 16.2.1 + LTO + `-O3`. Per the project rule
 *"falls eine Stelle auf main nicht mehr erreicht wird, fällt der Fix
-aus dem PR"*, only the `mmuseg_ts` commit is proposed for upstream;
-the other two commits are left on the local branch
-`fix/uninit-upstream` as defensive hardening for the fork and are not
-part of the upstream submission.
+aus dem PR"*, only the `mmuseg_ts` commit is part of the PR. The other
+two commits stay on the local branch `fix/uninit-upstream`; the issue
+offers them as precautionary hardening, not as part of the PR.
 
-### Two follow-up Memcheck runs confirming "not reached"
+### Follow-up Memcheck runs on the "not reached" sites
 
 Two hypotheses for the plain-debug "not reached" result were tested
 on `upstream/main b2978d1c73` with the same Valgrind recipe
 (`--track-origins=yes --threads 1 --quiet`, same Elegoo
-CC2-0.20 mm-PLA profile). Both produced the same error summary as
-plain-debug Bunny and neither added a `WallToolPaths` /
-`FillConcentricInternal` / `process_external_surfaces` context.
+CC2-0.20 mm-PLA profile), then combined in a third run. All three
+kept the 13-context footprint of plain-debug Bunny and none added a
+`WallToolPaths` / `FillConcentricInternal` /
+`process_external_surfaces` context.
 
 **Hypothesis A — Release + `-g` inliner / IPA-SRA masks the reads.**
 Targeted rebuild of
@@ -335,7 +336,9 @@ Memcheck log
 Stanford Bunny slice. **Result: 1987 errors / 13 contexts — identical
 footprint to plain-debug.** `WallToolPaths` / `FillConcentricInternal`
 / `process_external_surfaces` still do not appear in any stack frame.
-→ The inliner is not masking the reads; the paths are not executed.
+→ No sign of the inliner masking the reads: with these three
+translation units at `-O0`, Memcheck still reports nothing from these
+paths.
 
 **Hypothesis B — Bunny geometry does not exercise the Arachne /
 process_external_surfaces paths.** The v2.4.2 Stufe-3c baseline log
@@ -351,6 +354,22 @@ Bunny, just more hits each. `WallToolPaths` / `FillConcentricInternal`
 → The geometry argument alone does not account for it either on the
 upstream tree.
 
+**Combination — targeted `-O0` build on the large test model.** A and
+B above each changed one variable, so the plain-noisra binary was also
+run on the large test model. Memcheck log
+`local-test/stufe-3c/upstream-main-valgrind/plain-noisra-largemodel/memcheck.log`.
+**Result: 2103 errors / 13 contexts**, the same totals as plain-debug
+on that model. `WallToolPaths`, `FillConcentricInternal`,
+`process_external_surfaces` and `LayerRegion` have no match anywhere
+in the log; the `Model.cpp:2760` read is the only one of the three
+sites present. The only stack difference from plain-debug is one of
+the five glibc `round` contexts under
+`TimelapsePosPicker::construct_printable_area_by_printer`, which
+reports `s_round.c:58` instead of `s_round.c:39`. fix-debug shows the
+same variant, and the context belongs to `export_gcode`, after
+slicing. The G-code output differs from plain-debug on that model only
+in header line 2.
+
 Full-libslic3r `-O0` was also attempted
 (`local-test/upstream-orca-build/plain-O0/`) but Valgrind on that
 binary did not reach the Fill phase within 80 minutes (stuck in
@@ -361,22 +380,42 @@ only shows the same pre-Fill `mmuseg_ts` record. Not re-run.
 
 ### Final per-site reading
 
-- **Only `mmuseg_ts` demonstrably fires on `upstream/main b2978d1c73`**
-  under three independent Memcheck runs (plain-debug Bunny,
-  plain-noisra Bunny, plain-debug on the large test model). All
-  three produce the same one extra context relative to fix-debug.
-- **`WallToolPathsParams` and `LayerRegion::layer_thickness` cannot be
-  reproduced on upstream/main in this measurement environment.** The
-  source lines are unchanged since v2.4.2 and their 2.4-era traces are
-  real, but something between the v2.4.2 baseline and `b2978d1c73` —
-  possibly a Fill reorganisation, possibly a Clipper2 migration side
-  effect, possibly a profile default change — removes the predicate
-  chain that reached these reads before.
-- PR plan unchanged: the upstream submission targets
-  `d2e51c4c82` (`mmuseg_ts`) only. The two other commits remain local
-  on `fix/uninit-upstream` for the fork, and their inclusion in a
-  future upstream PR will require a new reproducer that actually
-  reaches the sites on current main.
+All four runs are on `upstream/main b2978d1c73`, without the fixes.
+"plain" is Release+`-g`; "noisra" is the same build with
+`FillConcentricInternal.cpp`, `LayerRegion.cpp` and `Model.cpp` rebuilt
+at `-O0 -fno-ipa-sra -fno-inline-small-functions -fno-ipa-icf`.
+
+| build | model | `ERROR SUMMARY` | `mmuseg_ts` (`Model.cpp:2760`) | `WallToolPaths` / `FillConcentricInternal` | `process_external_surfaces` / `LayerRegion` |
+|-------|-------|-----------------|--------------------------------|--------------------------------------------|---------------------------------------------|
+| plain | Bunny | 1987 errors / 13 contexts | 1 context | 0 | 0 |
+| noisra | Bunny | 1987 errors / 13 contexts | 1 context | 0 | 0 |
+| plain | large test model | 2103 errors / 13 contexts | 1 context | 0 | 0 |
+| noisra | large test model | 2103 errors / 13 contexts | 1 context | 0 | 0 |
+
+Memcheck names functions and source lines, not members, so the
+`mmuseg_ts` read appears in the logs as
+`ModelVolume::get_extruders() (Model.cpp:2760)`.
+
+- **On `upstream/main b2978d1c73` only `mmuseg_ts` is reached.** It
+  appears in all four cells, and fix-debug (Bunny, 1986 errors / 12
+  contexts) removes exactly that context.
+- **`WallToolPathsParams` and `LayerRegion::layer_thickness` are
+  documented on v2.4.2 only.** The `WallToolPaths` /
+  `FillConcentricInternal` trace comes from the v2.4.2 log on the large
+  test model (`local-test/stufe-3c/memcheck.log`). The
+  `process_external_surfaces` read appears in that log and in the
+  v2.4.2 Bunny log `local-test/stufe-3c/fix2-valgrind/memcheck.log`.
+  The source lines are unchanged since v2.4.2. What changed the
+  behaviour between v2.4.2 and `b2978d1c73` has not been identified.
+- **Limit of this reading.** "Reached" here means "reported by
+  Memcheck". Memcheck flags an uninitialised value only when it decides
+  a branch or reaches a syscall, and no coverage was measured, so these
+  runs do not prove that the two functions are never called on main.
+  `WallToolPaths.cpp` itself was not among the `-O0` translation units.
+- **PR and issue.** The PR contains `d2e51c4c82` (`mmuseg_ts`) only.
+  The issue offers `ae511eb96c` and `093f4f26f8` as precautionary
+  hardening, based on the v2.4.2 evidence and the unchanged source;
+  they are not part of the PR.
 
 ### Trace: `ModelVolume::mmuseg_ts` on upstream/main
 
