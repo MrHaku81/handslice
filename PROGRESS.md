@@ -18,6 +18,119 @@ was gemacht, Ergebnis, offene Fragen.
 
 ---
 
+## 2026-11-06 05:50 UTC – Orca uninit PR: two follow-up Memcheck runs confirm the "one site" reading
+
+Follow-up after Klaus's note "die zwei Stellen fallen nicht aus dem
+PR, Release+-g kann sie nicht zeigen" — two additional Memcheck runs
+on `upstream/main b2978d1c73` to test the inliner-mask hypothesis and
+the geometry hypothesis.
+
+### Hypothesis A — targeted -O0 rebuild (2.4-Stufe-3c recipe)
+
+Rebuilt `Fill/FillConcentricInternal.cpp`, `LayerRegion.cpp` and
+`Model.cpp` with `-O0 -fno-ipa-sra -fno-inline-small-functions
+-fno-ipa-icf` on top of the existing plain-debug (Release+`-g`)
+libslic3r.a; three `.o` files ar-replaced in the archive, CLI
+relinked. Full-libslic3r `-O0` had been tried first but Valgrind on
+that build got stuck in `Clipper2Lib::ClipperBase::PopScanline` via
+`PrintObject::discover_vertical_shells` after 80 min without reaching
+the Fill phase; targeted rebuild keeps the rest at Release+`-g` for
+speed.
+
+Binary: `local-test/upstream-orca-build/plain-noisra/handslice-cli`.
+Memcheck log:
+`local-test/stufe-3c/upstream-main-valgrind/plain-noisra/memcheck.log`.
+Stanford Bunny / ECC2-0.20 mm-PLA. Result:
+
+```
+ERROR SUMMARY: 1987 errors from 13 contexts
+```
+
+Same footprint as plain-debug Bunny. `WallToolPaths`,
+`FillConcentricInternal`, `process_external_surfaces` remain
+absent from every stack frame. **Inliner mask hypothesis
+widerlegt.**
+
+### Hypothesis B — Auryn exercises the Arachne path, Bunny does not
+
+The original v2.4.2 Stufe-3c Memcheck that showed all three sites
+(`local-test/stufe-3c/memcheck.log`) was actually run on Auryn, not
+Bunny. Re-ran plain-debug Memcheck on the 140 MB Auryn STL with the
+same profile on upstream/main.
+
+Memcheck log:
+`local-test/stufe-3c/upstream-main-valgrind/plain-debug-auryn/memcheck.log`.
+Result:
+
+```
+ERROR SUMMARY: 2103 errors from 13 contexts
+```
+
+Same 13 contexts as plain-debug Bunny, just more occurrences each.
+`WallToolPaths` / `FillConcentricInternal` /
+`process_external_surfaces` still absent. **Geometry hypothesis
+allein greift auch nicht auf upstream/main.**
+
+### Combined per-site reading on `upstream/main b2978d1c73`
+
+| commit | site | Bunny Release+-g | Bunny targeted -O0 | Auryn Release+-g | 2.4 baseline |
+|--------|------|------------------|--------------------|------------------|--------------|
+| `d2e51c4c82` mmuseg_ts | `Model.cpp:2760` | 1 context | 1 context | 1 context | yes |
+| `093f4f26f8` LayerRegion `layer_thickness` | `LayerRegion.cpp:551` | 0 | 0 | 0 | yes |
+| `ae511eb96c` WallToolPathsParams | `WallToolPaths.cpp:693` / `FillConcentricInternal.cpp:47` | 0 | 0 | 0 | yes |
+
+Three independent runs, same reading: only the `mmuseg_ts` read can
+be demonstrated on current upstream/main in this measurement
+environment. The source for the other two sites is byte-identical to
+v2.4.2, but something between v2.4.2 and `b2978d1c73` — likely a Fill
+reorganisation, a Clipper2 migration side effect, or a profile
+default change — removes the predicate chain that reached those
+reads before.
+
+### Updated evidence doc
+
+`docs/upstream/orca-uninit-evidence.md` gets a new
+"Two follow-up Memcheck runs confirming 'not reached'" subsection
+under "Memcheck on upstream main", plus a "Final per-site reading"
+paragraph that summarises the three runs. The PR plan stays as it
+was in commit `367608b`: only `d2e51c4c82` is proposed upstream;
+`ae511eb96c` and `093f4f26f8` stay on the local fork branch
+`fix/uninit-upstream` and will only ship upstream once there is a
+new reproducer that actually reaches the sites on current main.
+
+### Final report (CLAUDE.md §4 rubrics)
+
+**1. Demonstrably works**
+
+- plain-noisra binary built via ar-replace of three `-O0`-recompiled
+  `.o` members in plain-debug's `liblibslic3r.a`, Valgrind completed
+  in ~6 min on Bunny, log carries the final `ERROR SUMMARY` line.
+- plain-debug Memcheck re-run on Auryn, 32-min elapsed, log carries
+  the final `ERROR SUMMARY` line.
+- Both runs confirm what plain-debug Bunny already showed: only one
+  of the three fix sites is reachable on `upstream/main b2978d1c73`.
+- Doc + PROGRESS updated; main-repo submodule pointer unchanged;
+  submodule branch unchanged.
+
+**2. Unverified**
+
+- Which specific commit on main removed the two unreachable paths.
+  `git log` on `src/libslic3r/Fill/FillConcentricInternal.cpp` and
+  on `src/libslic3r/LayerRegion.cpp` since the v2.4.2 base is on the
+  order of 100 commits; bisecting that into a specific predicate
+  change is scoped out of this PR preparation.
+- Full-libslic3r `-O0` Valgrind. Would eventually have reached Fill
+  but the Clipper2-phase alone ran >80 min without progress on this
+  host; the partial log (`plain-O0/memcheck.log`, 22 lines) is
+  identical to plain-debug up to its termination point.
+
+**3. Blocked**
+
+- Nothing new. Upstream PR stays at one commit until a current-main
+  reproducer for the two other sites is available.
+
+---
+
 ## 2026-11-05 11:40 UTC – Orca upstream PR preparation: Memcheck on upstream main narrows the PR to one commit
 
 Follow-up after the init-mode SHA comparison came out all-identical:

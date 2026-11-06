@@ -312,6 +312,72 @@ the other two commits are left on the local branch
 `fix/uninit-upstream` as defensive hardening for the fork and are not
 part of the upstream submission.
 
+### Two follow-up Memcheck runs confirming "not reached"
+
+Two hypotheses for the plain-debug "not reached" result were tested
+on `upstream/main b2978d1c73` with the same Valgrind recipe
+(`--track-origins=yes --threads 1 --quiet`, same Elegoo
+CC2-0.20 mm-PLA profile). Both produced the same error summary as
+plain-debug Bunny and neither added a `WallToolPaths` /
+`FillConcentricInternal` / `process_external_surfaces` context.
+
+**Hypothesis A — Release + `-g` inliner / IPA-SRA masks the reads.**
+Targeted rebuild of
+`src/libslic3r/Fill/FillConcentricInternal.cpp`,
+`src/libslic3r/LayerRegion.cpp` and
+`src/libslic3r/Model.cpp` with
+`-O0 -fno-ipa-sra -fno-inline-small-functions -fno-ipa-icf`
+(the v2.4.2 Stufe-3c recipe), rest of libslic3r unchanged
+(Release+`-g`). Resulting binary
+`local-test/upstream-orca-build/plain-noisra/handslice-cli`,
+Memcheck log
+`local-test/stufe-3c/upstream-main-valgrind/plain-noisra/memcheck.log`.
+Stanford Bunny slice. **Result: 1987 errors / 13 contexts — identical
+footprint to plain-debug.** `WallToolPaths` / `FillConcentricInternal`
+/ `process_external_surfaces` still do not appear in any stack frame.
+→ The inliner is not masking the reads; the paths are not executed.
+
+**Hypothesis B — Bunny geometry does not exercise the Arachne /
+process_external_surfaces paths.** The v2.4.2 Stufe-3c baseline log
+(`local-test/stufe-3c/memcheck.log`) that originally showed all three
+sites was taken on a large third-party organic test model
+(~2.8 M triangles, not redistributable), not on the Stanford Bunny.
+Re-ran plain-debug Memcheck on that large test model with the same
+profile. Memcheck log
+`local-test/stufe-3c/upstream-main-valgrind/plain-debug-largemodel/memcheck.log`.
+**Result: 2103 errors / 13 contexts** — same 13 contexts as plain-debug
+Bunny, just more hits each. `WallToolPaths` / `FillConcentricInternal`
+/ `process_external_surfaces` still do not appear.
+→ The geometry argument alone does not account for it either on the
+upstream tree.
+
+Full-libslic3r `-O0` was also attempted
+(`local-test/upstream-orca-build/plain-O0/`) but Valgrind on that
+binary did not reach the Fill phase within 80 minutes (stuck in
+`Clipper2Lib::ClipperBase::PopScanline` via
+`PrintObject::discover_vertical_shells`). The partial log at
+`local-test/stufe-3c/upstream-main-valgrind/plain-O0/memcheck.log`
+only shows the same pre-Fill `mmuseg_ts` record. Not re-run.
+
+### Final per-site reading
+
+- **Only `mmuseg_ts` demonstrably fires on `upstream/main b2978d1c73`**
+  under three independent Memcheck runs (plain-debug Bunny,
+  plain-noisra Bunny, plain-debug on the large test model). All
+  three produce the same one extra context relative to fix-debug.
+- **`WallToolPathsParams` and `LayerRegion::layer_thickness` cannot be
+  reproduced on upstream/main in this measurement environment.** The
+  source lines are unchanged since v2.4.2 and their 2.4-era traces are
+  real, but something between the v2.4.2 baseline and `b2978d1c73` —
+  possibly a Fill reorganisation, possibly a Clipper2 migration side
+  effect, possibly a profile default change — removes the predicate
+  chain that reached these reads before.
+- PR plan unchanged: the upstream submission targets
+  `d2e51c4c82` (`mmuseg_ts`) only. The two other commits remain local
+  on `fix/uninit-upstream` for the fork, and their inclusion in a
+  future upstream PR will require a new reproducer that actually
+  reaches the sites on current main.
+
 ### Trace: `ModelVolume::mmuseg_ts` on upstream/main
 
 Shortened from
