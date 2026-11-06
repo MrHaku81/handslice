@@ -1,19 +1,17 @@
 # Arbeitsregeln für Claude Code – Handslice
 
 Du arbeitest hier oft **unbeaufsichtigt** (Klaus ist tagsüber nicht am Rechner).
-Diese Regeln sind kurz, damit sie auch nach Stunden noch gelten. Lies sie bei
-jedem Start.
+Lies diese Regeln bei jedem Start. Begründungen und Beispiele:
+`docs/claude-rules-background.md`.
 
 ## 1. Haltung
 
-- Ein **ehrlich gemeldeter Blocker** ist ein wertvolleres Ergebnis als ein
-  grüner Build, der nichts beweist. Fehler sind erwünschte Befunde, keine
-  Niederlagen.
+- Ein **ehrlich gemeldeter Blocker** ist wertvoller als ein grüner Build, der
+  nichts beweist. Fehler sind erwünschte Befunde, keine Niederlagen.
 - "Fertig" heißt: **das Erfolgskriterium der Phase ist nachweislich erfüllt**
-  (siehe README, Tabelle Phasen) – nicht "kompiliert" oder "sollte gehen".
-- Keine Workarounds, die ein Problem verstecken. Wenn einer unvermeidbar ist:
-  mit Begründung in `docs/blockers.md`, und im Code markiert mit
-  `// WORKAROUND(blockers#N):`.
+  (README, Tabelle Phasen) – nicht "kompiliert" oder "sollte gehen".
+- Keine Workarounds, die ein Problem verstecken. Wenn unvermeidbar: Begründung
+  in `docs/blockers.md`, im Code markiert mit `// WORKAROUND(blockers#N):`.
 
 ## 2. Was du darfst / nicht darfst
 
@@ -21,27 +19,37 @@ jedem Start.
   Keine Änderungen an System, Dotfiles oder anderen Repos.
 - **Keine Tests ändern oder abschwächen**, um sie grün zu bekommen. Keine
   Fehler schlucken (`catch {}` ohne Weitergabe).
-- Keine Engine-Patches aus Hersteller-Forks (ElegooSlicer, Creality …)
-  übernehmen. Engine-Quelle ist ausschließlich OrcaSlicer-Upstream.
+- Keine Engine-Patches aus Hersteller-Forks (ElegooSlicer, Creality …).
+  Engine-Quelle ist ausschließlich OrcaSlicer-Upstream.
 - Nichts auf GitHub pushen, keine Releases, keine Tags – das macht Klaus.
-- Das Testgerät (Poco X3 Pro, per ADB) darfst du frei nutzen: installieren,
-  starten, Logs ziehen, Dateien kopieren, zurücksetzen von App-Daten.
-  **Kein** Factory-Reset, kein Flashen, keine Systemeinstellungen.
-- **Zugangsdaten (Access-Code, SN, IP, Tokens, Passwörter) tauchen in
-  keinem Bericht, keinem stdout, keiner Doku-Datei auf** – auch nicht
-  als Suchmuster in grep-Verifikationen. Scrub-Scripts lesen den Wert
-  aus `.env` und greppen stumm; die Ausgabe meldet nur „N Treffer" (bei
-  0 ist der Scrub erfolgreich). Beispiele für falsch:
-  `grep -c "<access-code-wert>" datei` (Wert erscheint in der
-  Kommandozeile / im Terminal-Log). Richtig: ein Python-Skript liest
-  den Wert intern aus `.env` und gibt nur die Trefferzahl aus.
+- Testgerät (Poco X3 Pro, per ADB) frei nutzbar: installieren, starten, Logs
+  ziehen, Dateien kopieren, App-Daten zurücksetzen. **Kein** Factory-Reset,
+  kein Flashen, keine Systemeinstellungen.
+- **Drucker:** Niemals selbst `method 1020` (Druckstart) an den echten Drucker
+  senden. Drucke startet ausschließlich Klaus, nach eigener Sichtprüfung, in
+  der App oder am Gerät. Schreibende oder löschende Methoden am Drucker nur,
+  wenn Klaus anwesend ist und den einzelnen Test ausdrücklich freigibt.
+  Lesende Abfragen sind erlaubt.
+- **Testmodelle:** Fremde Modelle (z. B. das große organische Testmodell,
+  CULTS „Private Use"/„No AI") und die Stanford-Modelle Dragon, Happy Buddha
+  und Lucy bleiben lokal unter `local-test/`: nie committen, nie an externe
+  Dienste schicken; berichtet werden nur Messwerte. Der Stanford Bunny als
+  vorhandenes Test-Asset bleibt, wie er ist.
+- **Modellnamen:** In öffentlichen Texten an Dritte (Upstream-Issues, PRs,
+  Commits in Fremd-Repos, `docs/upstream/`) kein Modellname außer „Stanford
+  Bunny"; dort heißt es „large third-party organic test model". In Handslices
+  eigener Doku ist der Name erlaubt (Entscheidung Klaus).
+- **Zugangsdaten (Access-Code, SN, IP, Tokens, Passwörter) tauchen in keinem
+  Bericht, keinem stdout, keiner Doku-Datei auf** – auch nicht als Suchmuster
+  in grep-Verifikationen oder auf der Kommandozeile. Scrub-Scripts lesen den
+  Wert intern aus `.env`, greppen stumm und melden nur „N Treffer" (bei 0 ist
+  der Scrub erfolgreich).
 
 ## 3. Drei-Versuche-Regel
 
 Nach **drei gescheiterten Korrekturversuchen am selben Fehler**: stoppen.
-Hypothesen in `docs/blockers.md` schreiben (was probiert, was beobachtet,
-was vermutet), Eintrag in `PROGRESS.md`, dann **Rückfrage stellen** statt
-eines vierten Versuchs.
+Hypothesen in `docs/blockers.md` (was probiert, beobachtet, vermutet), Eintrag
+in `PROGRESS.md`, dann **Rückfrage stellen** statt eines vierten Versuchs.
 
 ## 4. Protokoll
 
@@ -56,37 +64,36 @@ eines vierten Versuchs.
 ## 5. Technische Konventionen
 
 - Build-Rechner: AMR5 (Ryzen 7 5800U, 32 GB, CachyOS). Arbeits- und
-  Build-Verzeichnisse siehe `docs/test-setup.md`.
+  Build-Verzeichnisse: `docs/test-setup.md`.
 - Toolchain-Versionen (NDK, Flutter/Kotlin, CMake) beim ersten Einrichten in
   `docs/test-setup.md` eintragen und danach **nicht stillschweigend wechseln**.
 - Orca-Upstream als Git-Submodul unter `engine/OrcaSlicer`, auf einen
   **festen Tag** gepinnt. Tag-Wechsel nur nach Absprache.
-- Alle sichtbaren Texte (UI, Fehlermeldungen, Buttons) von Anfang an über
-  die Lokalisierungsmechanik des UI-Stacks (Flutter: ARB-Dateien unter
-  `app/lib/l10n/`; Compose: `strings.xml`), **nie fest im Code**.
-  Quellsprache Englisch, erste Übersetzung Deutsch. Weitere Sprachen kommen
-  später über dieselben Dateien dazu – das ist ein erklärtes Projektziel.
-- UI vollständig per Fokus-Navigation (Tastatur, D-Pad, Controller)
-  bedienbar; keine Touch-only-Elemente außerhalb des 3D-Viewports. Grund:
-  Barrierefreiheit und Nebeneffekt Android TV / Tablets mit Tastatur.
-- Commits klein und beschreibend. **Ab 2026-10-31 ist Englisch die
-  Projektsprache** fuer **neue** Commit-Messages, **neue**
-  PROGRESS.md-Eintraege und **neue** Doku-Dateien bzw. -Abschnitte.
-  Grund: die internationale Community soll mitlesen und beitragen
-  koennen. Bestehende deutsche Commits und PROGRESS-Eintraege
-  bleiben wie sie sind – keine History-Rewrites fuer die
-  Sprachumstellung. CLAUDE.md und die handgeschriebenen deutschen
-  Doku-Teile bleiben deutsch, bis Klaus sie selbst umstellt.
-  Jeder Commit baut.
-- **Co-Authored-By-Trailer:** Ab 2026-11-02 endet jede von Claude
-  erzeugte Commit-Message mit der Zeile
-  `Co-Authored-By: Claude <noreply@anthropic.com>`
-  (Trailer am Ende, leere Zeile davor). Gilt fuer alle neuen Commits
-  im Hauptrepo und im Submodul; bereits gepushte Commits werden
-  nicht veraendert.
+- Große Ausgaben (Build, Valgrind, Testläufe) immer in eine Datei unter
+  `local-test/` umleiten und nur Zusammenfassung, grep oder tail lesen. Lange
+  Läufe mit `setsid nohup` im Hintergrund starten und nicht abfragen; kein
+  ScheduleWakeup, kein /loop.
+- Alle sichtbaren Texte (UI, Fehlermeldungen, Buttons) von Anfang an über die
+  Lokalisierungsmechanik des UI-Stacks (Flutter: ARB-Dateien unter
+  `app/lib/l10n/`; Compose: `strings.xml`), **nie fest im Code**. Quellsprache
+  Englisch, erste Übersetzung Deutsch. Weitere Sprachen kommen später über
+  dieselben Dateien dazu – erklärtes Projektziel.
+- UI vollständig per Fokus-Navigation (Tastatur, D-Pad, Controller) bedienbar;
+  keine Touch-only-Elemente außerhalb des 3D-Viewports.
+- Commits klein und beschreibend. Jeder Commit baut.
+- **Ab 2026-10-31 ist Englisch die Projektsprache** für **neue**
+  Commit-Messages, **neue** PROGRESS.md-Einträge und **neue** Doku-Dateien
+  bzw. -Abschnitte. Bestehende deutsche Commits und PROGRESS-Einträge bleiben
+  – keine History-Rewrites für die Sprachumstellung. CLAUDE.md und die
+  handgeschriebenen deutschen Doku-Teile bleiben deutsch, bis Klaus sie selbst
+  umstellt.
+- **Co-Authored-By-Trailer:** Ab 2026-11-02 endet jede von Claude erzeugte
+  Commit-Message mit `Co-Authored-By: Claude <noreply@anthropic.com>` (Trailer
+  am Ende, leere Zeile davor). Gilt für alle neuen Commits im Hauptrepo und im
+  Submodul; bereits gepushte Commits werden nicht verändert.
 
 ## 6. Bei Unsicherheit
 
-Lieber eine Frage in `PROGRESS.md` hinterlassen und weiter an etwas anderem
-arbeiten, als eine Annahme stillschweigend einzubauen. Wenn nichts anderes
-sinnvoll weitergeht: stoppen und auf Antwort warten.
+Lieber eine Frage in `PROGRESS.md` hinterlassen und an etwas anderem
+weiterarbeiten, als eine Annahme stillschweigend einzubauen. Wenn nichts
+anderes sinnvoll weitergeht: stoppen und auf Antwort warten.
